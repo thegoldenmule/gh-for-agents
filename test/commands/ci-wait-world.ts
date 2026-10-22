@@ -33,6 +33,8 @@ export interface SimJob {
   tests?: string[];
   /** Extra log lines (e.g. an infra error). */
   logExtra?: string[];
+  /** false: a check REST lists but the GraphQL statusCheckRollup leaves out (a `dynamic` suite, e.g. copilot review). */
+  rollup?: boolean;
 }
 
 export interface SimStatus {
@@ -448,6 +450,9 @@ export class GitHubSim {
     });
     if (q === SUITES_QUERY) {
       const jobs = st.checks[field('oid') ?? ''] ?? [];
+      const contexts = jobs
+        .filter((j) => j.rollup !== false)
+        .map((j) => ({ __typename: 'CheckRun', checkSuite: { databaseId: suiteOf(j) } }));
       const nodes = [...new Map(jobs.map((j) => [suiteOf(j), j])).values()].map((j) => ({
         databaseId: suiteOf(j),
         workflowRun: {
@@ -457,33 +462,42 @@ export class GitHubSim {
           workflow: { databaseId: j.workflowId ?? 5, name: j.workflow ?? 'CI' },
         },
       }));
-      return ok({ repository: { object: { checkSuites: { nodes } } } });
+      return ok({
+        repository: {
+          object: {
+            checkSuites: { nodes },
+            statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: contexts } },
+          },
+        },
+      });
     }
     if (q === FALLBACK_PR_QUERY) {
       const head = st.pr.head;
-      const nodes = (st.checks[head] ?? []).map((j) => {
-        const r = this.checkRun(j) as Record<string, string | null>;
-        return {
-          __typename: 'CheckRun',
-          databaseId: j.id,
-          name: j.name,
-          status: String(r.status).toUpperCase(),
-          conclusion: r.conclusion === null ? null : String(r.conclusion).toUpperCase(),
-          startedAt: r.started_at,
-          completedAt: r.completed_at,
-          detailsUrl: r.html_url,
-          isRequired: false,
-          checkSuite: {
-            app: { slug: 'github-actions' },
-            workflowRun: {
-              databaseId: j.runId,
-              event: 'pull_request',
-              file: { path: `.github/workflows/w${j.workflowId ?? 5}.yml` },
-              workflow: { databaseId: j.workflowId ?? 5, name: j.workflow ?? 'CI' },
+      const nodes = (st.checks[head] ?? [])
+        .filter((j) => j.rollup !== false)
+        .map((j) => {
+          const r = this.checkRun(j) as Record<string, string | null>;
+          return {
+            __typename: 'CheckRun',
+            databaseId: j.id,
+            name: j.name,
+            status: String(r.status).toUpperCase(),
+            conclusion: r.conclusion === null ? null : String(r.conclusion).toUpperCase(),
+            startedAt: r.started_at,
+            completedAt: r.completed_at,
+            detailsUrl: r.html_url,
+            isRequired: false,
+            checkSuite: {
+              app: { slug: 'github-actions' },
+              workflowRun: {
+                databaseId: j.runId,
+                event: 'pull_request',
+                file: { path: `.github/workflows/w${j.workflowId ?? 5}.yml` },
+                workflow: { databaseId: j.workflowId ?? 5, name: j.workflow ?? 'CI' },
+              },
             },
-          },
-        };
-      });
+          };
+        });
       return ok({
         rateLimit: { limit: 5000, remaining: 4321, resetAt: this.iso(3_600_000), cost: 1 },
         repository: {

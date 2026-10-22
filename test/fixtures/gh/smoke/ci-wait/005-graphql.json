@@ -6,7 +6,7 @@
     "--hostname",
     "github.com",
     "-f",
-    "query=query($owner:String!,$name:String!,$oid:GitObjectID!){repository(owner:$owner,name:$name){object(oid:$oid){... on Commit{checkSuites(first:100){nodes{databaseId workflowRun{databaseId event file{path} workflow{databaseId name}}}}}}}}",
+    "query=query($owner:String!,$name:String!,$oid:GitObjectID!){repository(owner:$owner,name:$name){object(oid:$oid){... on Commit{checkSuites(first:100){nodes{databaseId workflowRun{databaseId event file{path} workflow{databaseId name}}}} statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ... on CheckRun{checkSuite{databaseId}}}}}}}}}",
     "-f",
     "name=powerhouse",
     "-f",
@@ -15,7 +15,7 @@
     "owner=powerhouse-inc"
   ],
   "exitCode": 0,
-  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4999\r\nX-Ratelimit-Used: 1\r\nX-Ratelimit-Reset: 1792674000\r\nX-Ratelimit-Resource: graphql\r\n\r\n{\"data\":{\"repository\":{\"object\":{\"checkSuites\":{\"nodes\":[{\"databaseId\":37957190914,\"workflowRun\":{\"databaseId\":37948190914,\"event\":\"pull_request\",\"file\":{\"path\":\".github/workflows/w5.yml\"},\"workflow\":{\"databaseId\":5,\"name\":\"CI\"}}}]}}}}}",
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4999\r\nX-Ratelimit-Used: 1\r\nX-Ratelimit-Reset: 1792674000\r\nX-Ratelimit-Resource: graphql\r\n\r\n{\"data\": {\"repository\": {\"object\": {\"checkSuites\": {\"nodes\": [{\"databaseId\": 37957190914, \"workflowRun\": {\"databaseId\": 37948190914, \"event\": \"pull_request\", \"file\": {\"path\": \".github/workflows/w5.yml\"}, \"workflow\": {\"databaseId\": 5, \"name\": \"CI\"}}}]}, \"statusCheckRollup\": {\"contexts\": {\"pageInfo\": {\"hasNextPage\": false}, \"nodes\": [{\"__typename\": \"CheckRun\", \"checkSuite\": {\"databaseId\": 37957190914}}]}}}}}}",
   "stderr": "",
   "meta": {
     "source": "synthetic",

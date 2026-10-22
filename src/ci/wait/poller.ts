@@ -1,7 +1,9 @@
 // The ci wait poller (02 §11.6; 03 M4.3, spike §3.1). A tick sends three conditional REST GETs (pulls/N
 // or branches/<name>, check-runs, status) and returns GraphQL-shaped rollup nodes for checks.ts. A 304 is
 // free and reuses the cached, schema-stripped body, which persists in the wait state (M4.6).
-// REST check runs carry no workflow run, so new check suites are mapped once via GraphQL.
+// REST check runs carry no workflow run, so new check suites are mapped once via GraphQL. The same query
+// reads which suites the statusCheckRollup holds: the rollup is the one canonical check set (04), and
+// REST also lists suites it leaves out (a `dynamic` copilot review), which are dropped.
 // After two consecutive REST failures, one GraphQL query per tick (with rateLimit{}) takes over.
 import { z } from 'zod';
 import { rethrowControlFlow } from '../../core/control-flow.ts';
@@ -60,6 +62,8 @@ export const MAX_CHECK_RUN_PAGES = 5;
 export const REST_FAILURES_BEFORE_FALLBACK = 2;
 /** A suite still unmapped after this many GraphQL lookups is treated as a non-Actions suite. */
 export const MAX_SUITE_LOOKUPS = 3;
+/** Lookups in a row that must miss a suite in a complete rollup before its checks are dropped. */
+export const ROLLUP_MISSES_TO_DROP = 2;
 
 // ── Suite → workflow run (GraphQL, once per new suite) ────────────────────
 export const WorkflowRunNode = z.object({
@@ -73,7 +77,9 @@ export type WorkflowRunNode = z.infer<typeof WorkflowRunNode>;
 export const SUITES_QUERY =
   'query($owner:String!,$name:String!,$oid:GitObjectID!){repository(owner:$owner,name:$name){' +
   'object(oid:$oid){... on Commit{checkSuites(first:100){nodes{databaseId ' +
-  'workflowRun{databaseId event file{path} workflow{databaseId name}}}}}}}}';
+  'workflowRun{databaseId event file{path} workflow{databaseId name}}}} ' +
+  'statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ' +
+  '... on CheckRun{checkSuite{databaseId}}}}}}}}}';
 
 const SuitesData = z.object({
   repository: z
@@ -87,6 +93,16 @@ const SuitesData = z.object({
                   .object({ databaseId: z.number().int().nullable(), workflowRun: WorkflowRunNode.nullable() })
                   .nullable(),
               ),
+            })
+            .nullish(),
+          statusCheckRollup: z
+            .object({
+              contexts: z.object({
+                pageInfo: z.object({ hasNextPage: z.boolean() }),
+                nodes: z.array(
+                  z.object({ checkSuite: z.object({ databaseId: z.number().int().nullable() }).nullish() }).nullable(),
+                ),
+              }),
             })
             .nullish(),
         })
@@ -175,9 +191,11 @@ export interface PollerState {
   suites: Record<string, WorkflowRunNode | null>;
   /** Lookups so far for suites not yet mapped. */
   suiteLookups: Record<string, number>;
+  /** check_suite id → true (in the rollup) or how many complete rollups in a row left it out. */
+  rollup?: Record<string, true | number>;
 }
 
-export const emptyPollerState = (): PollerState => ({ etags: {}, suites: {}, suiteLookups: {} });
+export const emptyPollerState = (): PollerState => ({ etags: {}, suites: {}, suiteLookups: {}, rollup: {} });
 
 export interface TickResult {
   /** PR targets: the PR as read this tick. */
@@ -298,8 +316,25 @@ export interface PollerOptions {
 
 export function createPoller(o: PollerOptions): Poller {
   const st: PollerState = o.initial
-    ? { etags: { ...o.initial.etags }, suites: { ...o.initial.suites }, suiteLookups: { ...o.initial.suiteLookups } }
+    ? {
+        etags: { ...o.initial.etags },
+        suites: { ...o.initial.suites },
+        suiteLookups: { ...o.initial.suiteLookups },
+        rollup: { ...o.initial.rollup },
+      }
     : emptyPollerState();
+  st.rollup ??= {};
+  const rollup = st.rollup;
+  /** Dropped: left out of the rollup ROLLUP_MISSES_TO_DROP times in a row (until then it counts). */
+  const outside = (id: number): boolean => {
+    const m = rollup[String(id)];
+    return typeof m === 'number' && m >= ROLLUP_MISSES_TO_DROP;
+  };
+  /** Membership still to (re)confirm: never looked up, or missed fewer times than the drop threshold. */
+  const unsettled = (id: number): boolean => {
+    const m = rollup[String(id)];
+    return m === undefined || (typeof m === 'number' && m < ROLLUP_MISSES_TO_DROP);
+  };
   let mode: 'rest' | 'graphql' = 'rest';
   let restFailures = 0;
   const { gh, repo } = o;
@@ -342,13 +377,23 @@ export function createPoller(o: PollerOptions): Poller {
 
   async function mapSuites(sha: string, ids: readonly number[], counter: { calls: number }): Promise<void> {
     const unknown = ids.filter((id) => !(String(id) in st.suites));
-    if (unknown.length === 0) return;
+    if (unknown.length === 0 && !ids.some(unsettled)) return;
     counter.calls++;
     const data = await gh.graphql(SUITES_QUERY, { owner: repo.owner, name: repo.name, oid: sha }, SuitesData, {
       repo,
     });
     for (const n of data.repository?.object?.checkSuites?.nodes ?? []) {
       if (n?.databaseId != null) st.suites[String(n.databaseId)] = n.workflowRun;
+    }
+    const contexts = data.repository?.object?.statusCheckRollup?.contexts;
+    const inRollup = new Set(
+      (contexts?.nodes ?? []).flatMap((n) => (n?.checkSuite?.databaseId ? [n.checkSuite.databaseId] : [])),
+    );
+    for (const id of ids.filter(unsettled)) {
+      const k = String(id);
+      // An incomplete rollup (over 100 contexts) cannot prove a suite absent: it counts.
+      if (inRollup.has(id) || !contexts || contexts.pageInfo.hasNextPage) rollup[k] = true;
+      else rollup[k] = (typeof rollup[k] === 'number' ? rollup[k] : 0) + 1;
     }
     for (const id of unknown) {
       const k = String(id);
@@ -419,7 +464,9 @@ export function createPoller(o: PollerOptions): Poller {
     const suiteIds = [...new Set(runs.flatMap((r) => (r.check_suite ? [r.check_suite.id] : [])))];
     await mapSuites(target, suiteIds, counter);
     const nodes: RollupContext[] = [
-      ...runs.map((r) => checkRunNode(r, st.suites, required)),
+      ...runs
+        .filter((r) => !(r.check_suite && outside(r.check_suite.id)))
+        .map((r) => checkRunNode(r, st.suites, required)),
       ...status.statuses.map((s) => statusNode(s, required)),
     ];
     return {

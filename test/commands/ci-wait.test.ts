@@ -334,3 +334,16 @@ test('a check on page 2 of check-runs is re-read while page 1 is unchanged (a co
     'an unchanged page 2 costs a 304',
   );
 });
+
+test('one check set: a REST check the GraphQL rollup leaves out (copilot review) is not counted', async () => {
+  const t = running(301, 'test');
+  const copilot = running(302, 'copilot-pull-request-reviewer', { runId: 650, rollup: false });
+  const { sim } = world([t, copilot]);
+  change(sim, 3 * MIN, done(t, 3 * MIN));
+  const r = await wait(sim, ['o/r#7'], { maxMs: 60 * MIN });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout.slice(0, 300));
+  assert.equal(r.json.results[0].ci.counts.pass, 1);
+  assert.equal(r.json.results[0].ci.counts.pending, 0);
+  const lookups = sim.calls.filter((c) => c.argv[1] === 'graphql').length;
+  assert.ok(lookups <= 2, `${lookups} GraphQL suite lookups: only when the suites change, plus one confirmation`);
+});

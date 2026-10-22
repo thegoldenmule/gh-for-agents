@@ -79,6 +79,7 @@ export const WaitStateSchema = z.object({
     etags: z.record(z.string(), z.object({ etag: z.string(), body: z.unknown() })),
     suites: z.record(z.string(), WorkflowRunNode.nullable()),
     suiteLookups: z.record(z.string(), z.number()),
+    rollup: z.record(z.string(), z.union([z.literal(true), z.number()])).optional(),
   }),
   baselines: z.record(z.string(), JobStatsSchema),
   /** Workflow ids whose ETA samples were read. */
