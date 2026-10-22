@@ -40,6 +40,7 @@ const MachineStateSchema = z.object({
   seenFailures: z.array(z.string()),
   reported: z.array(z.string()),
   lastEventAt: z.number(),
+  firstSeen: z.record(z.string(), z.number()).optional(),
 });
 
 const JobStatsSchema = z.object({

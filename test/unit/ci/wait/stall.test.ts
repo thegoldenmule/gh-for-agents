@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import type { ActionsJob } from '../../../../src/ci/github.ts';
 import type { BaselineStats } from '../../../../src/ci/wait/eta.ts';
 import { scanJobTimeouts } from '../../../../src/ci/wait/job-timeouts.ts';
+import { checkKey } from '../../../../src/ci/wait/machine.ts';
 import {
   detectStalls,
   runningThreshold,
@@ -303,4 +304,16 @@ test('config: ci.stall is optional, takes positive integers, and is strict', () 
   for (const bad of [{ queuedMinutes: 0 }, { missingMinutes: 1.5 }, { other: 1 }]) {
     assert.equal(CiSection.safeParse({ stall: bad }).success, false, JSON.stringify(bad));
   }
+});
+
+test('a queued check with no startedAt is measured from when the wait first saw it', async () => {
+  const c = check('build', { jobId: null, runId: null, status: 'queued', startedAt: null });
+  const firstSeen = { [checkKey(c)]: T0 };
+  const before = await input(30 * MIN, { checks: [c], firstSeen });
+  assert.deepEqual(detectStalls(before), []);
+  const after = await input(30 * MIN + SEC, { checks: [c], firstSeen });
+  assert.deepEqual(
+    detectStalls(after).map((s) => [s.name, s.state, s.thresholdSec]),
+    [['build', 'queued', 30 * 60]],
+  );
 });

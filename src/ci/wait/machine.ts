@@ -51,6 +51,8 @@ export interface MachineState {
   reported: string[];
   /** Epoch ms of the last event, for the progress cadence. */
   lastEventAt: number;
+  /** Epoch ms each check (by checkKey) was first observed: stall.ts's clock when startedAt is null. */
+  firstSeen?: Record<string, number>;
 }
 
 export interface Observation {
@@ -140,8 +142,10 @@ export function observe(prev: MachineState, obs: Observation, cfg: MachineConfig
   const headSha = prev.boundSha;
   const events: MachineEvent[] = [];
   const buckets: Record<string, Bucket> = { ...prev.buckets };
+  const firstSeen: Record<string, number> = { ...prev.firstSeen };
   for (const c of checks) {
     const k = checkKey(c);
+    firstSeen[k] ??= now;
     const from = prev.buckets[k] ?? 'absent';
     buckets[k] = c.bucket;
     // A check first seen pending is not a transition worth a line; `start` and `progress` carry counts.
@@ -205,6 +209,7 @@ export function observe(prev: MachineState, obs: Observation, cfg: MachineConfig
       othersSettledAt,
       seenFailures: [...seen],
       lastEventAt,
+      firstSeen,
     },
     events,
     newFailures,

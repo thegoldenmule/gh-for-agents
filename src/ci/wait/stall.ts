@@ -1,6 +1,6 @@
-// Stall detection (02 §11.1, §11.3; 03 M4.5, Q1). Pure and stateless: every clock it needs is read
-// from the snapshot (job created_at/started_at, check completedAt), so a resumed wait judges the same
-// snapshot the same way. A check is stalled when it is
+// Stall detection (02 §11.1, §11.3; 03 M4.5, Q1). Pure: every clock it needs is read from the snapshot
+// (job created_at/started_at, check completedAt) or, for a check with no startedAt, from the first-seen
+// time the wait state keeps, so a resumed wait judges the same snapshot the same way. A check is stalled when it is
 // - running longer than max(3×p90, p90+15m) of its baseline; with no baseline, longer than the job's
 //   literal `timeout-minutes`, else 360 min;
 // - queued (no runner) longer than `ci.stall.queuedMinutes` (30), measured from created_at, while no
@@ -11,6 +11,7 @@ import type { Check, ExpectedCheck, StalledCheck } from '../../schemas/ci.ts';
 import type { ActionsJob } from '../github.ts';
 import type { BaselineStats } from './eta.ts';
 import { jobTimeoutFor, type WorkflowTimeouts } from './job-timeouts.ts';
+import { checkKey } from './machine.ts';
 
 export const STALL_DEFAULTS = { queuedMinutes: 30, missingMinutes: 10 } as const;
 
@@ -68,6 +69,8 @@ export interface StallInput {
   /** Epoch ms. */
   now: number;
   config: StallConfig;
+  /** Epoch ms the wait first saw each check (by checkKey): the clock for a check with no startedAt. */
+  firstSeen?: Readonly<Record<string, number>>;
 }
 
 const ms = (iso: string | null | undefined): number => (iso ? Date.parse(iso) : Number.NaN);
@@ -95,12 +98,13 @@ function activity(c: Check, i: StallInput): Activity {
     }
     return null;
   }
-  if (c.status === 'in_progress') return { kind: 'running', since: ms(c.startedAt), runIdle: false };
+  const since = Number.isFinite(ms(c.startedAt)) ? ms(c.startedAt) : (i.firstSeen?.[checkKey(c)] ?? Number.NaN);
+  if (c.status === 'in_progress') return { kind: 'running', since, runIdle: false };
   if (c.status === 'queued') {
     const siblings = c.runId === null ? [] : i.checks.filter((s) => s !== c && s.runId === c.runId);
     // The rollup has no created_at; a queued check run's startedAt is its creation time (spike §3.5:
     // started_at == created_at while queued), so this measures from created_at as the jobs rule does.
-    return { kind: 'queued', since: ms(c.startedAt), runIdle: !siblings.some(checkStarted) };
+    return { kind: 'queued', since, runIdle: !siblings.some(checkStarted) };
   }
   return null;
 }

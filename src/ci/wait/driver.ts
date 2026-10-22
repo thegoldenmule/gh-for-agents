@@ -551,6 +551,7 @@ export async function* runWait(
       expected,
       now: clock.now(),
       config: stallConfig(r.ci.stall),
+      ...(st.machine.firstSeen ? { firstSeen: st.machine.firstSeen } : {}),
     };
     const rough = detectStalls(input);
     const runIds = [
