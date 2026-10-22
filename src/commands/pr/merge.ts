@@ -4,9 +4,8 @@
 import { z } from 'zod';
 import { MergeMethod } from '../../config/sections/_shared.ts';
 import { defineCommand } from '../../core/command.ts';
-import { GhxError } from '../../core/errors.ts';
 import { planMerge } from '../../pr/merge/plan.ts';
-import { readMergePull } from '../../pr/merge/pull.ts';
+import { putMerge } from '../../pr/merge/put.ts';
 import { PrMergeOutput } from '../../pr/merge/schema.ts';
 import { ShaInput } from '../../schemas/common.ts';
 
@@ -20,8 +19,6 @@ const Input = z.strictObject({
     .describe('Overridable blocker codes the user accepted (CODE or CODE,CODE); needs --reason'),
   reason: z.string().optional().describe('Why the override is allowed (who asked); one line, ≤200 chars'),
 });
-
-const PutResponse = z.object({ sha: z.string(), merged: z.boolean(), message: z.string().optional() });
 
 export default defineCommand({
   name: ['pr', 'merge'],
@@ -68,23 +65,24 @@ export default defineCommand({
       };
     }
     ctx.preview({ wouldMerge: true, plan });
-    const put = await ctx.gh.api(
-      { method: 'PUT', path: plan.request.path, repo: d.repo, body: plan.request.body },
-      PutResponse,
-      { retry: 'none', notFound: 'PR_NOT_FOUND' },
-    );
-    if (put.notModified) throw new GhxError('INTERNAL', 'PUT pulls/N/merge returned 304.');
-    const pull = await readMergePull(ctx.gh, d.repo, snapshot.number);
-    const mergeCommit = pull.merge_commit_sha ?? put.data.sha;
+    const outcome = await putMerge({
+      ctx,
+      repo: d.repo,
+      number: snapshot.number,
+      ref: snapshot.ref,
+      base: snapshot.base.ref,
+      plan,
+    });
+    const { mergeCommit } = outcome;
     return {
       ref: snapshot.ref,
       merged: true as const,
-      alreadyMerged: false,
-      recoveredFromTransient: false,
+      alreadyMerged: outcome.alreadyMerged,
+      recoveredFromTransient: outcome.recoveredFromTransient,
       method: plan.method,
       headSha: d.head,
       mergeCommit,
-      mergedAt: pull.merged_at ?? new Date(ctx.clock.now()).toISOString(),
+      mergedAt: outcome.mergedAt,
       deletedBranch: false,
       children,
       plan,
