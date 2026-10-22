@@ -313,10 +313,12 @@ export function createGh(deps: GhDeps): Gh {
         signal: deps.signal,
         deadline: deps.deadline,
         ...(deps.random ? { random: deps.random } : {}),
-        decide: (e) =>
-          e instanceof GhFailure && e.failure.transient
-            ? { retry: true, retryAfterMs: e.failure.retryAfterMs }
-            : { retry: false },
+        decide: (e, attempt) => {
+          if (!(e instanceof GhFailure) || !e.failure.transient) return { retry: false };
+          // 01 §4.3: a per-attempt timeout is retried once; another full timeout rarely helps.
+          if (e.failure.code === 'GH_TIMEOUT' && attempt >= 2) return { retry: false };
+          return { retry: true, retryAfterMs: e.failure.retryAfterMs };
+        },
         onRetry: (attempt, waitMs) => log.debug('gh.retry', { argv, attempt, waitMs: Math.round(waitMs) }),
       },
     );

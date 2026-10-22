@@ -37,7 +37,8 @@ export async function withRetry<T>(
     clock: Clock;
     signal: AbortSignal;
     deadline?: number | undefined;
-    decide: (e: unknown) => RetryDecision;
+    /** `attempt` is the 1-based attempt that just failed. */
+    decide: (e: unknown, attempt: number) => RetryDecision;
     random?: Random;
     onRetry?: (attempt: number, waitMs: number, e: unknown) => void;
   },
@@ -49,7 +50,7 @@ export async function withRetry<T>(
       return await fn(attempt);
     } catch (e) {
       if (o.signal.aborted || attempt >= policy.attempts) throw e;
-      const d = o.decide(e);
+      const d = o.decide(e, attempt);
       if (!d.retry) throw e;
       const wait = backoffMs(attempt, policy, random, d.retryAfterMs);
       if (o.deadline !== undefined && o.clock.monotonic() + wait >= o.deadline) throw e;

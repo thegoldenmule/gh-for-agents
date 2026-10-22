@@ -178,3 +178,30 @@ test('a mutating call with a retry policy must declare idempotent: true, or it i
   await gh.exec({ args: ['pr', 'view', '1'], repo, retry: policy });
   assert.equal(fake.calls.length, 3);
 });
+
+test('a per-attempt timeout (GH_TIMEOUT) is retried once, not up to the policy limit (01 §4.3)', async () => {
+  let calls = 0;
+  const { clock, gh } = setup('read', {
+    proc: async () => {
+      calls++;
+      return {
+        exitCode: null,
+        signal: 'SIGTERM',
+        stdout: '',
+        stderr: '',
+        timedOut: true,
+        aborted: false,
+        durationMs: 0,
+      };
+    },
+  });
+  const p = gh.exec({ args: ['api', 'repos/o/r'] });
+  const settled = p.then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  await clock.advance(60_000);
+  const e = await settled;
+  assert.ok(e instanceof GhFailure && e.failure.code === 'GH_TIMEOUT', String(e));
+  assert.equal(calls, 2);
+});
