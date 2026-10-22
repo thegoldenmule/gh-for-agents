@@ -229,6 +229,24 @@ test('oversized event lines are spilled; the terminal line is bounded by maxByte
   assert.equal(JSON.parse(readFileSync(big.json.path, 'utf8')).pad.length, 20000);
 });
 
+test('ndjson: a spilled terminal line still has type, seq and at, so the last line is the summary', async () => {
+  const r = await run(['--stream', '--count', '1', '--summary-bytes', '20000']);
+  const lines = parse(r.lines);
+  const last = lines.at(-1);
+  assert.equal(last?.type, 'summary');
+  assert.equal(last?.seq, lines.length - 1);
+  assert.match(last?.at, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(last?.spilled, true);
+  assert.deepEqual(Object.keys(last ?? {}), ['type', 'seq', 'at', 'spilled', 'path', 'bytes']);
+  const full = readFileSync(last?.path, 'utf8');
+  assert.equal(Buffer.byteLength(full), last?.bytes);
+  assert.equal(JSON.parse(full).pad.length, 20000);
+  const file = readFileSync(lines[0]?.eventsPath ?? JSON.parse(full).eventsPath, 'utf8')
+    .trimEnd()
+    .split('\n');
+  assert.deepEqual(file, r.lines, 'stdout lines are identical to the events file');
+});
+
 test('stream --schema reports event and summary; --dry-run on a read stream is refused', async () => {
   const s = await runInProcess(['test', 'tick', '--schema']);
   assert.equal(s.json.mode, 'stream');

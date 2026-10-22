@@ -140,23 +140,30 @@ export async function runStream(
     const terminal = async (kind: 'summary' | 'error', body: object): Promise<void> => {
       await flushWarnings();
       const obj = line(kind, body as Record<string, unknown>);
-      const text = serializeJson(obj);
-      if (byteLength(text) <= out.maxBytes) {
-        await events.append(text);
-      } else {
+      let text = serializeJson(obj);
+      const fits = byteLength(text) <= out.maxBytes;
+      if (!fits) {
+        // The spilled terminal line keeps the stream envelope, so "the last line is always summary or
+        // error" holds in ndjson mode too: {type, seq, at, spilled, path, bytes}.
         const ref = await out.artifacts.write({
           kind: 'events',
           name: `${name.replaceAll(' ', '-')}-${clock.now()}-terminal.json`,
           content: `${text}\n`,
         });
-        await events.append(serializeJson({ type: obj.type, seq: obj.seq, at: obj.at, spilled: ref.path }));
+        text = serializeJson({
+          type: obj.type,
+          seq: obj.seq,
+          at: obj.at,
+          spilled: true,
+          path: ref.path,
+          bytes: ref.bytes,
+        });
       }
+      await events.append(text);
       if (mode === 'final') {
         await emitDocument(deps.stdout, body, out);
-      } else if (byteLength(text) <= out.maxBytes) {
-        await deps.stdout.writeLine(text);
       } else {
-        await emitDocument(deps.stdout, obj, out);
+        await deps.stdout.writeLine(text);
       }
     };
     const terminalError = async (e: unknown): Promise<number> => {
