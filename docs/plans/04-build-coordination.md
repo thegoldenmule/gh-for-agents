@@ -112,6 +112,7 @@ Filled in by the wave 1 bootstrap agent (commits `f29f2eb`..`3cd7603`).
 - The harness builds its environment from scratch. Without `git` or `proc`, it uses an in-memory "not a checkout" git.
 - `pnpm check` runs typecheck, lint and tests. Contract tests spawn `bin/ghx.js`.
 - **Rethrow control flow from every catch-all.** `DryRunHalt`, `INTERRUPTED`, `TIMEOUT` and `AbortError` are ordinary throws that the runner turns into the dry-run result, the interrupted summary or the timeout error. A handler's `catch (e)` that turns failures into warnings or partial results must let them through first: `try { … } catch (e) { rethrowControlFlow(e); /* handle the rest */ }`. Use `isControlFlow(e)` when you need a boolean. Both live in `src/core/control-flow.ts`. Stream handlers that build a graceful `interrupted` summary still use `isAbort()` from `src/core/signals.ts`, and must rethrow `DryRunHalt`.
+- **Write commands must ship a smoke scenario.** The registry smoke run now requires a GitHub-mutating write's `examples[0] --dry-run` to reach the halt and print `{dryRun: true, wouldRun}`. Against the default 404 gh, a write fails its reads first, so ship `test/fixtures/gh/smoke/<name-with-dashes>/` with the reads it needs. Writes that change only local files go in `LOCAL_WRITES` in `test/registry.test.ts` (today only `init`).
 
 ## Coordinator decisions during the build
 
