@@ -14,9 +14,15 @@ import type { Gh } from '../gh/index.ts';
 import type { RepoRef } from '../gh/types.ts';
 import { type Check, CI_CAPS, type CompactDiagnosis, type DiagnosisJob, type FailingJob } from '../schemas/ci.ts';
 import type { WorkflowRunInfo } from './checks.ts';
-import { createMainComparer, failingJobFacts, type MainComparer, notCompared } from './compare-main.ts';
+import {
+  createMainComparer,
+  type FailingJobFacts,
+  failingJobFacts,
+  type MainComparer,
+  notCompared,
+} from './compare-main.ts';
 import { assessFlake, type KnownFlakyRule, scoreFlake } from './flake.ts';
-import { analyzeJob } from './logs/analyze.ts';
+import { analyzeJob, type JobAnalysis } from './logs/analyze.ts';
 import { capLine } from './logs/extract/index.ts';
 
 /** 02 §11.4: at most 5 jobs, all under a 60 s deadline. */
@@ -115,6 +121,18 @@ export function skeletonJob(c: Check & { jobId: number; runId: number }, default
   };
 }
 
+/**
+ * The PR side of the main comparison. A log cut by the 8 MB cap (LOG_TRUNCATED) lost its head, so its
+ * test list is incomplete and must never prove `same-tests`, just like a list cut by the test cap.
+ */
+export function comparisonFacts(
+  a: Parameters<typeof failingJobFacts>[0] & Pick<JobAnalysis, 'warnings'>,
+  workflowId: number | null,
+): FailingJobFacts {
+  const facts = failingJobFacts(a, workflowId);
+  return a.warnings.some((w) => w.code === 'LOG_TRUNCATED') ? { ...facts, testsTruncated: true } : facts;
+}
+
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export function createDiagnoser(o: DiagnoserOptions): Diagnoser {
@@ -173,7 +191,7 @@ export function createDiagnoser(o: DiagnoserOptions): Diagnoser {
     if (compare) {
       try {
         out.sameOnMain = await comparer.compare({
-          ...failingJobFacts(analysis, workflowId),
+          ...comparisonFacts(analysis, workflowId),
           name: c.name,
           runId: c.runId,
         });

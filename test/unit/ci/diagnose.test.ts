@@ -2,9 +2,11 @@
 // per-stage degradation, and the compact/event forms ci wait uses.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { compareVerdict } from '../../../src/ci/compare-main.ts';
 import {
   clipExcerpt,
   compactDiagnosis,
+  comparisonFacts,
   createDiagnoser,
   diagnosisOrder,
   eventDiagnosis,
@@ -220,4 +222,25 @@ test('clipExcerpt keeps whole lines from the top within both limits', () => {
   assert.equal(clipExcerpt('a\nb\nc', 2, 100), 'a\nb');
   assert.equal(clipExcerpt('aaaa\nbbbb', 5, 6), 'aaaa');
   assert.equal(clipExcerpt('', 5, 6), '');
+});
+
+test('comparisonFacts: a log cut by the 8 MB cap marks the tests truncated, so they never prove same-tests', () => {
+  const analysis = {
+    job: { name: 'test', run_id: 500 } as never,
+    tests: ['src/a.test.ts > a'],
+    testsTruncated: false,
+    step: { number: 2, name: 'Run tests' },
+    logPath: '/tmp/job-1.log',
+    warnings: [] as { code: 'LOG_TRUNCATED'; message: string }[],
+  };
+  assert.equal(comparisonFacts(analysis, 5).testsTruncated, false);
+  assert.equal(comparisonFacts(analysis, 5).logParsed, true);
+  const cut = comparisonFacts({ ...analysis, warnings: [{ code: 'LOG_TRUNCATED', message: 'cut' }] }, 5);
+  assert.equal(cut.testsTruncated, true);
+  const main = {
+    run: { id: 9, head_sha: sha('d'), created_at: '2026-10-22T09:00:00Z' },
+    job: { conclusion: 'failure', tests: ['src/a.test.ts > a', 'b'], step: null, logParsed: true },
+  };
+  assert.equal(compareVerdict(comparisonFacts(analysis, 5), main, 'main').verdict, 'same-tests');
+  assert.equal(compareVerdict(cut, main, 'main').verdict, 'different');
 });
