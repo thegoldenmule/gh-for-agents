@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "api",
+    "graphql",
+    "--include",
+    "--hostname",
+    "github.com",
+    "-f",
+    "query=query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid commits(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{commit{oid}}}}}}",
+    "-f",
+    "name=powerhouse",
+    "-F",
+    "number=3301",
+    "-f",
+    "owner=powerhouse-inc"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"data\":{\"repository\":{\"pullRequest\":{\"headRefOid\":\"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d\",\"commits\":{\"totalCount\":2,\"pageInfo\":{\"hasNextPage\":false,\"endCursor\":null},\"nodes\":[{\"commit\":{\"oid\":\"4b1e7d20c9a35f8e61d24b07c3a9e5f1d8b62c47\"}},{\"commit\":{\"oid\":\"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d\"}}]}}}}}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "recordedAt": "2026-10-22T09:15:00.000Z"
+  }
+}
