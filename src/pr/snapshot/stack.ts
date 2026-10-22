@@ -71,6 +71,12 @@ export interface Q2Plan {
   query: string;
   /** Alias → owner/repo#N, for the precondition refs. */
   aliases: Map<string, string>;
+  /**
+   * The variables the query declares, all of them used: GitHub rejects an operation that declares a
+   * variable it never uses (GraphQL "All Variables Used"), so `$base`/`$head` appear only with the
+   * parent/children lookups.
+   */
+  variables: readonly ('owner' | 'name' | 'base' | 'head')[];
 }
 
 export function q2Query(o: {
@@ -111,10 +117,16 @@ export function q2Query(o: {
       : []),
     ...sameRepo,
   ];
+  const variables = [
+    'owner',
+    'name',
+    ...(o.wantParent ? (['base'] as const) : []),
+    ...(o.wantChildren ? (['head'] as const) : []),
+  ] as const;
   const query =
-    'query($owner:String!,$name:String!,$base:String!,$head:String!){' +
+    `query(${variables.map((v) => `$${v}:String!`).join(',')}){` +
     `repository(owner:$owner,name:$name){__typename ${parts.join(' ')}}${otherRepo.length ? ` ${otherRepo.join(' ')}` : ''}}`;
-  return { query, aliases };
+  return { query, aliases, variables };
 }
 
 const ListPr = z.object({
@@ -161,9 +173,10 @@ export async function fetchQ2(o: FetchQ2Options): Promise<Q2Result> {
   if (!wantParent && !wantChildren && plan.aliases.size === 0) return { parent: null, children: [], refs, queries: 0 };
 
   // Partial: a precondition ref that doesn't exist is a NOT_FOUND error on its alias, not a failed read.
+  const all = { owner: o.repo.owner, name: o.repo.name, base: o.baseRef, head: o.headRef };
   const { data } = await o.gh.graphqlPartial(
     plan.query,
-    { owner: o.repo.owner, name: o.repo.name, base: o.baseRef, head: o.headRef },
+    Object.fromEntries(plan.variables.map((v) => [v, all[v]])),
     z.record(z.string(), z.unknown().nullable()),
     { repo: o.repo },
   );

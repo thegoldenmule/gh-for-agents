@@ -147,5 +147,5 @@ export function prCommitsReply(oids: string[], o: { head?: string; total?: numbe
 const queryOf = (argv: readonly string[]) => argv.find((a) => a.startsWith('query=')) ?? '';
 export const isQ1 = (argv: string[]) => queryOf(argv).includes('viewer{login}');
 export const isMergeable = (argv: string[]) => queryOf(argv).includes('{state headRefOid mergeable mergeStateStatus}');
-export const isQ2 = (argv: string[]) => queryOf(argv).includes('$base:String!');
+export const isQ2 = (argv: string[]) => queryOf(argv).includes('{repository(owner:$owner,name:$name){__typename');
 export const isPrCommits = (argv: string[]) => queryOf(argv).includes('commits(first:100,after:$after){totalCount');
