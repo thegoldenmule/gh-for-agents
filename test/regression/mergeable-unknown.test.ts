@@ -3,8 +3,13 @@
 // reports settled:false with a warning when it never does, and restarts once on a head change.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { snapshotSummary } from '../../src/ci/snapshot.ts';
+import { ERROR_CODES } from '../../src/core/errors.ts';
+import { evaluateMerge, mergeBlockedError } from '../../src/policy/merge.ts';
 import { fetchPrSnapshot, MERGE_MERGEABLE_BUDGET_MS } from '../../src/pr/snapshot/index.ts';
+import { EXIT } from '../contract/exit-table.ts';
 import { ciEnv } from '../unit/ci/_helpers.ts';
+import { config, NOW } from '../unit/policy/_helpers.ts';
 import {
   HEAD,
   isMergeable,
@@ -81,6 +86,14 @@ test('R03: the merge budget keeps asking until 30 s; --no-wait-mergeable never r
   );
   assert.equal(s.merge.retries, 8);
   assert.equal(env.fake.calls.filter((c) => isMergeable(c.argv)).at(-1)?.at, 30_000);
+  // pr merge: MERGEABLE_UNKNOWN, a state-class blocker (exit 9); the plan's PUT is never sent.
+  const e = evaluateMerge({ snapshot: s, ci: snapshotSummary(s.ci), feedback: s.feedback, config: config(), now: NOW });
+  assert.deepEqual(
+    e.plan.blockers.map((b) => b.code),
+    ['MERGEABLE_UNKNOWN'],
+  );
+  assert.equal(ERROR_CODES.MERGE_BLOCKED.exit(mergeBlockedError(e).details), EXIT.STATE);
+  env.fake.expectNoMutations();
 
   const env2 = setup([mergeableReply('MERGEABLE')]);
   const s2 = await fetchPrSnapshot({
