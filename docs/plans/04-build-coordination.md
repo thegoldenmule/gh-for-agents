@@ -111,3 +111,13 @@ Filled in by the wave 1 bootstrap agent (commits `f29f2eb`..`3cd7603`).
   - GraphQL goes through `graphql()` and `graphqlPartial()`. Reads send the query as `-f query=…`; mutations send a JSON body.
 - The harness builds its environment from scratch. Without `git` or `proc`, it uses an in-memory "not a checkout" git.
 - `pnpm check` runs typecheck, lint and tests. Contract tests spawn `bin/ghx.js`.
+
+## Coordinator decisions during the build
+
+- **2026-10-22, spill exit code.** A spilled document keeps the command's own exit code. This supersedes "exit 0" in 01 and 02 §1.3. A failing command must not read as a success just because its output was large.
+- **2026-10-22, wave 1 additions accepted.** These are:
+  - `CONFIG_EXISTS` (exit 3);
+  - SIGHUP and EPIPE exit 143;
+  - the directory-scanned registry;
+  - `summarySchema`;
+  - `MIN_GH_VERSION` 2.81.0.
