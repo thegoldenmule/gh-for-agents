@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { WaitSummary } from '../../src/schemas/ci.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeClock } from '../helpers/fake-clock.ts';
-import { GitHubSim, type SimJob, type SimState, sha, wait } from './ci-wait-world.ts';
+import { drive, GitHubSim, type SimJob, type SimState, sha, startWait, wait } from './ci-wait-world.ts';
 
 const MIN = 60_000;
 const head = (n: number) => sha((n % 16).toString(16));
@@ -115,4 +115,20 @@ test('10 targets, each with 5 diagnosed failing jobs: compacted under 16 384 byt
   );
   assert.ok((r.json.warnings ?? []).length <= 8, 'warnings are capped in the summary');
   assert.deepEqual(sim.mutations(), []);
+});
+
+test('two waits over the same targets in opposite order both finish (no lock held across the wait)', async () => {
+  const { sim } = twoPrs();
+  sim.at(3 * MIN, (s) => ({
+    ...s,
+    checks: {
+      [head(1)]: [job(11, { status: 'completed', conclusion: 'success', completedAt: 3 * MIN })],
+      [head(2)]: [job(21, { status: 'completed', conclusion: 'success', completedAt: 3 * MIN })],
+    },
+  }));
+  const one = startWait(sim, ['o/r#1', 'o/r#2']);
+  const two = startWait(sim, ['o/r#2', 'o/r#1'], { artifacts: one.artifacts });
+  await drive(sim, () => one.isDone() && two.isDone(), { stepMs: 5_000, maxMs: 30 * MIN });
+  assert.equal((await one.p).exitCode, EXIT.OK);
+  assert.equal((await two.p).exitCode, EXIT.OK);
 });

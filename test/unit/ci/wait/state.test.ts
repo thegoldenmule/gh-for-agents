@@ -1,11 +1,18 @@
 // The wait state store (03 M4.6): round trip, index, corrupt files, expiry and the per-target lock.
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { initialState } from '../../../../src/ci/wait/machine.ts';
 import { emptyPollerState } from '../../../../src/ci/wait/poller.ts';
-import { createWaitStore, STATE_TTL_AFTER_SETTLE_MS, safeKey, type WaitState } from '../../../../src/ci/wait/state.ts';
+import {
+  createWaitStore,
+  LOCK_STALE_MS,
+  LOCK_WAIT_MS,
+  STATE_TTL_AFTER_SETTLE_MS,
+  safeKey,
+  type WaitState,
+} from '../../../../src/ci/wait/state.ts';
 import { createArtifactStore } from '../../../../src/core/artifacts.ts';
 import { FakeClock } from '../../../helpers/fake-clock.ts';
 import { scratchDir } from '../../../helpers/harness.ts';
@@ -14,7 +21,7 @@ const repo = { host: 'github.com', owner: 'o', name: 'r' };
 const A = 'a'.repeat(40);
 const B = 'b'.repeat(40);
 
-async function store(o: { pid?: number; alive?: (pid: number) => boolean } = {}) {
+async function store(o: Omit<Parameters<typeof createWaitStore>[0], 'artifacts' | 'repo' | 'clock'> = {}) {
   const clock = new FakeClock();
   const root = mkdtempSync(join(scratchDir(), 'state-'));
   const s = await createWaitStore({ artifacts: createArtifactStore({ root, clock }), repo, clock, ...o });
@@ -86,29 +93,49 @@ test('a pending SHA never expires', async () => {
   assert.equal(s.load('pr-7', A).kind, 'hit');
 });
 
-test('the lock: a second run waits on the clock until the first releases', async () => {
-  const { s, clock } = await store();
-  const signal = new AbortController().signal;
-  const release = await s.lock('pr-7', { signal });
-  const box: { release?: () => void } = {};
-  void s.lock('pr-7', { signal }).then((r) => {
-    box.release = r;
-  });
-  await clock.advance(5_000);
-  assert.ok(box.release === undefined, 'still waiting');
-  release();
-  await clock.advance(1_000);
-  const got = box.release as (() => void) | undefined;
-  assert.ok(got, 'acquired after the holder released');
-  got();
-  assert.equal(existsSync(join(s.dir, `${safeKey('pr-7')}.lock`)), false, 'release removes the lock file');
+const lockPath = (s: { dir: string }) => join(s.dir, `${safeKey('pr-7')}.lock`);
+const lockFile = (pid: number, at: number, nonce = 'other') => JSON.stringify({ pid, at, nonce });
+
+test('the lock covers one call: held inside withLock with a complete lock file, removed after', async () => {
+  const { s } = await store();
+  const seen = s.withLock('pr-7', () => JSON.parse(readFileSync(lockPath(s), 'utf8')));
+  assert.equal(seen.pid, process.pid);
+  assert.equal(typeof seen.nonce, 'string');
+  assert.equal(existsSync(lockPath(s)), false, 'released');
 });
 
-test('a stale lock (holder pid gone) is broken and reported', async () => {
-  const { s } = await store({ alive: () => false });
-  writeFileSync(join(s.dir, `${safeKey('pr-7')}.lock`), JSON.stringify({ pid: 999_999 }));
+test('release never deletes a lock another process now holds (nonce check)', async () => {
+  const { s, clock } = await store();
+  s.withLock('pr-7', () => writeFileSync(lockPath(s), lockFile(process.pid, clock.now())));
+  assert.equal(existsSync(lockPath(s)), true, 'the other holder keeps its lock');
+});
+
+test('a live holder blocks only up to the bound, then the lock is broken (timeout)', async () => {
+  const stale: string[] = [];
+  const { s, clock } = await store({ lockWaitMs: 30, onStale: (x) => stale.push(x.reason) });
+  writeFileSync(lockPath(s), lockFile(process.pid, clock.now()));
+  const t0 = Date.now();
+  s.save('pr-7', state(clock));
+  assert.ok(Date.now() - t0 >= 30);
+  assert.deepEqual(stale, ['timeout']);
+  assert.equal(s.load('pr-7', A).kind, 'hit');
+});
+
+test('a reused pid does not block: a lock older than LOCK_STALE_MS is stale although its pid is alive', async () => {
+  const stale: string[] = [];
+  const { s, clock } = await store({ onStale: (x) => stale.push(x.reason) });
+  writeFileSync(lockPath(s), lockFile(process.pid, clock.now()));
+  await clock.advance(LOCK_STALE_MS + 1);
+  const t0 = Date.now();
+  s.save('pr-7', state(clock));
+  assert.ok(Date.now() - t0 < LOCK_WAIT_MS, 'broken at once, not after the bound');
+  assert.deepEqual(stale, ['old']);
+});
+
+test('a lock whose holder pid is gone is broken and reported', async () => {
   const stale: (number | null)[] = [];
-  const release = await s.lock('pr-7', { signal: new AbortController().signal, onStale: (p) => stale.push(p) });
+  const { s, clock } = await store({ alive: () => false, onStale: (x) => stale.push(x.pid) });
+  writeFileSync(lockPath(s), lockFile(999_999, clock.now()));
+  s.save('pr-7', state(clock));
   assert.deepEqual(stale, [999_999]);
-  release();
 });

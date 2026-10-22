@@ -2,8 +2,9 @@
 // under <artifacts>/<host>/<owner>/<repo>/ci-wait/, written atomically (temp file + rename), plus a
 // per-target index naming the latest bound SHA, so a re-run can send its first poll with the stored
 // ETags before it knows the head. A corrupt file is a miss (WAIT_STATE_DISCARDED); state expires 24 h
-// after every check of its SHA completed. A per-target lock file serialises concurrent runs.
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+// after every check of its SHA completed. A per-target lock covers only one load or save (04, wave 4
+// review): concurrent waits poll on their own, and only one key is ever held, so there is no lock order.
+import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { ArtifactStore } from '../../core/artifacts.ts';
@@ -18,7 +19,12 @@ import type { MachineState } from './machine.ts';
 import { type PollerState, WorkflowRunNode } from './poller.ts';
 
 export const STATE_TTL_AFTER_SETTLE_MS = 24 * 60 * 60_000;
-export const LOCK_POLL_MS = 1_000;
+/** Real-time retry interval while another process holds a lock (holds last one file read or write). */
+export const LOCK_POLL_MS = 5;
+/** How long a load or save waits for a lock before breaking it (WAIT_STATE_DISCARDED). */
+export const LOCK_WAIT_MS = 2_000;
+/** A lock older than this (by its own timestamp) is stale even if its pid is alive: the pid was reused. */
+export const LOCK_STALE_MS = 30_000;
 
 const MachineStateSchema = z.object({
   target: z.string(),
@@ -117,8 +123,15 @@ export interface WaitStore {
   load(key: string, boundSha: string): LoadResult;
   /** Atomic write of the state and the target's index. */
   save(key: string, state: WaitState): void;
-  /** Wait for the target's lock; resolves with its release. A lock whose holder is gone is broken. */
-  lock(key: string, o: { signal: AbortSignal; onStale?: (pid: number | null) => void }): Promise<() => void>;
+  /** Run `fn` holding the target's lock (load and save take it themselves). */
+  withLock<T>(key: string, fn: () => T): T;
+}
+
+const LockFile = z.object({ pid: z.number().int(), at: z.number(), nonce: z.string() });
+
+/** Block the thread for `ms` (a lock is held for one file operation, so waits are milliseconds). */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 /** A target key as a file-name segment. */
@@ -163,6 +176,10 @@ export async function createWaitStore(o: {
   /** The holder pid written to lock files (tests pass another to simulate a dead holder). */
   pid?: number;
   alive?: (pid: number) => boolean;
+  /** A lock was broken: its holder is gone, it is older than LOCK_STALE_MS, or the wait bound passed. */
+  onStale?: (o: { pid: number | null; reason: 'gone' | 'old' | 'timeout' | 'unreadable' }) => void;
+  /** Default LOCK_WAIT_MS (tests shorten it). */
+  lockWaitMs?: number;
 }): Promise<WaitStore> {
   const marker = await o.artifacts.pathFor('ci-wait', '.keep', o.repo);
   const dir = join(marker, '..');
@@ -170,6 +187,69 @@ export async function createWaitStore(o: {
   const statePath = (key: string, sha: string) => join(dir, `${safeKey(key)}-${sha}.json`);
   const indexPath = (key: string) => join(dir, `${safeKey(key)}.index.json`);
   const alive = o.alive ?? pidAlive;
+  const pid = o.pid ?? process.pid;
+
+  /** Take the lock: a complete lock file appears atomically (temp file + link), or EEXIST. */
+  const acquire = (path: string): string | null => {
+    const nonce = secureHex(8);
+    const tmp = `${path}.${nonce}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ pid, at: o.clock.now(), nonce }));
+    try {
+      linkSync(tmp, path);
+      return nonce;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      return null;
+    } finally {
+      rmSync(tmp, { force: true });
+    }
+  };
+  const holder = (path: string) => {
+    const r = readJson(path);
+    if (!r.ok) return r.missing ? undefined : null;
+    const p = LockFile.safeParse(r.value);
+    return p.success ? p.data : null;
+  };
+  /** Remove the lock only while it still carries `nonce` (never another process's lock). */
+  const removeIf = (path: string, nonce: string | null): void => {
+    const h = holder(path);
+    if (h === undefined) return;
+    if (nonce === null ? h === null : h?.nonce === nonce) rmSync(path, { force: true });
+  };
+  const withLock = <T>(key: string, fn: () => T): T => {
+    const path = join(dir, `${safeKey(key)}.lock`);
+    // Bounded by attempts (real time; the clock may be fake): each failed attempt sleeps LOCK_POLL_MS.
+    const attempts = Math.ceil((o.lockWaitMs ?? LOCK_WAIT_MS) / LOCK_POLL_MS);
+    let tries = 0;
+    let nonce: string | null;
+    for (;;) {
+      nonce = acquire(path);
+      if (nonce !== null) break;
+      const h = holder(path);
+      if (h === undefined) continue;
+      const reason =
+        h === null
+          ? 'unreadable'
+          : !alive(h.pid)
+            ? 'gone'
+            : o.clock.now() - h.at > LOCK_STALE_MS
+              ? 'old'
+              : ++tries > attempts
+                ? 'timeout'
+                : null;
+      if (reason === null) {
+        sleepSync(LOCK_POLL_MS);
+        continue;
+      }
+      o.onStale?.({ pid: h?.pid ?? null, reason });
+      removeIf(path, h?.nonce ?? null);
+    }
+    try {
+      return fn();
+    } finally {
+      removeIf(path, nonce);
+    }
+  };
   return {
     dir,
     latest(key) {
@@ -178,50 +258,32 @@ export async function createWaitStore(o: {
       const p = Index.safeParse(r.value);
       return p.success ? p.data.boundSha : undefined;
     },
+    withLock,
     load(key, boundSha) {
-      const path = statePath(key, boundSha);
-      const r = readJson(path);
-      if (!r.ok) return r.missing ? { kind: 'miss' } : { kind: 'discarded', reason: r.message };
-      const p = WaitStateSchema.safeParse(r.value);
-      if (!p.success) {
-        const issue = p.error.issues[0];
-        return { kind: 'discarded', reason: `${issue?.path.join('.') || '(root)'}: ${issue?.message ?? 'invalid'}` };
-      }
-      if (p.data.boundSha !== boundSha) return { kind: 'discarded', reason: 'bound SHA mismatch' };
-      if (p.data.settledAt !== null && o.clock.now() - p.data.settledAt > STATE_TTL_AFTER_SETTLE_MS) {
-        rmSync(path, { force: true });
-        return { kind: 'expired' };
-      }
-      return { kind: 'hit', state: p.data as WaitState };
+      return withLock(key, () => loadUnlocked(key, boundSha));
     },
     save(key, state) {
-      writeAtomic(statePath(key, state.boundSha), state);
-      writeAtomic(indexPath(key), { v: 1, boundSha: state.boundSha, savedAt: state.savedAt });
-    },
-    async lock(key, l) {
-      const path = join(dir, `${safeKey(key)}.lock`);
-      const pid = o.pid ?? process.pid;
-      for (;;) {
-        try {
-          writeFileSync(path, JSON.stringify({ pid }), { flag: 'wx' });
-          let released = false;
-          return () => {
-            if (released) return;
-            released = true;
-            rmSync(path, { force: true });
-          };
-        } catch (e) {
-          if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-        }
-        const r = readJson(path);
-        const holder = r.ok ? z.object({ pid: z.number().int() }).safeParse(r.value) : undefined;
-        if (!holder?.success || !alive(holder.data.pid)) {
-          l.onStale?.(holder?.success ? holder.data.pid : null);
-          rmSync(path, { force: true });
-          continue;
-        }
-        await o.clock.sleep(LOCK_POLL_MS, l.signal);
-      }
+      withLock(key, () => {
+        writeAtomic(statePath(key, state.boundSha), state);
+        writeAtomic(indexPath(key), { v: 1, boundSha: state.boundSha, savedAt: state.savedAt });
+      });
     },
   };
+
+  function loadUnlocked(key: string, boundSha: string): LoadResult {
+    const path = statePath(key, boundSha);
+    const r = readJson(path);
+    if (!r.ok) return r.missing ? { kind: 'miss' } : { kind: 'discarded', reason: r.message };
+    const p = WaitStateSchema.safeParse(r.value);
+    if (!p.success) {
+      const issue = p.error.issues[0];
+      return { kind: 'discarded', reason: `${issue?.path.join('.') || '(root)'}: ${issue?.message ?? 'invalid'}` };
+    }
+    if (p.data.boundSha !== boundSha) return { kind: 'discarded', reason: 'bound SHA mismatch' };
+    if (p.data.settledAt !== null && o.clock.now() - p.data.settledAt > STATE_TTL_AFTER_SETTLE_MS) {
+      rmSync(path, { force: true });
+      return { kind: 'expired' };
+    }
+    return { kind: 'hit', state: p.data as WaitState };
+  }
 }

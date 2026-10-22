@@ -102,10 +102,6 @@ test('SIGKILL mid-wait, then the identical command resumes with no repeated base
   const s = JSON.parse(r2.stdout);
   assert.equal(s.resumed, true);
   assert.equal(s.outcome, 'interrupted');
-  assert.ok(
-    s.warnings?.some((w: { code: string }) => w.code === 'WAIT_STATE_DISCARDED'),
-    'the killed run left its lock behind; the re-run breaks it (its pid is gone)',
-  );
   const run2 = logLines(d.log).slice(before);
   assert.deepEqual(
     run2.filter((c) => SETUP.test(c.argv.join(' '))).map((c) => c.argv.join(' ')),

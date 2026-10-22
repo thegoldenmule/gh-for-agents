@@ -141,7 +141,6 @@ interface Run {
   cache: JsonCache;
   ci: CiConfig;
   poller: Poller;
-  release: () => void;
   st: WaitState | null;
   /** A state loaded from disk for the latest binding (resume), until the first tick confirms it. */
   resumed: boolean;
@@ -213,75 +212,70 @@ export async function* runWait(
   }
   const runs: Run[] = [];
   let flagRepo: string | undefined;
-  try {
-    for (const given of parsed) {
-      const resolved = await ctx.repo({ ref: given.kind === 'pr' ? given.repo : undefined });
-      if (resolved.source === 'flag') flagRepo = repoSlug(resolved.repo);
-      const repo = resolved.repo;
-      const target = await fullSha(given, resolved);
-      const key = targetKey(target);
-      const label = targetLabel(target, repo);
-      if (runs.some((r) => r.key === key && repoSlug(r.repo) === repoSlug(repo))) {
-        throw new GhxError('VALIDATION', `Target ${label} is listed twice.`, {
-          details: { issues: [{ path: 'targets', code: 'duplicate', message: `${label} is listed twice` }] },
-        });
-      }
-      const ci = (await ctx.config({ ref: repo })).config.ci;
-      const store = await createWaitStore({ artifacts: ctx.artifacts, repo, clock });
-      const release = await store.lock(key, {
-        signal: ctx.signal,
-        onStale: (pid) =>
-          warn({
-            code: 'WAIT_STATE_DISCARDED',
-            message: `${label}: broke a stale wait lock${pid === null ? '' : ` (pid ${pid} is gone)`}.`,
-          }),
-      });
-      // The latest binding's ETags make the first poll a 304 when nothing changed. Its state is not
-      // resumed here: the first tick reads the current head, and bind() loads the state for that SHA.
-      const latest = store.latest(key);
-      const prior = latest ? store.load(key, latest) : ({ kind: 'miss' } as const);
-      const seed = prior.kind === 'hit' ? prior.state.poller : undefined;
-      runs.push({
-        target,
-        resolved,
-        repo,
-        key,
-        label,
-        policy: headPolicy(target, o.onHeadChange),
-        store,
-        // pr status's namespace: the merge gate (M6.6) then reuses this wait's baselines and ETA samples.
-        cache: await repoCache({ artifacts: ctx.artifacts, repo, clock, ns: PR_CI_CACHE_NS }),
-        ci,
-        poller: createPoller({
-          gh: ctx.gh,
-          repo,
-          target:
-            target.kind === 'pr' ? { kind: 'pr', number: target.number } : { kind: 'branch', branch: target.branch },
-          now: () => clock.now(),
-          ...(seed ? { initial: seed } : {}),
-        }),
-        release,
-        st: null,
-        resumed: false,
-        started: false,
-        bound: false,
-        diagnoser: null,
-        runs: {},
-        last: null,
-        lastDecision: null,
-        summary: null,
-        nextAt: clock.monotonic(),
-        advanced: new Set(),
-        rateLimited: false,
-        failures: 0,
-        waitStartedAt: clock.now(),
-        restarts: 0,
-        jobs: new Map(),
+  for (const given of parsed) {
+    const resolved = await ctx.repo({ ref: given.kind === 'pr' ? given.repo : undefined });
+    if (resolved.source === 'flag') flagRepo = repoSlug(resolved.repo);
+    const repo = resolved.repo;
+    const target = await fullSha(given, resolved);
+    const key = targetKey(target);
+    const label = targetLabel(target, repo);
+    if (runs.some((r) => r.key === key && repoSlug(r.repo) === repoSlug(repo))) {
+      throw new GhxError('VALIDATION', `Target ${label} is listed twice.`, {
+        details: { issues: [{ path: 'targets', code: 'duplicate', message: `${label} is listed twice` }] },
       });
     }
-  } catch (e) {
-    for (const r of runs) r.release();
-    throw e;
+    const ci = (await ctx.config({ ref: repo })).config.ci;
+    const store = await createWaitStore({
+      artifacts: ctx.artifacts,
+      repo,
+      clock,
+      onStale: ({ pid, reason }) =>
+        warn({
+          code: 'WAIT_STATE_DISCARDED',
+          message: `${label}: broke a ${reason === 'timeout' ? 'held' : 'stale'} wait-state lock${pid === null ? '' : ` (pid ${pid}${reason === 'gone' ? ' is gone' : ''})`}.`,
+        }),
+    });
+    // The latest binding's ETags make the first poll a 304 when nothing changed. Its state is not
+    // resumed here: the first tick reads the current head, and bind() loads the state for that SHA.
+    const latest = store.latest(key);
+    const prior = latest ? store.load(key, latest) : ({ kind: 'miss' } as const);
+    const seed = prior.kind === 'hit' ? prior.state.poller : undefined;
+    runs.push({
+      target,
+      resolved,
+      repo,
+      key,
+      label,
+      policy: headPolicy(target, o.onHeadChange),
+      store,
+      // pr status's namespace: the merge gate (M6.6) then reuses this wait's baselines and ETA samples.
+      cache: await repoCache({ artifacts: ctx.artifacts, repo, clock, ns: PR_CI_CACHE_NS }),
+      ci,
+      poller: createPoller({
+        gh: ctx.gh,
+        repo,
+        target:
+          target.kind === 'pr' ? { kind: 'pr', number: target.number } : { kind: 'branch', branch: target.branch },
+        now: () => clock.now(),
+        ...(seed ? { initial: seed } : {}),
+      }),
+      st: null,
+      resumed: false,
+      started: false,
+      bound: false,
+      diagnoser: null,
+      runs: {},
+      last: null,
+      lastDecision: null,
+      summary: null,
+      nextAt: clock.monotonic(),
+      advanced: new Set(),
+      rateLimited: false,
+      failures: 0,
+      waitStartedAt: clock.now(),
+      restarts: 0,
+      jobs: new Map(),
+    });
   }
 
   const shape: CommandShape = { ...o, repo: flagRepo };
@@ -822,8 +816,6 @@ export async function* runWait(
     if (!isAbort(e) || runs.some((r) => r.summary === null && r.st === null)) throw e;
     const details = (e as GhxError).details as { signal?: string } | null | undefined;
     return await result(isGhxError(e, 'INTERRUPTED') ? (details?.signal ?? 'SIGTERM') : 'SIGTERM');
-  } finally {
-    for (const r of runs) r.release();
   }
 }
 
