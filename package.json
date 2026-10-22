@@ -25,7 +25,8 @@
     "fixtures:redact": "node scripts/fixtures/redact.ts",
     "fixtures:verify": "node scripts/fixtures/verify.ts",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
-    "docs:check": "node -e \"console.log('docs:check: no generated agent docs yet (M12).')\""
+    "docs:gen": "node scripts/docs/gen.ts",
+    "docs:check": "node scripts/docs/gen.ts --check"
   },
   "dependencies": {
     "zod": "^4.6.7"
