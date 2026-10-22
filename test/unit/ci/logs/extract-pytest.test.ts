@@ -38,3 +38,16 @@ test('without a short summary, E lines are the errors', () => {
   const lines = ['=== test session starts ===', 'E       assert 3 == 4', '=== 1 failed in 0.01s ==='];
   assert.deepEqual(extractFailures(lines).errors, ['assert 3 == 4']);
 });
+
+test('pytest ids with spaces in parameters are kept whole', () => {
+  const lines = [
+    '=========================== short test summary info ============================',
+    'FAILED py/test_x.py::test_p[hello world] - assert 1 == 2',
+    'FAILED py/test_x.py::test_q[a b]',
+    'ERROR py/test_y.py::test_r[x y] - fixture missing',
+    '========================= 2 failed, 1 error in 0.12s =========================',
+  ];
+  const f = extractFailures(lines);
+  assert.deepEqual(f.tests, ['py/test_x.py::test_p[hello world]', 'py/test_x.py::test_q[a b]']);
+  assert.deepEqual(f.errors.slice(0, 2), ['assert 1 == 2', 'py/test_y.py::test_r[x y] - fixture missing']);
+});

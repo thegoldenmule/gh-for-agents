@@ -1,12 +1,12 @@
 // pytest: `FAILED path::Class::test[param] - AssertionError: …` in the short test summary, `E   …`
 // detail lines, and `=== 1 failed, 2 passed in 0.12s ===`. When a short test summary exists, only
 // lines after the last one are read: pytest's own tests print nested pytest output that also
-// contains FAILED lines.
+// contains FAILED lines. An id may contain spaces (`test_p[hello world]`); it ends at ` - ` or the line end.
 import type { Extraction, Extractor } from './types.ts';
 
 const SHORT = /^=+ short test summary info =+$/;
-const FAILED = /^FAILED (\S+?)(?: - (.*))?$/;
-const ERROR = /^ERROR (\S+?)(?: - (.*))?$/;
+const FAILED = /^FAILED (.+?)(?: - (.*))?$/;
+const ERROR = /^ERROR (.+?)(?: - (.*))?$/;
 const DETAIL = /^E {2,}(\S.*)$/;
 const SUMMARY = /^=+ .*\b\d+ (?:failed|passed|errors?)\b.* in [\d.]+s\b.*=+$/;
 const SESSION = /^=+ test session starts =+$/;
