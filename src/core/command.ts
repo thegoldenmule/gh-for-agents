@@ -56,6 +56,12 @@ interface BaseSpec<I extends z.ZodObject> {
   examples?: readonly CommandExample[];
   /** 'required': JSON must come from --input (USAGE_INPUT_MISSING otherwise). Default 'optional'. */
   jsonInput?: 'required' | 'optional';
+  /**
+   * A harness protocol that owns stdin and stdout (`ghx hook claude-pretooluse`). When set, a call
+   * without --help/--schema skips the runner: stdin is read whole, a non-null reply is written
+   * verbatim, and the exit code is always 0. The one exception to "stdin only via --input -".
+   */
+  protocol?: (stdin: string, env: Readonly<Record<string, string | undefined>>) => string | null;
 }
 
 export interface SingleCommandSpec<I extends z.ZodObject, O extends z.ZodObject> extends BaseSpec<I> {

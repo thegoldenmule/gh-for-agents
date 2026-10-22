@@ -1,0 +1,106 @@
+[
+  {
+    "pattern": "gh run rerun",
+    "command": "ci rerun"
+  },
+  {
+    "pattern": "gh run rerun --failed",
+    "command": "ci rerun"
+  },
+  {
+    "pattern": "gh run rerun --job",
+    "command": "ci rerun"
+  },
+  {
+    "pattern": "gh pr close <n> && gh pr reopen <n>",
+    "command": "ci retrigger"
+  },
+  {
+    "pattern": "gh pr checks",
+    "command": "ci wait"
+  },
+  {
+    "pattern": "gh pr checks --watch",
+    "command": "ci wait"
+  },
+  {
+    "pattern": "gh run list",
+    "command": "ci wait"
+  },
+  {
+    "pattern": "gh run watch",
+    "command": "ci wait"
+  },
+  {
+    "pattern": "gh api repos/{o}/{r}/actions/jobs/{id}/logs",
+    "command": "ci why"
+  },
+  {
+    "pattern": "gh run view --log",
+    "command": "ci why"
+  },
+  {
+    "pattern": "gh run view --log-failed",
+    "command": "ci why"
+  },
+  {
+    "pattern": "gh pr close --comment",
+    "command": "pr comment"
+  },
+  {
+    "pattern": "gh pr comment",
+    "command": "pr comment"
+  },
+  {
+    "pattern": "gh pr create",
+    "command": "pr create"
+  },
+  {
+    "pattern": "gh pr edit",
+    "command": "pr edit"
+  },
+  {
+    "pattern": "gh pr ready",
+    "command": "pr edit"
+  },
+  {
+    "pattern": "gh api repos/{o}/{r}/issues/{n}/comments",
+    "command": "pr feedback"
+  },
+  {
+    "pattern": "gh api repos/{o}/{r}/pulls/{n}/comments",
+    "command": "pr feedback"
+  },
+  {
+    "pattern": "gh pr view --comments",
+    "command": "pr feedback"
+  },
+  {
+    "pattern": "gh api -X PUT repos/{owner}/{repo}/pulls/{n}/merge",
+    "command": "pr merge"
+  },
+  {
+    "pattern": "gh pr merge",
+    "command": "pr merge"
+  },
+  {
+    "pattern": "gh pr merge --match-head-commit",
+    "command": "pr merge"
+  },
+  {
+    "pattern": "gh pr review",
+    "command": "pr review"
+  },
+  {
+    "pattern": "gh pr checks",
+    "command": "pr status"
+  },
+  {
+    "pattern": "gh pr view",
+    "command": "pr status"
+  },
+  {
+    "pattern": "gh pr view --json mergeable,mergeStateStatus,reviews,comments",
+    "command": "pr status"
+  }
+]

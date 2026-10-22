@@ -6,7 +6,8 @@
 //
 // The specs are the source of truth (01 §7): the reference is built from `ghx <cmd> --help`, which is
 // derived from the same zod schemas `--schema` prints. claude-md-snippet.md and hooks.md are written
-// by hand; the skill embeds the snippet. test/docs.test.ts fails when anything here is stale.
+// by hand; the skill embeds the snippet. The hook's replaces table is generated here too.
+// test/docs.test.ts fails when anything here is stale.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { commandHelp } from '../../src/cli/help.ts';
@@ -132,6 +133,14 @@ function skill(specs: readonly AnyCommandSpec[], snippet: string): string {
   ].join('\n');
 }
 
+/** Every spec's `replaces`, for the PreToolUse hook (src/hook/rules.ts), which can't load every spec in its latency budget. */
+function replacesTable(specs: readonly AnyCommandSpec[]): string {
+  const rows = specs
+    .flatMap((s) => (s.replaces ?? []).map((pattern) => ({ pattern, command: commandName(s) })))
+    .sort((a, b) => a.command.localeCompare(b.command) || a.pattern.localeCompare(b.pattern));
+  return `${JSON.stringify(rows, null, 2)}\n`;
+}
+
 /** Every generated file, by repo-relative path. */
 export async function generate(): Promise<Map<string, string>> {
   const specs = await loadSpecs();
@@ -139,6 +148,7 @@ export async function generate(): Promise<Map<string, string>> {
   return new Map([
     ['docs/agents/commands.md', reference(specs)],
     ['docs/agents/skill/ghx/SKILL.md', skill(specs, snippet)],
+    ['src/hook/replaces.generated.json', replacesTable(specs)],
   ]);
 }
 

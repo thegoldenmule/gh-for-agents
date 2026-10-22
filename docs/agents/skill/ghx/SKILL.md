@@ -65,6 +65,7 @@ Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then co
 - `ghx ci wait` (read): Wait for CI on a PR or branch; one JSON summary, exit code = outcome (run in background)
 - `ghx ci why` (read): Why CI is red: failing jobs, step, tests, errors, log path, shared-with-main and flake
 - `ghx doctor` (read): Check the setup: gh version and features, auth, git, the target repo and its config.
+- `ghx hook claude-pretooluse` (read): Claude Code PreToolUse hook: background ghx ci wait, steer raw gh to ghx (stdin protocol)
 - `ghx init` (write): Write a starter .github/ghx.json (components inferred from the workspace).
 - `ghx pr comment` (write): Post a typed coordination comment: note, merge precondition, status or supersede
 - `ghx pr create` (write): Open a PR from validated JSON: compact body, hidden ghx block, exact read-back

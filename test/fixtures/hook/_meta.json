@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "source": "synthetic",
+    "note": "Claude Code PreToolUse events in the shape logged by the 03 \u00a73.6 spike (Monitor input is {command, description, timeout_ms})."
+  }
+}

@@ -1,5 +1,5 @@
 // runCli(argv, deps): global flags, route, dispatch. Never throws: every failure is an error document.
-import { commandName } from '../core/command.ts';
+import { type AnyCommandSpec, commandName } from '../core/command.ts';
 import { GhxError } from '../core/errors.ts';
 import { ExitCode } from '../core/exit.ts';
 import {
@@ -115,6 +115,9 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<Ru
 
     const spec = hit.spec;
     const rest = argv.slice(hit.consumed);
+    if (spec.protocol && !rest.some((t) => t === '--help' || t === '-h' || t === '--schema')) {
+      return await runProtocol(spec.protocol, deps);
+    }
     const parsed = parseCommandArgv(rest, spec, deriveInterface(spec));
     out = outputOptions(parsed.globals, deps, commandName(spec));
     if (parsed.globals.help) {
@@ -129,6 +132,29 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<Ru
   } catch (e) {
     return done(await emitError(deps.stdout, e, out, deps.clock));
   }
+}
+
+const PROTOCOL_MAX_STDIN = 1_048_576;
+const PROTOCOL_STDIN_MS = 2_000;
+
+/** A harness protocol (spec.protocol): fail open, so every path ends in exit 0, with output or without. */
+async function runProtocol(protocol: NonNullable<AnyCommandSpec['protocol']>, deps: CliDeps): Promise<RunOutcome> {
+  const giveUp = new AbortController();
+  try {
+    deps.clock.sleep(PROTOCOL_STDIN_MS, giveUp.signal).then(
+      () => giveUp.abort(),
+      () => {},
+    );
+    const stdin = await deps.readStdin(PROTOCOL_MAX_STDIN, giveUp.signal);
+    giveUp.abort();
+    const reply = protocol(stdin, deps.env);
+    if (reply !== null) await deps.stdout.writeLine(reply);
+  } catch {
+    // Fail open: no output.
+  } finally {
+    giveUp.abort();
+  }
+  return done(ExitCode.OK);
 }
 
 async function refuseUnknown(

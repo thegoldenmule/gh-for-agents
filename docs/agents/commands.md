@@ -9,6 +9,7 @@ Every command prints one JSON document (or a spill result). Errors are `{"error"
 - [`ghx ci wait`](#ghx-ci-wait) (read): Wait for CI on a PR or branch; one JSON summary, exit code = outcome (run in background)
 - [`ghx ci why`](#ghx-ci-why) (read): Why CI is red: failing jobs, step, tests, errors, log path, shared-with-main and flake
 - [`ghx doctor`](#ghx-doctor) (read): Check the setup: gh version and features, auth, git, the target repo and its config.
+- [`ghx hook claude-pretooluse`](#ghx-hook-claude-pretooluse) (read): Claude Code PreToolUse hook: background ghx ci wait, steer raw gh to ghx (stdin protocol)
 - [`ghx init`](#ghx-init) (write): Write a starter .github/ghx.json (components inferred from the workspace).
 - [`ghx pr comment`](#ghx-pr-comment) (write): Post a typed coordination comment: note, merge precondition, status or supersede
 - [`ghx pr create`](#ghx-pr-create) (write): Open a PR from validated JSON: compact body, hidden ghx block, exact read-back
@@ -165,6 +166,24 @@ Examples:
 - `ghx doctor --repo owner/name`
 
 Schema: `ghx doctor --schema`.
+
+## ghx hook claude-pretooluse
+
+Claude Code PreToolUse hook: background ghx ci wait, steer raw gh to ghx (stdin protocol)
+
+`ghx hook claude-pretooluse`
+
+read, single document, timeout 1m (max 5m).
+
+Reads the PreToolUse event JSON on stdin (the one command that does; Claude Code delivers it there) and prints a hook reply or nothing. A Bash `ghx ci wait` without run_in_background gets updatedInput with run_in_background: true and no permission decision. A gh CI polling loop (Bash or Monitor) or a gh command ghx wraps gets permissionDecision ask (GHX_HOOK_MODE=deny|ask|off; default ask) naming the ghx replacement. Fails open: any error or unparseable stdin exits 0 with no output. No gh calls. Register it with matcher Bash|Monitor (docs/agents/hooks.md).
+
+Input: Flags and positionals only; --input file.json is also accepted.
+
+Examples:
+
+- `ghx hook claude-pretooluse`: Run by Claude Code with the event on stdin; settings: matcher "Bash|Monitor"
+
+Schema: `ghx hook claude-pretooluse --schema`.
 
 ## ghx init
 

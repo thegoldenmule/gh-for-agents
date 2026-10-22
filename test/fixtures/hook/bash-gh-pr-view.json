@@ -1,0 +1,13 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "transcript_path": "/tmp/ghx-synthetic/session.jsonl",
+  "cwd": "/tmp/ghx-synthetic/repo",
+  "permission_mode": "default",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "gh pr view 3266 --json state,mergeable,statusCheckRollup",
+    "description": "PR state"
+  },
+  "tool_use_id": "toolu_synthetic_08"
+}
