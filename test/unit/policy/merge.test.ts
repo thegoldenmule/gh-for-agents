@@ -553,3 +553,21 @@ test('the engine re-validates overrides: an empty reason or a non-overridable co
   const ok = evaluate({ ...failingCi, request: { overrides: { codes: ['CI_RED'], reason: ' user asked ' } } });
   assert.deepEqual(ok.plan.overrides, [{ code: 'CI_RED', reason: 'user asked' }]);
 });
+
+test('scope ci-gate: BLOCKED caused by CHANGES_REQUESTED (out of scope) stays blocked; full scope explains it', () => {
+  const over = {
+    snapshot: { merge: merge({ mergeStateStatus: 'BLOCKED' as const, reviewDecision: 'CHANGES_REQUESTED' as const }) },
+    feedback: feedback({ reviews: [review('maria-dev', 'CHANGES_REQUESTED', '2026-10-21T15:00:00Z')] }),
+  };
+  const gate = evaluate({ ...over, scope: 'ci-gate' });
+  assert.equal(gate.ready, false);
+  assert.deepEqual(
+    gate.plan.blockers.map((b) => b.code),
+    ['BLOCKED_BY_PROTECTION'],
+  );
+  assert.match(gate.plan.blockers[0]?.message ?? '', /changes were requested/);
+  assert.deepEqual(
+    evaluate(over).plan.blockers.map((b) => b.code),
+    ['CHANGES_REQUESTED'],
+  );
+});

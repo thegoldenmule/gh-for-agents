@@ -469,11 +469,15 @@ export function evaluateMerge(i: MergePolicyInput): MergeEvaluation {
     ['FEEDBACK_TRUNCATED', feedbackTruncated(i)],
     ['PRECONDITION_UNMET', preconditionUnmet(i)],
   ]);
+  const inScope = (code: string) => i.scope !== 'ci-gate' || (CI_GATE_CODES as readonly string[]).includes(code);
   const stillFails = (code: MergeCheckCode) => results.get(code)?.status === 'fail' && !overrides.has(code);
-  const explained = (['CI_PENDING', 'CI_NO_CHECKS', 'CI_RED', 'CHANGES_REQUESTED'] as const).some(stillFails);
+  // Only a reported blocker explains BLOCKED: in ci-gate scope CHANGES_REQUESTED is not reported, so a
+  // PR blocked by it must stay blocked there rather than pass the gate.
+  const explained = (['CI_PENDING', 'CI_NO_CHECKS', 'CI_RED', 'CHANGES_REQUESTED'] as const).some(
+    (code) => inScope(code) && stillFails(code),
+  );
   results.set('BLOCKED_BY_PROTECTION', open ? blockedByProtection(s, explained) : notOpen);
 
-  const inScope = (code: string) => i.scope !== 'ci-gate' || (CI_GATE_CODES as readonly string[]).includes(code);
   const checks: PlanCheck[] = [];
   const blockers: Violation[] = [];
   const waivers: Violation[] = [];
