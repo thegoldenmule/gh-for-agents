@@ -121,3 +121,18 @@ export async function listRunsForSha(o: { gh: Gh; repo: RepoRef; headSha: string
   if (r.notModified) throw new Error('unreachable: unconditional request returned 304');
   return r.data.workflow_runs;
 }
+
+const WorkflowsPage = z.object({ total_count: z.number().int().min(0) });
+
+/**
+ * GET repos/{o}/{r}/actions/workflows (per_page=1): the repo's workflow count, `total_count`. Read-only.
+ * CI_NO_CHECKS (02 §8.2 row 10b) auto-passes only when it is 0 (CiFacts.workflowsTotal).
+ */
+export async function countWorkflows(o: { gh: Gh; repo: RepoRef }): Promise<number> {
+  const r = await o.gh.api(
+    { path: 'repos/{owner}/{repo}/actions/workflows', repo: o.repo, fields: { per_page: 1 } },
+    WorkflowsPage,
+  );
+  if (r.notModified) throw new Error('unreachable: unconditional request returned 304');
+  return r.data.total_count;
+}
