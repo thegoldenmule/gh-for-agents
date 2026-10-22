@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/powerhouse-inc/powerhouse/actions/runs/37948190914"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"id\":37948190914,\"head_sha\":\"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d\",\"head_branch\":\"feat/x\",\"event\":\"pull_request\",\"status\":\"completed\",\"conclusion\":\"failure\",\"workflow_id\":5,\"path\":\".github/workflows/w5.yml\",\"run_attempt\":1,\"created_at\":\"2026-10-22T10:59:00Z\",\"run_started_at\":\"2026-10-22T10:59:05Z\"}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "ci rerun smoke scenario: #3301 has one failed job whose log shows ECONNRESET (infra-error, flaky)"
+  }
+}

@@ -50,5 +50,8 @@ export const CiSection = z
         missingMinutes: z.number().int().positive().optional(),
       })
       .optional(),
+    // M5.1 (02 §13.1): ci rerun skips runs at this attempt or later (RERUN_LIMIT). Optional; default 3
+    // (src/ci/rerun/plan.ts).
+    maxRerunAttempts: z.number().int().positive().optional(),
   })
   .prefault({});

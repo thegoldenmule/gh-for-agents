@@ -1,0 +1,19 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/powerhouse-inc/powerhouse/actions/jobs/111978835495/logs"
+  ],
+  "exitCode": 0,
+  "stdout": "",
+  "stderr": "",
+  "stdoutFile": "005-actions-jobs-111978835495-logs.log",
+  "meta": {
+    "source": "synthetic",
+    "note": "ci rerun smoke scenario: #3301 has one failed job whose log shows ECONNRESET (infra-error, flaky)"
+  }
+}
