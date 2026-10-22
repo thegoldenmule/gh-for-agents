@@ -155,9 +155,8 @@ function pickBlock(item: Item, blocks: BlockRead[]): Pick {
   const b = blocks.findLast((x) => x.status !== 'invalid');
   if (!b) {
     const invalid = blocks.findLast((x) => x.status === 'invalid');
-    return { ok: false, error: invalid?.status === 'invalid' ? invalid.error : null };
+    return { ok: false, error: invalid?.error ?? null };
   }
-  if (b.status === 'invalid') return { ok: false, error: b.error };
   if (b.status === 'unknown-type') return { ok: true, placement: { as: 'comment', id: b.id, block: null }, used: [b] };
   if (b.block.t === 'comment')
     return { ok: true, placement: { as: 'comment', id: b.block.id, block: b.block }, used: [b] };
