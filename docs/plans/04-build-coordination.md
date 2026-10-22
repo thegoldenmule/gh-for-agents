@@ -56,7 +56,58 @@ Live tests and the sandbox (M0.2, `test/live/**`, `live.yml`) are deferred (03 Q
 
 The bootstrap agent fills this in. For each kind of extension, it records the file or directory where you add it, and whether doing so needs an edit to a shared file. The aim is that adding a command, an error code or a fixture scenario needs no edit to a central shared file, or at most a one-line append.
 
-- Commands:
-- Error codes:
-- Fixture scenarios:
-- Config keys:
+Filled in by the wave 1 bootstrap agent (commits `f29f2eb`..`3cd7603`).
+
+- **Commands: no shared edit.** One new file per command: `src/commands/<group>/<verb>.ts`, or `src/commands/<name>.ts` for a top-level command. Its default export is `defineCommand({...})` or `defineStreamCommand({...})` from `src/core/command.ts`, and its `name` must equal its path segments: `src/commands/pr/status.ts` is `name: ['pr', 'status']`.
+  - The registry (`src/cli/registry.ts`) discovers commands from the directory, with no build and no index file. It resolves the longest positional prefix by statting candidate paths, then imports only that one module.
+  - Path rules:
+    - Segments match `[a-z][a-z0-9-]*`, with at most 3 levels.
+    - Files and directories whose names start with `_` are helpers, never commands (for example `src/commands/pr/_shared.ts`). Put substantial logic in domain dirs (`src/ci/`, `src/pr/`, `src/policy/`, …).
+    - A `<x>.ts` file and an `<x>/` directory must not coexist.
+  - `test/registry.test.ts` proves the registry is complete and checks every spec automatically:
+    - the summary is at most 100 chars;
+    - every schema converts to JSON Schema, so no transforms are allowed;
+    - no derived flag collides with a global flag;
+    - every positional names a real field;
+    - stream event types avoid `summary|error|heartbeat|warning`;
+    - an `examples[0]` smoke run never exits 1, never mutates for reads, and halts under `--dry-run` for writes.
+  - Every command needs at least one example. Give it `input` if the command takes JSON. By default the smoke run answers every gh and git call with a 404; ship `test/fixtures/gh/smoke/<name-with-dashes>/` to give it a real scenario.
+  - Spec fields beyond 01 §3.1:
+    - `jsonInput: 'required'` raises `USAGE_INPUT_MISSING` when `--input` is absent.
+    - `timeout: null` means no deadline, and `--timeout` is refused.
+    - Stream specs use `summarySchema` for the summary schema (01's sketch reused the name `summary`). They take `outputMode: 'final' | 'ndjson' | (input) => …`, and their context has `ctx.events.path()` and `ctx.events.setPath(p)`.
+- **Error codes: one-line append** to the right exit-class section of `ERROR_CODES` in `src/core/errors.ts`.
+  - The catalogue is already complete for the plans: all of 02 §6.2, 03 §1's additions (`READBACK_MISMATCH`, `DIFF_TOO_LARGE`, `PASSTHROUGH_WRITE_REFUSED`, `METHOD_NOT_ALLOWED`, `MERGEABLE_UNKNOWN`, `META_TOO_LARGE`), and 01's codes (`USAGE_*`, `CONFIG_*`, `ENV_*`, `INTERNAL_*`, `INTERRUPTED`, `TIMEOUT`, `REPO_AMBIGUOUS`, `GH_OUTPUT_UNEXPECTED`). Most milestones need no edit.
+  - `MERGE_BLOCKED` exits 9 when `details.exitClass === 'state'` and 6 otherwise.
+  - Internal gh failure codes (`GH_TRANSIENT`, `GH_LOGS_GONE`, …) stay internal. Catch `GhFailure` and read `.failure.code`. `publicCodeFor()` maps them; pass `notFound: 'PR_NOT_FOUND'` (etc.) on the call.
+  - Tests read exit numbers from `EXIT` in `test/contract/exit-table.ts`. `test/unit/core/exit.test.ts` checks it against `src/core/exit.ts`.
+  - Warning codes are free strings passed to `ctx.warn({code, message})`; there is no registry.
+- **Fixture scenarios: no shared edit.**
+  - gh fixtures go in a directory `test/fixtures/gh/<scenario>/` of `NNN-<slug>.json` files in the GhFixture shape (`test/helpers/fixture-match.ts`; `src/proc/recording.ts` writes exactly this shape). Nested groups such as `ci-snapshot/pending` work too.
+    - File order is the reply order for the same canonical argv, and the last reply repeats.
+    - In-process, use `FakeGh.fromScenario('<scenario>')` from `test/helpers/fake-gh.ts`, together with `runInProcess(argv, {gh})`.
+    - For the spawned bin, set `GHX_FAKE_SCENARIO=<scenario>` with `spawnGhx(…, {fakeGh: true})`.
+  - Re-capture scripts are one file each, `scripts/fixtures/scenarios/<name>.ts`, default-exporting `defineScenario` from `scripts/fixtures/scenario-api.ts`. Run them with `pnpm fixtures:record <name>`. Recording refuses mutating gh calls until the sandbox exists.
+  - Non-gh fixtures (bodies, config, stderr) are files plus a `meta.source` entry in their directory's `_meta.json`.
+  - `test/fixtures.test.ts` requires three things of every fixture: a `meta.source`, no token or email, and a reference from at least one test.
+  - Biome ignores `test/fixtures/**`, so fixtures stay byte-exact.
+- **Config keys: no shared edit within a section.**
+  - Sections live in `src/config/sections/<section>.ts`. All eight from 02 §15 already exist: `components`, `title`, `render`, `create`, `merge`, `ci`, `trust`, `bots`.
+  - Add a key by editing only that section's file, which its milestone owns: CI keys in `ci.ts`, create keys in `title.ts`/`render.ts`/`create.ts`, and so on.
+  - A new top-level section is a new file plus one line in `src/config/schema.ts`.
+  - Use `.prefault()`, not `.default()`.
+  - Commands read config through `ctx.config()` after declaring `needs.config`.
+- **Other hooks:**
+  - Schema targets are one entry in `SCHEMA_TARGETS` (`src/cli/schema.ts`).
+  - Test-only commands are files in `test/helpers/commands/test/<name>.ts`. They are exposed as `ghx test <name>` only under `GHX_TEST_HOOKS=1`, and contract tests use them, for example for exit 1.
+  - Passthrough (M7.1) replaces `onUnknown` in `src/cli/unknown.ts`. It returns `{kind: 'run', spec, input}`, which runs a synthetic spec through `runCommandWith` with no ghx flag parsing, or `{kind: 'refuse', error}`. The read guard (`src/gh/guard.ts`) already allowlists 02 §10's reads.
+
+**Notes for later waves:**
+- Config sections use 02 §15 names. 01's `checks.ignore` is `ci.ignore`, and 01's `pr.title` and `pr.render` are the empty `title` and `render` sections.
+- A spill keeps the command's own exit code. Today this differs from 01's literal "exit 0" only for a failing doctor.
+- SIGHUP and EPIPE exit 143, like SIGTERM.
+- `gh` is reached only through `ctx.gh` (`src/gh/index.ts`):
+  - REST goes through `api()` and `apiText()`, which always pass `--include`. A 304 comes back as `notModified`.
+  - GraphQL goes through `graphql()` and `graphqlPartial()`. Reads send the query as `-f query=…`; mutations send a JSON body.
+- The harness builds its environment from scratch. Without `git` or `proc`, it uses an in-memory "not a checkout" git.
+- `pnpm check` runs typecheck, lint and tests. Contract tests spawn `bin/ghx.js`.
