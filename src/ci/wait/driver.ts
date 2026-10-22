@@ -441,7 +441,8 @@ export async function* runWait(
       byWf.set(wf, [...(byWf.get(wf) ?? []), c.name]);
     }
     for (const [workflowId, jobNames] of byWf) {
-      st.etaWorkflows.push(workflowId);
+      // Marked sampled only once the read finished: an interrupt mid-fetch (which saves the state) must
+      // leave the workflow to be sampled again, not marked sampled with no stats.
       try {
         Object.assign(
           st.baselines,
@@ -451,6 +452,7 @@ export async function* runWait(
         rethrowControlFlow(e);
         warn({ code: 'ETA_UNAVAILABLE', message: `${r.label}: no ETA baseline for workflow ${workflowId}.` });
       }
+      st.etaWorkflows.push(workflowId);
     }
   }
 

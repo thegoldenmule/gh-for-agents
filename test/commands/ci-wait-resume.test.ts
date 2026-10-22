@@ -186,3 +186,31 @@ test('concurrent runs of one target: the second waits on the lock, then resumes 
   assert.equal(r2.json.resumed, true);
   assert.equal(sim.callsTo(/\/pulls\/7\/commits$/).length, 1, 'only one run read the baseline');
 });
+
+test('an interrupt during the ETA read leaves the workflow to be sampled again on resume', async () => {
+  const { clock, sim, a, b } = world();
+  let hang = true;
+  sim.override(
+    (argv) => hang && argv.some((x) => x.includes('/actions/workflows/')),
+    () => ({ status: 0, exitCode: 0, stdout: '', stderr: '', hang: true }),
+  );
+  const shutdown = createShutdown();
+  const run1 = startWait(sim, ['o/r#7'], { shutdown });
+  await clock.advance(MIN);
+  assert.equal(run1.isDone(), false, 'stuck in the ETA read');
+  shutdown.trigger('SIGTERM');
+  await clock.runUntil(run1.isDone, { stepMs: 1_000, maxMs: 10_000 });
+  assert.equal((await run1.p).json.outcome, 'interrupted');
+  hang = false;
+  set(sim, clock.monotonic(), [{ ...a, status: 'completed', conclusion: 'success', completedAt: 0 }, b]);
+  const n = sim.callsTo(/\/actions\/workflows\//).length;
+  const run2 = startWait(sim, ['o/r#7'], { artifacts: run1.artifacts });
+  await clock.advance(1_000);
+  assert.ok(sim.callsTo(/\/actions\/workflows\//).length > n, 'the ETA samples are read on resume');
+  set(sim, clock.monotonic(), [
+    { ...a, status: 'completed', conclusion: 'success', completedAt: 0 },
+    { ...b, status: 'completed', conclusion: 'success', completedAt: 0 },
+  ]);
+  await clock.runUntil(run2.isDone, { stepMs: 5_000, maxMs: 10 * MIN });
+  assert.equal((await run2.p).exitCode, EXIT.OK);
+});
