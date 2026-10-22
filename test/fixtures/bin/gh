@@ -1,0 +1,98 @@
+#!/usr/bin/env node
+// The fake `gh` for contract tests (03 §4.3). ghx finds it first on PATH. It replays the scenario in
+// GHX_FAKE_SCENARIO (a directory under test/fixtures/gh, or an absolute path), logs every call to
+// GHX_FAKE_LOG as NDJSON (argv, stdinSha256 and the env keys ghx is meant to set), and keeps the
+// per-argv reply counter in GHX_FAKE_STATE so successive replies work across processes.
+// A `hang` reply blocks until the process is signalled. An unmatched call exits 99 and names the
+// nearest fixtures on stderr.
+import { createHash } from 'node:crypto';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const { loadScenario, pickFixture, replyStdout, FakeGhUnmatched } = await import(
+  '../../helpers/fixture-match.ts'
+);
+
+const ENV_KEYS = [
+  'GH_PAGER',
+  'PAGER',
+  'NO_COLOR',
+  'CLICOLOR',
+  'GH_PROMPT_DISABLED',
+  'GH_NO_UPDATE_NOTIFIER',
+  'GH_NO_EXTENSION_UPDATE_NOTIFIER',
+  'GH_SPINNER_DISABLED',
+  'GIT_TERMINAL_PROMPT',
+  'GH_FORCE_TTY',
+  'CLICOLOR_FORCE',
+  'GH_DEBUG',
+  'GH_TOKEN',
+  'GH_HOST',
+];
+
+function readStdin() {
+  try {
+    return readFileSync(0, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+const argv = process.argv.slice(2);
+const stdinText = readStdin();
+const stdin = stdinText === '' ? undefined : stdinText;
+const env = Object.fromEntries(ENV_KEYS.filter((k) => k in process.env).map((k) => [k, process.env[k]]));
+
+if (process.env.GHX_FAKE_LOG) {
+  appendFileSync(
+    process.env.GHX_FAKE_LOG,
+    `${JSON.stringify({
+      fake: true,
+      argv,
+      stdinSha256: stdin === undefined ? null : createHash('sha256').update(stdin).digest('hex'),
+      env,
+    })}\n`,
+  );
+}
+
+const scenario = process.env.GHX_FAKE_SCENARIO;
+if (!scenario) {
+  process.stderr.write('fake gh: GHX_FAKE_SCENARIO is not set\n');
+  process.exit(98);
+}
+
+const stateDir = process.env.GHX_FAKE_STATE;
+const counterFile = stateDir ? join(stateDir, 'fake-gh-counts.json') : undefined;
+const state = { counts: counterFile && existsSync(counterFile) ? JSON.parse(readFileSync(counterFile, 'utf8')) : {} };
+
+let fixture;
+try {
+  fixture = pickFixture(loadScenario(scenario), argv, stdin, state);
+} catch (e) {
+  if (e instanceof FakeGhUnmatched) {
+    process.stderr.write(`${e.message}\n`);
+    process.exit(99);
+  }
+  throw e;
+}
+if (counterFile) {
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(counterFile, JSON.stringify(state.counts));
+}
+
+async function reply() {
+  if (fixture.delayMs) await new Promise((r) => setTimeout(r, fixture.delayMs));
+  if (fixture.hang) {
+    process.on('SIGTERM', () => process.exit(143));
+    process.on('SIGINT', () => process.exit(130));
+    setInterval(() => {}, 60_000);
+    return;
+  }
+  const out = replyStdout(fixture);
+  process.stderr.write(fixture.stderr);
+  process.stdout.write(out, () => {
+    process.exitCode = fixture.exitCode;
+  });
+}
+
+await reply();

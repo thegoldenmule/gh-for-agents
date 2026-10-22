@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "auth",
+    "status",
+    "--json",
+    "hosts"
+  ],
+  "exitCode": 1,
+  "stdout": "",
+  "stderr": "unknown flag: --json\n\nUsage:  gh auth status [flags]\n",
+  "meta": {
+    "source": "synthetic",
+    "note": "gh < 2.81.0 has no auth status --json"
+  }
+}

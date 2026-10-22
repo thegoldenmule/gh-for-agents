@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "pr",
+    "checks",
+    "--help"
+  ],
+  "exitCode": 0,
+  "stdout": "Show CI status for a single pull request.\n\nWithout an argument, the pull request that belongs to the current branch\nis selected.\n\nthe `state` field into `pass`, `fail`, `pending`, `skipping`, or `cancel`.\n\nAdditional exit codes:\n\t8: Checks pending\n\nFor more information about output formatting flags, see `gh help formatting`.\n\nUSAGE\n  gh pr checks [<number> | <url> | <branch>] [flags]\n\nFLAGS\n      --fail-fast         Exit watch mode on first check failure\n  -i, --interval int      Refresh interval in seconds in watch mode (default 10)\n      --required          Only show checks that are required\n      --watch             Watch checks until they finish\n  -w, --web               Open the web browser to show details about checks\n\nINHERITED FLAGS\n      --help                     Show help for command\n  -R, --repo [HOST/]OWNER/REPO   Select another repository using the [HOST/]OWNER/REPO format\n\n  bucket, completedAt, description, event, link, name, startedAt, state, workflow\n\nLEARN MORE\n  Use `gh <command> <subcommand> --help` for more information about a command.\n  Read the manual at https://cli.github.com/manual\n  Learn about exit codes using `gh help exit-codes`\n  Learn about accessibility experiences using `gh help accessibility`\n\n",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "gh < 2.50.0: pr checks --help without --json"
+  }
+}

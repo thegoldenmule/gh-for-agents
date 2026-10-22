@@ -33,3 +33,9 @@ export function versionAtLeast(v: GhVersion, min: string): boolean {
   const [major = 0, minor = 0, patch = 0] = min.split('.').map(Number);
   return compareVersions(v, { major, minor, patch }) >= 0;
 }
+
+/**
+ * The floor for the features ghx probes (01 §8): `gh auth status --json` shipped in v2.81.0
+ * (cli/cli#11544) and `gh pr checks --json` in v2.50.0 (cli/cli#9079), per the cli/cli release notes.
+ */
+export const MIN_GH_VERSION = '2.81.0';

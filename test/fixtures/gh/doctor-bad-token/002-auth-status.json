@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "auth",
+    "status",
+    "--json",
+    "hosts"
+  ],
+  "exitCode": 0,
+  "stdout": "{\"hosts\":{\"github.com\":[{\"state\":\"error\",\"active\":true,\"host\":\"github.com\",\"login\":\"viewer-user\",\"tokenSource\":\"GH_TOKEN\",\"error\":\"HTTP 401: Bad credentials (https://api.github.com/)\"}]}}\n",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "active account in error state"
+  }
+}

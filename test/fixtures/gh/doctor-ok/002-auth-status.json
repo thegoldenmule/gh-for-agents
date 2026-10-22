@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "auth",
+    "status",
+    "--json",
+    "hosts"
+  ],
+  "exitCode": 0,
+  "stdout": "{\"hosts\":{\"github.com\":[{\"state\":\"success\",\"active\":true,\"host\":\"github.com\",\"login\":\"viewer-user\",\"tokenSource\":\"keyring\",\"scopes\":\"gist, read:org, repo, workflow\",\"gitProtocol\":\"ssh\"}]}}\n",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "gh auth status --json hosts shape (gh 2.86.0), login aliased"
+  }
+}

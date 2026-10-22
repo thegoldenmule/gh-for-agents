@@ -1,6 +1,7 @@
 // Spawn bin/ghx.js the way an agent does: through pipes, with an environment built from scratch
 // (never process.env: agent sessions set CLAUDE_CODE_SESSION_ATTENDED, 03 §3.6).
 import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { scratchDir } from './harness.ts';
 
@@ -28,8 +29,18 @@ export interface SpawnResult {
   ms: number;
 }
 
+/** A directory holding only a `node` symlink, so scripts with `#!/usr/bin/env node` run without the rest of PATH. */
+export function nodeBinDir(): string {
+  const dir = join(scratchDir(), 'nodebin');
+  if (!existsSync(join(dir, 'node'))) {
+    mkdirSync(dir, { recursive: true });
+    symlinkSync(process.execPath, join(dir, 'node'));
+  }
+  return dir;
+}
+
 export function baseEnv(o: SpawnOptions = {}): Record<string, string> {
-  const path = o.fakeGh ? `${FAKE_BIN_DIR}:/usr/bin:/bin` : '/usr/bin:/bin';
+  const path = [...(o.fakeGh ? [FAKE_BIN_DIR] : []), nodeBinDir(), '/usr/bin', '/bin'].join(':');
   const env: Record<string, string | undefined> = {
     PATH: path,
     HOME: scratchDir(),

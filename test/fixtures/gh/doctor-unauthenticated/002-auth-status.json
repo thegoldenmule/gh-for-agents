@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "auth",
+    "status",
+    "--json",
+    "hosts"
+  ],
+  "exitCode": 0,
+  "stdout": "{\"hosts\":{}}\n",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "no logged-in host"
+  }
+}

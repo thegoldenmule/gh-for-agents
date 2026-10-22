@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "--version"
+  ],
+  "exitCode": 0,
+  "stdout": "gh version 2.40.1 (2023-12-13)\nhttps://github.com/cli/cli/releases/tag/v2.40.1\n",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "a gh older than MIN_GH_VERSION"
+  }
+}
