@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/powerhouse-inc/powerhouse/actions/workflows/9001/runs?branch=main&event=push&status=completed&per_page=10"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"total_count\":1,\"workflow_runs\":[{\"id\":37950011223,\"head_sha\":\"c0ffee1d2e3f405162738495a6b7c8d9e0f1a2b3\",\"head_branch\":\"main\",\"event\":\"push\",\"status\":\"completed\",\"conclusion\":\"failure\",\"workflow_id\":9001,\"path\":\".github/workflows/ci.yml\",\"run_attempt\":1,\"created_at\":\"2026-10-21T15:58:10Z\",\"run_started_at\":\"2026-10-21T15:58:19Z\"}]}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "recordedAt": "2026-10-22T09:15:00.000Z"
+  }
+}

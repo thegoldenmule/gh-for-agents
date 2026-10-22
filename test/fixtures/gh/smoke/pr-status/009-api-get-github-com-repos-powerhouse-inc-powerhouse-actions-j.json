@@ -1,0 +1,19 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/powerhouse-inc/powerhouse/actions/jobs/111970000001/logs"
+  ],
+  "exitCode": 0,
+  "stdout": "",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "recordedAt": "2026-10-22T09:15:00.000Z"
+  },
+  "stdoutFile": "009-api-get-github-com-repos-powerhouse-inc-powerhouse-actions-j.log"
+}

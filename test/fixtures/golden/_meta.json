@@ -1,0 +1,9 @@
+{
+  "meta": {
+    "source": "synthetic",
+    "note": "Worked-example goldens (03 §6.2). Compared field by field; fetchedAt and artifact paths may be normalised by the test."
+  },
+  "files": {
+    "pr-status-3301.json": { "source": "synthetic", "note": "02 §14.5 verbatim: ghx pr status powerhouse-inc/powerhouse#3301 after settle" }
+  }
+}

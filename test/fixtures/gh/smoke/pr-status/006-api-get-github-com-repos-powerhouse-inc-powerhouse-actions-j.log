@@ -1,0 +1,11 @@
+HTTP/1.1 200 OK
+Content-Type: text/plain
+
+﻿2026-10-21T16:40:58.0000000Z ##[group]Run tests
+2026-10-21T16:40:58.0000000Z pnpm vitest run
+2026-10-21T16:40:58.0000000Z ##[endgroup]
+2026-10-21T16:40:58.0000000Z  RUN  v3.2.4 /home/runner/work/powerhouse/powerhouse
+2026-10-21T16:40:58.0000000Z    × reactor-api > should converge after reshuffle rebroadcast between two connect reactors 20056ms
+2026-10-21T16:40:58.0000000Z      AssertionError: expected 3 to equal 4
+2026-10-21T16:40:58.0000000Z  Test Files  1 failed | 41 passed (42)
+2026-10-21T16:40:58.0000000Z ##[error]Process completed with exit code 1.
