@@ -297,6 +297,25 @@ test('an invalid block is NO_BLOCK, and adopt rewrites it in place with a fresh 
   assert.equal((String(s2.patched[0]?.body).match(/<!-- ghx:v1 /g) ?? []).length, 1);
 });
 
+test('a trailer edited in the UI is re-rendered with a TRAILER_UI_EDIT_DISCARDED warning', async () => {
+  const s = editScene({ pr: { body: bodyOf().replace('Risk: low', 'Risk: low (I think)') } });
+  const r = await run(s.gh, { description: NEW_DESCRIPTION });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.ok(codes(r).includes('TRAILER_UI_EDIT_DISCARDED'));
+  assert.ok(!String(s.patched[0]?.body).includes('(I think)'));
+  const plain = await run(editScene().gh, { description: NEW_DESCRIPTION });
+  assert.ok(!codes(plain).includes('TRAILER_UI_EDIT_DISCARDED'));
+});
+
+test('BASE_NOT_A_PR warns only when the base changes, not on every edit of a PR on such a base', async () => {
+  const same = await run(editScene({ pr: { baseRefName: 'release/1.x' } }).gh, { description: NEW_DESCRIPTION });
+  assert.equal(same.exitCode, EXIT.OK, same.stdout);
+  assert.ok(!codes(same).includes('BASE_NOT_A_PR'), codes(same).join());
+  const moved = await run(editScene().gh, { base: 'release/1.x' });
+  assert.equal(moved.exitCode, EXIT.OK, moved.stdout);
+  assert.ok(codes(moved).includes('BASE_NOT_A_PR'));
+});
+
 /** The body pr create rendered under an earlier `render.footer`. */
 const bodyWithFooter = (footer: string | null) =>
   renderPrBody(toPrBlock(CONTENT as never, { id: BLOCK_ID, rev: 1 }), { ...RENDER, footer });

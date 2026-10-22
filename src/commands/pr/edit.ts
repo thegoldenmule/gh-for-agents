@@ -57,7 +57,9 @@ export default defineCommand({
     'Write the patch with your file tool and pass --input patch.json; only the fields to change. ' +
     'DESCRIPTION_DRIFT when the visible text was edited in the UI (include it, or --discard-ui-edits); ' +
     'NO_BLOCK unless "adopt": true with the full object. ' +
-    'GH_FORBIDDEN unless you have write access or opened the PR yourself (GitHub lets authors edit their own PRs).',
+    'GH_FORBIDDEN unless you have write access or opened the PR yourself (GitHub lets authors edit their own PRs). ' +
+    'CONCURRENT_EDIT when the title or body changed since the read; GitHub has no If-Match, so an edit made ' +
+    'in the moment between the final re-read and the PATCH is still overwritten.',
   kind: 'write',
   input: Input,
   output: Output,

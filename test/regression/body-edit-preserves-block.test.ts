@@ -116,17 +116,25 @@ test('adopt with a partial object is VALIDATION listing the missing fields', asy
   s.gh.expectNoMutations();
 });
 
-test('updatedAt changed before the PATCH is CONCURRENT_EDIT (exit 9), no PATCH', async () => {
-  const s = editScene({ reread: { updatedAt: '2026-10-22T10:00:22Z' } });
+test('a title changed before the PATCH is CONCURRENT_EDIT (exit 9), no PATCH', async () => {
+  const s = editScene({ reread: { title: 'fix(app): retitled in the UI', updatedAt: '2026-10-22T10:00:22Z' } });
   const r = await run(s.gh, { description: NEW });
   assert.equal(r.exitCode, EXIT.STATE, r.stdout);
   assert.equal(r.json.error.code, 'CONCURRENT_EDIT');
-  assert.match(r.json.error.message, /10:00:00Z → 2026-10-22T10:00:22Z/);
+  assert.match(r.json.error.message, /title/);
+  assert.equal(r.json.error.details.titleChanged, true);
   assert.deepEqual(editSequence(s.gh), ['config', 'snapshot', 'preflight', 'compare', 'snapshot']);
   s.gh.expectNoMutations();
 });
 
-test('a body changed before the PATCH (same updatedAt) is CONCURRENT_EDIT too', async () => {
+test('updatedAt bumped by unrelated activity (same title and body) is not CONCURRENT_EDIT', async () => {
+  const s = editScene({ reread: { updatedAt: '2026-10-22T10:00:22Z' } });
+  const r = await run(s.gh, { description: NEW });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(s.patched.length, 1);
+});
+
+test('a body changed before the PATCH is CONCURRENT_EDIT too', async () => {
   const s = editScene({ reread: { body: `${bodyOf()}\n\nappended` } });
   const r = await run(s.gh, { description: NEW });
   assert.equal(r.exitCode, EXIT.STATE, r.stdout);

@@ -29,18 +29,20 @@ export async function applyEdit(ctx: Context, repo: RepoRef, plan: EditPlan): Pr
   };
   if (plan.changed.length === 0) return target;
 
-  // GitHub's PATCH has no If-Match, so this re-read is the guard against overwriting a change made since
-  // the snapshot (another agent, or a UI edit).
+  // GitHub's PATCH has no If-Match, so this re-read, right before the PATCH, is the only guard against
+  // overwriting a change made since the snapshot (another agent, or a UI edit). It compares what the PATCH
+  // would overwrite, the title and body, not updatedAt, which unrelated activity (a comment, a push, a
+  // label) also bumps. An edit landing between this read and the PATCH is still lost; that window cannot
+  // be closed without an If-Match.
   const now = await fetchPrSnapshot(ctx.gh, repo, pr.number);
-  if (now.updatedAt !== pr.updatedAt || now.body !== pr.body) {
-    throw new GhxError(
-      'CONCURRENT_EDIT',
-      `${plan.ref} changed since it was read (updatedAt ${pr.updatedAt} → ${now.updatedAt}${now.body !== pr.body ? '; the body differs' : ''}).`,
-      {
-        hint: 'Re-run the same command; it re-reads the PR.',
-        details: { before: pr.updatedAt, after: now.updatedAt, bodyChanged: now.body !== pr.body },
-      },
-    );
+  const titleChanged = now.title !== pr.title;
+  const bodyChanged = now.body !== pr.body;
+  if (titleChanged || bodyChanged) {
+    const what = [titleChanged ? 'title' : null, bodyChanged ? 'body' : null].filter((x) => x !== null).join(' and ');
+    throw new GhxError('CONCURRENT_EDIT', `The ${what} of ${plan.ref} changed since it was read.`, {
+      hint: 'Re-run the same command; it re-reads the PR.',
+      details: { before: pr.updatedAt, after: now.updatedAt, titleChanged, bodyChanged },
+    });
   }
 
   if (Object.keys(plan.rest).length > 0) {

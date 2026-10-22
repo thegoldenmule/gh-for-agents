@@ -127,9 +127,16 @@ export async function planEdit(env: EditEnv): Promise<EditPlan> {
   // silently overwrite with the block's copy. The trailer is derived, so it is simply re-rendered.
   if (block !== null) {
     const parsedBody = parsePrBody(pr.body, { footer: config.render.footer });
-    const drift: DriftField[] = prBodyDrift(pr.body, block, config.render, pr.title).filter(
+    const bodyDrift = prBodyDrift(pr.body, block, config.render, pr.title);
+    const drift: DriftField[] = bodyDrift.filter(
       (f): f is 'title' | 'description' => f === 'title' || f === 'description',
     );
+    if (bodyDrift.includes('trailer')) {
+      warnings.push({
+        code: 'TRAILER_UI_EDIT_DISCARDED',
+        message: `The trailer line of ${ref} was edited outside ghx; it is derived from the block, so the edit re-renders it. Put lasting changes in the patch (risk, components, testing, revertPolicy).`,
+      });
+    }
     const footer = config.render.footer?.replace(/\r\n?/g, '\n').trim() || null;
     // The tail after the trailer is the footer the PR was rendered with. The block does not record it, so
     // a render.footer change since then (or a PR rendered with none) must not read as a UI edit: a single
@@ -237,7 +244,8 @@ export async function planEdit(env: EditEnv): Promise<EditPlan> {
             : `stackedOn is now ${want} (was ${have ?? 'empty'}): the open PR whose head is the base '${input.base}'.`,
       });
     }
-    if (stacked && baseParent === null) {
+    // Only when the base moves: a PR that already sits on such a base was warned when it got there.
+    if (stacked && baseParent === null && input.base !== pr.baseRefName) {
       warnings.push({
         code: 'BASE_NOT_A_PR',
         message: `The base '${input.base}' is not the default branch '${pf.defaultBranch}' and no open PR has it as head; stackedOn is left empty.`,
