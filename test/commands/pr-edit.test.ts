@@ -6,16 +6,18 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { DEFAULT_FOOTER } from '../../src/config/sections/render.ts';
 import { buildGraphqlArgs } from '../../src/gh/graphql.ts';
 import { readPrBlock } from '../../src/meta/schemas.ts';
 import { buildPreflightQuery, preflightVars } from '../../src/pr/create/preflight.ts';
 import { SNAPSHOT_QUERY } from '../../src/pr/edit/snapshot.ts';
+import { renderPrBody, toPrBlock } from '../../src/render/pr-body.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 import { argvKey, GH_FIXTURE_ROOT } from '../helpers/fixture-match.ts';
 import { runInProcess } from '../helpers/harness.ts';
-import { PARENT_OID } from './pr-create-scene.ts';
-import { BLOCK_ID, bodyOf, CONTENT, editScene, editSequence, PR_NODE_ID } from './pr-edit-scene.ts';
+import { CONFIG, ok, PARENT_OID } from './pr-create-scene.ts';
+import { BLOCK_ID, bodyOf, CONTENT, editLabel, editScene, editSequence, PR_NODE_ID, RENDER } from './pr-edit-scene.ts';
 
 const ARGV = ['pr', 'edit', 'octo/demo#12', '--input', '-'];
 const run = (gh: FakeGh, patch: unknown, extra: string[] = []) =>
@@ -293,6 +295,55 @@ test('an invalid block is NO_BLOCK, and adopt rewrites it in place with a fresh 
   assert.equal(r2.json.rev, 1);
   assert.notEqual(r2.json.blockId, BLOCK_ID);
   assert.equal((String(s2.patched[0]?.body).match(/<!-- ghx:v1 /g) ?? []).length, 1);
+});
+
+/** The body pr create rendered under an earlier `render.footer`. */
+const bodyWithFooter = (footer: string | null) =>
+  renderPrBody(toPrBlock(CONTENT as never, { id: BLOCK_ID, rev: 1 }), { ...RENDER, footer });
+
+/** Serve a config with this render.footer instead of the default one. */
+function withFooter(gh: FakeGh, footer: string | null): void {
+  const config = { ...CONFIG, render: { footer } };
+  gh.on(
+    (argv) => editLabel({ argv }) === 'config',
+    ok({ content: Buffer.from(JSON.stringify(config)).toString('base64'), encoding: 'base64' }),
+  );
+}
+
+test('a PR rendered under an older render.footer is not DESCRIPTION_DRIFT; the footer is replaced, with a warning', async () => {
+  const s = editScene({ pr: { body: bodyWithFooter('Shipped by the release bot.') } });
+  const r = await run(s.gh, { description: NEW_DESCRIPTION });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(s.patched[0]?.body, bodyOf({ ...CONTENT, description: NEW_DESCRIPTION }, 2));
+  assert.ok(codes(r).includes('FOOTER_REPLACED'));
+  assert.match(r.json.warnings.find((w: { code: string }) => w.code === 'FOOTER_REPLACED').message, /release bot/);
+});
+
+test('a PR rendered with no footer gains the current one without drift or warning', async () => {
+  const s = editScene({ pr: { body: bodyWithFooter(null) } });
+  const r = await run(s.gh, { description: NEW_DESCRIPTION });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.ok(String(s.patched[0]?.body).includes(DEFAULT_FOOTER));
+  assert.ok(!codes(r).includes('FOOTER_REPLACED'));
+});
+
+test('render.footer set to null drops the old footer instead of reporting drift', async () => {
+  const s = editScene();
+  withFooter(s.gh, null);
+  const r = await run(s.gh, { description: NEW_DESCRIPTION });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.ok(!String(s.patched[0]?.body).includes(DEFAULT_FOOTER));
+  assert.ok(codes(r).includes('FOOTER_REPLACED'));
+});
+
+test('a multi-paragraph tail after the trailer is still DESCRIPTION_DRIFT under a changed footer', async () => {
+  const s = editScene({
+    pr: { body: bodyWithFooter('Old footer.').replace('Old footer.', 'Old footer.\n\nCC @someone.') },
+  });
+  const r = await run(s.gh, { description: NEW_DESCRIPTION });
+  assert.equal(r.exitCode, EXIT.STATE, r.stdout);
+  assert.equal(r.json.error.code, 'DESCRIPTION_DRIFT');
+  assert.deepEqual(r.json.error.details.drift, ['appended']);
 });
 
 test('the snapshot and preflight queries match the smoke fixture byte for byte', () => {

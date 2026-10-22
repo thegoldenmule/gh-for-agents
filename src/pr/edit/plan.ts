@@ -131,7 +131,21 @@ export async function planEdit(env: EditEnv): Promise<EditPlan> {
       (f): f is 'title' | 'description' => f === 'title' || f === 'description',
     );
     const footer = config.render.footer?.replace(/\r\n?/g, '\n').trim() || null;
-    if (parsedBody.trailer !== null && parsedBody.footer !== footer) drift.push('appended');
+    // The tail after the trailer is the footer the PR was rendered with. The block does not record it, so
+    // a render.footer change since then (or a PR rendered with none) must not read as a UI edit: a single
+    // footer-shaped line is taken as the old footer and replaced, with a warning so that a one-line UI
+    // addition there is not lost silently. Anything longer is still `appended`.
+    const tail = parsedBody.trailer === null ? null : parsedBody.footer;
+    if (tail !== null && tail !== footer) {
+      if (footerShaped(tail)) {
+        warnings.push({
+          code: 'FOOTER_REPLACED',
+          message: `The line after the trailer ('${tail}') is not the current render.footer; it is taken as an earlier footer and ${footer === null ? 'dropped (render.footer is null)' : 'replaced by the current one'}.`,
+        });
+      } else {
+        drift.push('appended');
+      }
+    }
     const unresolved = drift.filter((f) => f === 'appended' || patch[f] === undefined);
     if (unresolved.length > 0) {
       const visible = parsedBody.description;
@@ -294,4 +308,9 @@ function sameAsBefore(input: PrCreateInput, block: PrBlockRead, config: GhxConfi
     if (e instanceof GhxError) return false;
     throw e;
   }
+}
+
+/** One line that render.footer could have produced (02 §15: at most 500 chars, no HTML comment). */
+function footerShaped(text: string): boolean {
+  return text !== '' && !text.includes('\n') && [...text].length <= 500 && !text.includes('<!--');
 }
