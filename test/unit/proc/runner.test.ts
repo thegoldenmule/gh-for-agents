@@ -53,6 +53,22 @@ test('timeout kills the child', async () => {
   assert.equal(r.signal, 'SIGTERM');
 });
 
+test('timeout kills the whole process tree, not just the direct child', {
+  skip: process.platform === 'win32',
+}, async () => {
+  const started = performance.now();
+  const r = await run({
+    cmd: 'sh',
+    args: ['-c', 'sleep 6 & wait'],
+    env: { PATH: process.env.PATH },
+    signal: new AbortController().signal,
+    timeoutMs: 300,
+  });
+  const elapsed = performance.now() - started;
+  assert.equal(r.timedOut, true);
+  assert.ok(elapsed < 1_500, `returned after ${Math.round(elapsed)} ms`);
+});
+
 test('abort kills the child', async () => {
   const c = new AbortController();
   const p = run(req('setInterval(()=>{}, 1000)', { signal: c.signal }));
