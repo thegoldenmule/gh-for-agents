@@ -12,6 +12,7 @@ import {
   runCommandWith,
 } from '../core/runner.ts';
 import { suggest } from '../core/suggest.ts';
+import { ALLOWED_NAMES } from '../passthrough/policy.ts';
 import { deriveInterface, parseCommandArgv } from './args.ts';
 import { commandHelp, globalHelp } from './help.ts';
 import type { Registry } from './registry.ts';
@@ -163,9 +164,21 @@ async function refuseUnknown(
   out: ReturnType<typeof outputOptions>,
 ): Promise<number> {
   const r = await (deps.onUnknown ?? defaultOnUnknown)(words, { names: await deps.registry.names() });
-  const error =
-    r.kind === 'refuse'
-      ? r.error
-      : new GhxError('USAGE_UNKNOWN_COMMAND', `'ghx ${words.join(' ')}' is not a ghx command.`);
-  return emitError(deps.stdout, error, out, deps.clock);
+  // An allowlisted gh read (02 §10; bare `api` has no endpoint to check yet): say how it runs.
+  if (r.kind === 'run' || ALLOWED_NAMES.includes(words.join(' '))) {
+    const name = r.kind === 'run' ? r.spec.name.join(' ') : words.join(' ');
+    await emitDocument(
+      deps.stdout,
+      {
+        name,
+        passthrough: true,
+        summary: `Not a ghx command: ghx ${name} runs gh ${name} through passthrough, an allowlisted gh read.`,
+        usage: `ghx ${name} [gh flags and arguments]; see gh ${name} --help for them`,
+        output: '{passthrough:{argv, exitCode, json?, text?, stdoutPath?, stdoutBytes, stderr?}}',
+      },
+      out,
+    );
+    return ExitCode.OK;
+  }
+  return emitError(deps.stdout, r.error, out, deps.clock);
 }
