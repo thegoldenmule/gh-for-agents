@@ -6,6 +6,8 @@ import type { ApiRequest } from '../../gh/api.ts';
 import { type Gh, GhFailure } from '../../gh/index.ts';
 import type { RepoRef } from '../../gh/types.ts';
 import type { JsonCache } from '../cache.ts';
+import { listRunJobs } from '../github.ts';
+import { type BaselineStats, baselineStats, type JobSamples, needsPullRequestSamples, samplesFromJobs } from './eta.ts';
 import {
   type Baseline,
   type BaselineCandidate,
@@ -247,4 +249,88 @@ export async function fetchBaseline(o: {
   }
   o.cache?.set(key, found, BASELINE_TTL_MS);
   return found;
+}
+
+// ── ETA samples (02 §11.6) ────────────────────────────────────────────────
+export const ETA_TTL_MS = 24 * 60 * 60_000;
+/** Runs whose jobs are sampled, per event. */
+export const ETA_SAMPLE_RUNS = 3;
+
+const SampleRun = z.object({
+  id: z.number().int(),
+  pull_requests: z.array(z.object({ base: z.object({ ref: z.string() }) })).nullish(),
+});
+const SampleRunsPage = z.object({ workflow_runs: z.array(SampleRun) });
+const Sample = z.object({ durationSec: z.number(), queueSec: z.number().nullable() });
+const CachedSamples = z.object({
+  push: z.record(z.string(), z.array(Sample)),
+  pullRequest: z.record(z.string(), z.array(Sample)).nullable(),
+});
+
+async function sampleRuns(
+  o: { gh: Gh; repo: RepoRef; workflowId: number },
+  fields: Record<string, string | number>,
+): Promise<z.output<typeof SampleRun>[]> {
+  return (
+    await get(
+      o.gh,
+      { path: `repos/{owner}/{repo}/actions/workflows/${o.workflowId}/runs`, repo: o.repo, fields },
+      SampleRunsPage,
+    )
+  ).workflow_runs;
+}
+
+async function samplesOf(o: { gh: Gh; repo: RepoRef }, runIds: readonly number[]): Promise<JobSamples> {
+  const out: JobSamples = {};
+  for (const runId of runIds) {
+    for (const [name, xs] of Object.entries(samplesFromJobs(await listRunJobs({ gh: o.gh, repo: o.repo, runId })))) {
+      out[name] = [...(out[name] ?? []), ...xs];
+    }
+  }
+  return out;
+}
+
+/**
+ * Baseline stats for one workflow's jobs: ≤10 successful push runs on the base (jobs of the newest 3),
+ * and, only when a job name is missing there, ≤10 successful pull_request runs into the base. The raw
+ * samples are cached for 24 h per repo, workflow and base.
+ */
+export async function fetchEtaStats(o: {
+  gh: Gh;
+  repo: RepoRef;
+  base: string;
+  workflowId: number;
+  /** The PR's job names in this workflow. */
+  jobNames: readonly string[];
+  cache?: JsonCache;
+}): Promise<BaselineStats> {
+  const key = `eta:${o.workflowId}:${o.base}`;
+  let s = o.cache?.get(key, CachedSamples);
+  let dirty = false;
+  if (!s) {
+    const runs = await sampleRuns(o, { branch: o.base, event: 'push', status: 'success', per_page: 10 });
+    s = {
+      push: await samplesOf(
+        o,
+        runs.slice(0, ETA_SAMPLE_RUNS).map((r) => r.id),
+      ),
+      pullRequest: null,
+    };
+    dirty = true;
+  }
+  if (s.pullRequest === null && needsPullRequestSamples(o.jobNames, s.push)) {
+    const runs = (await sampleRuns(o, { event: 'pull_request', status: 'success', per_page: 10 })).filter((r) =>
+      (r.pull_requests ?? []).some((p) => p.base.ref === o.base),
+    );
+    s = {
+      ...s,
+      pullRequest: await samplesOf(
+        o,
+        runs.slice(0, ETA_SAMPLE_RUNS).map((r) => r.id),
+      ),
+    };
+    dirty = true;
+  }
+  if (dirty) o.cache?.set(key, s, ETA_TTL_MS);
+  return baselineStats(o.jobNames, s.push, s.pullRequest ?? {});
 }
