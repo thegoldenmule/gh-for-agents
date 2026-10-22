@@ -11,6 +11,41 @@ The steering kit is opt-in. It has two parts that work separately or together:
 
 Nothing here changes your settings for you. Copy the block you want into your own Claude Code settings file.
 
+## Settings
+
+Paste this into a Claude Code settings file. Use `.claude/settings.json` to share it with a repo's contributors, `.claude/settings.local.json` for yourself in one repo, or `~/.claude/settings.json` for every repo. Merge it with what is already there.
+
+```json
+{
+  "permissions": {
+    "deny": [
+      "Bash(gh pr merge:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr edit:*)",
+      "Bash(gh pr review:*)",
+      "Bash(gh pr comment:*)",
+      "Bash(gh pr close:*)",
+      "Bash(gh pr ready:*)",
+      "Bash(gh run rerun:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Monitor",
+        "hooks": [{ "type": "command", "command": "ghx hook claude-pretooluse", "timeout": 5 }]
+      }
+    ]
+  }
+}
+```
+
+- **The deny rules** are the gh writes that ghx wraps, so each one has a validated replacement: `ghx pr merge`, `ghx pr create`, `ghx pr edit` (which also covers `ready`), `ghx pr review`, `ghx pr comment` (which also covers `close`, with `--close`) and `ghx ci rerun`. They are prefix rules, so they match the command as typed.
+  - `gh pr reopen` is also wrapped (by `ghx ci retrigger`), but it is left out because reopening a PR is sometimes legitimate. Add `"Bash(gh pr reopen:*)"` if you want ghx to own it too.
+- **The hook** is optional, and either part works alone. Without the deny rules, the hook still asks before a raw gh write. With them, the deny rule wins.
+- **To deny instead of ask**, set the mode in the same file: `"env": { "GHX_HOOK_MODE": "deny" }`. Use `"off"` to keep the hook registered but silent.
+- `ghx` has to be on the `PATH` that Claude Code runs hooks with. Otherwise use the absolute path to `bin/ghx.js`.
+
 ## The hook
 
 `ghx hook claude-pretooluse` reads the PreToolUse event JSON on stdin and answers on stdout.
