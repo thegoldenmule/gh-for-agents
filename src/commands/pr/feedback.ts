@@ -106,6 +106,7 @@ export default defineCommand({
       source: input.source,
       since,
       includeOutdated: input.includeOutdated,
+      blockOnSeverity: config.merge.blockOnSeverity,
     });
     const all = [...warnings, ...snapshot.warnings, ...snapshot.feedback.warnings];
     const full = { ref: snapshot.ref, headSha: snapshot.head.sha, ...view, warnings: all };

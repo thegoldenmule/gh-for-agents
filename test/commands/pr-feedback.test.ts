@@ -64,6 +64,37 @@ test('--open drops outdated open findings unless --include-outdated; a later app
   assert.deepEqual(ids(filterFeedback(w, { open: true }).feedback.reviews), []);
 });
 
+test("--open agrees with merge policy: a dismissed latest review clears that reviewer's change request", () => {
+  const r0 = GOLDEN.feedback.reviews[0] as Feedback['reviews'][number];
+  const base = { ...r0, structured: false, verdict: null, verdictDowngraded: false };
+  const reviews = [
+    { ...base, id: 'rv:1', githubState: 'CHANGES_REQUESTED' as const, submittedAt: '2026-10-21T10:00:00Z' },
+    { ...base, id: 'rv:2', githubState: 'DISMISSED' as const, submittedAt: '2026-10-21T12:00:00Z' },
+  ];
+  const v = { ...GOLDEN, feedback: { ...GOLDEN.feedback, reviews } };
+  assert.deepEqual(ids(filterFeedback(v, { open: true }).feedback.reviews), []);
+});
+
+test('--open agrees with merge policy: an addressed finding with an unverified commit counts as open', () => {
+  const unverified = GOLDEN.feedback.findings.map((f) =>
+    f.id === 'f_h4x8pz' && f.statusEvent
+      ? { ...f, outdated: false, statusEvent: { ...f.statusEvent, verified: null } }
+      : f,
+  );
+  const v = { ...GOLDEN, feedback: { ...GOLDEN.feedback, findings: unverified } };
+  const open = filterFeedback(v, { open: true, blockOnSeverity: 'high' }).feedback;
+  assert.deepEqual(ids(open.findings), ['f_h4x8pz', 'f_n2c6rv']);
+  assert.equal(open.counts.findingsOpen, 2);
+  // Below merge.blockOnSeverity the policy does not count it, so neither does --open.
+  const lowOnly = unverified.map((f) => (f.id === 'f_h4x8pz' ? { ...f, severity: 'low' as const } : f));
+  const w = { ...GOLDEN, feedback: { ...GOLDEN.feedback, findings: lowOnly } };
+  assert.deepEqual(ids(filterFeedback(w, { open: true, blockOnSeverity: 'high' }).feedback.findings), ['f_n2c6rv']);
+  // Verified stays settled.
+  assert.deepEqual(ids(filterFeedback(GOLDEN, { open: true, blockOnSeverity: 'high' }).feedback.findings), [
+    'f_n2c6rv',
+  ]);
+});
+
 test('--source human keeps unstructured human items; --source bot only bots; --source ghx no humans', async () => {
   const human = await run(['pr', 'feedback', REF, '--source', 'human'], install());
   assert.deepEqual(ids(human.json.feedback.comments), ['ic:2412345678']);
