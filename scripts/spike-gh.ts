@@ -157,8 +157,7 @@ const probes: Record<string, Probe> = {
   },
   // §3.4: GraphQL partial errors come back as 200 with exit 1, data + errors[type=NOT_FOUND].
   graphql() {
-    const q =
-      '{repository(owner:"cli",name:"cli"){pullRequest(number:99999999){number}} rateLimit{remaining cost}}';
+    const q = '{repository(owner:"cli",name:"cli"){pullRequest(number:99999999){number}} rateLimit{remaining cost}}';
     const r = gh(['api', '-i', 'graphql', '-f', `query=${q}`]);
     const p = parseInclude(r.stdout);
     let errorTypes: string[] = [];
@@ -189,10 +188,19 @@ const probes: Record<string, Probe> = {
       runId = null;
     }
     if (runId === null) {
-      return { result: { note: 'no queued run found on vercel/next.js right now', exitCode: runs.exitCode }, assumptions: {} };
+      return {
+        result: { note: 'no queued run found on vercel/next.js right now', exitCode: runs.exitCode },
+        assumptions: {},
+      };
     }
     const jobs = gh(['api', `repos/vercel/next.js/actions/runs/${runId}/jobs?per_page=100`]);
-    type Job = { status: string; created_at: string; started_at: string | null; runner_id: number | null; runner_name: string | null };
+    type Job = {
+      status: string;
+      created_at: string;
+      started_at: string | null;
+      runner_id: number | null;
+      runner_name: string | null;
+    };
     let queued: Job[] = [];
     try {
       queued = ((JSON.parse(jobs.stdout) as { jobs?: Job[] }).jobs ?? []).filter((j) => j.status === 'queued');
@@ -222,12 +230,19 @@ function main(): void {
   const wanted = process.argv.slice(2);
   const unknown = wanted.filter((w) => !(w in probes));
   if (unknown.length > 0) {
-    process.stdout.write(`${JSON.stringify({ error: `unknown probe(s): ${unknown.join(', ')}`, probes: Object.keys(probes) })}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ error: `unknown probe(s): ${unknown.join(', ')}`, probes: Object.keys(probes) })}\n`,
+    );
     process.exitCode = 2;
     return;
   }
   const version = gh(['--version']).stdout.split('\n')[0] ?? null;
-  const out: { ghVersion: string | null; ranAt: string; probes: Record<string, unknown>; assumptions: Record<string, boolean> } = {
+  const out: {
+    ghVersion: string | null;
+    ranAt: string;
+    probes: Record<string, unknown>;
+    assumptions: Record<string, boolean>;
+  } = {
     ghVersion: version,
     ranAt: new Date().toISOString(),
     probes: {},

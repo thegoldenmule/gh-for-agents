@@ -71,7 +71,8 @@ function childEnv(dir: string): NodeJS.ProcessEnv {
 
 function textOf(content: unknown): string {
   if (typeof content === 'string') return content;
-  if (Array.isArray(content)) return content.map((c) => (typeof c?.text === 'string' ? c.text : JSON.stringify(c))).join('\n');
+  if (Array.isArray(content))
+    return content.map((c) => (typeof c?.text === 'string' ? c.text : JSON.stringify(c))).join('\n');
   return JSON.stringify(content ?? '');
 }
 
@@ -91,7 +92,9 @@ function main(): void {
       {
         permissions: { deny: ['Bash(touch:*)'] },
         hooks: {
-          PreToolUse: [{ matcher: 'Bash|Monitor', hooks: [{ type: 'command', command: `node ${JSON.stringify(hookPath)}` }] }],
+          PreToolUse: [
+            { matcher: 'Bash|Monitor', hooks: [{ type: 'command', command: `node ${JSON.stringify(hookPath)}` }] },
+          ],
         },
       },
       null,
@@ -134,7 +137,8 @@ function main(): void {
   for (const ev of events) {
     const msg = ev.message as { content?: unknown[] } | undefined;
     for (const c of (msg?.content ?? []) as Record<string, unknown>[]) {
-      if (c.type === 'tool_use') uses.set(String(c.id), { name: String(c.name), input: (c.input ?? {}) as Record<string, unknown> });
+      if (c.type === 'tool_use')
+        uses.set(String(c.id), { name: String(c.name), input: (c.input ?? {}) as Record<string, unknown> });
       if (c.type === 'tool_result') results.set(String(c.tool_use_id), textOf(c.content));
     }
   }
@@ -142,7 +146,8 @@ function main(): void {
     for (const [id, u] of uses) if (String(u.input.command ?? '').includes(needle)) return results.get(id);
     return undefined;
   };
-  const sawNotification = (run.stdout ?? '').includes('task_notification') || (run.stdout ?? '').includes('task-notification');
+  const sawNotification =
+    (run.stdout ?? '').includes('task_notification') || (run.stdout ?? '').includes('task-notification');
 
   const hookLog = existsSync(join(dir, 'hook-log.ndjson'))
     ? readFileSync(join(dir, 'hook-log.ndjson'), 'utf8')
@@ -191,7 +196,10 @@ function main(): void {
         meta: { source: 'live:spike-hook', recordedAt: report.ranAt, claudeVersion: version },
         event: { tool_name: ev.tool_name, tool_input: ev.tool_input, hook_event_name: ev.hook_event_name },
       };
-      writeFileSync(join(out, `spike-${String(i + 1).padStart(2, '0')}-${tool}.json`), `${JSON.stringify(payload, null, 2)}\n`);
+      writeFileSync(
+        join(out, `spike-${String(i + 1).padStart(2, '0')}-${tool}.json`),
+        `${JSON.stringify(payload, null, 2)}\n`,
+      );
     });
   }
 

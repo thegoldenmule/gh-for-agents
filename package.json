@@ -1,0 +1,37 @@
+{
+  "name": "ghx",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GitHub for agents: validated writes, one-call reads. Wraps gh.",
+  "type": "module",
+  "bin": {
+    "ghx": "bin/ghx.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@12.5.1",
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "node --test --test-reporter=spec \"test/{unit,commands,contract,regression}/**/*.test.ts\" \"test/*.test.ts\"",
+    "test:unit": "node --test --test-reporter=spec \"test/unit/**/*.test.ts\"",
+    "test:contract": "node --test --test-reporter=spec \"test/contract/**/*.contract.test.ts\"",
+    "test:regression": "node --test --test-reporter=spec \"test/regression/**/*.test.ts\"",
+    "test:live": "node -e \"console.log('The live suite is deferred to post-v1 (03 Q2).')\"",
+    "test:coverage": "node --test --test-reporter=dot --experimental-test-coverage --test-coverage-lines=90 \"--test-coverage-include=src/{ci,policy,meta,feedback,pr/create,render}/**\" \"test/{unit,commands,regression}/**/*.test.ts\" \"test/*.test.ts\"",
+    "fixtures:record": "node scripts/fixtures/record.ts",
+    "fixtures:redact": "node scripts/fixtures/redact.ts",
+    "fixtures:verify": "node scripts/fixtures/verify.ts",
+    "check": "pnpm typecheck && pnpm lint && pnpm test"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.2",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2"
+  }
+}
