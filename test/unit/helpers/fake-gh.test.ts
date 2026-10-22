@@ -42,6 +42,12 @@ test('canonical argv: -R normalised, -H and -f/-F pairs sorted after the rest', 
   ]);
 });
 
+test('canonical argv: --hostname github.com is dropped, other hosts are kept', () => {
+  assert.deepEqual(canonicalArgv(['api', '--hostname', 'github.com', 'x']), ['api', 'x']);
+  assert.deepEqual(canonicalArgv(['api', '--hostname=github.com', 'x']), ['api', 'x']);
+  assert.deepEqual(canonicalArgv(['api', '--hostname', 'ghe.example', 'x']), ['api', '--hostname', 'ghe.example', 'x']);
+});
+
 test('scenario replay through createGh: successive replies, last repeats; field order is irrelevant', async () => {
   const fake = FakeGh.fromScenario('fake-gh-selftest');
   const gh = createGh({

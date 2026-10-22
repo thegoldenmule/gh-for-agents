@@ -3,7 +3,7 @@
 import { closeSync, createReadStream, createWriteStream, openSync, readSync, renameSync, statSync } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { GhxError } from '../core/errors.ts';
-import { DEFAULT_HOST, type RepoRef } from './types.ts';
+import type { RepoRef } from './types.ts';
 
 export type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
@@ -116,7 +116,9 @@ function withQuery(path: string, q: Record<string, string | number | boolean>): 
 export function buildApiArgs(req: ApiRequest, endpoint?: string): { args: string[]; stdin?: string } {
   const method = req.method ?? 'GET';
   const args = ['api', '--include', '-X', method];
-  if (req.repo && req.repo.host !== DEFAULT_HOST) args.push('--hostname', req.repo.host);
+  // Always explicit: an inherited GH_HOST must never redirect a github.com target (gh honours GH_HOST
+  // over its default host). Repo-less calls (rate_limit) keep gh's own host resolution, i.e. GH_HOST.
+  if (req.repo) args.push('--hostname', req.repo.host);
   for (const [k, v] of Object.entries(req.headers ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
     args.push('-H', `${k}: ${v}`);
   }

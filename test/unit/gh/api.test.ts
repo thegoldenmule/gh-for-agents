@@ -80,7 +80,15 @@ test('buildApiArgs: GET fields become a query string, so the call stays a read',
     repo,
     fields: { branch: 'main', per_page: 10 },
   });
-  assert.deepEqual(args, ['api', '--include', '-X', 'GET', 'repos/o/r/actions/runs?branch=main&per_page=10']);
+  assert.deepEqual(args, [
+    'api',
+    '--include',
+    '-X',
+    'GET',
+    '--hostname',
+    'github.com',
+    'repos/o/r/actions/runs?branch=main&per_page=10',
+  ]);
   assert.equal(stdin, undefined);
   assert.equal(isMutating(args), false);
 });

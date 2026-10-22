@@ -43,6 +43,7 @@ export interface LoadedFixture extends GhFixture {
 const REPO_FLAGS = new Set(['-R', '--repo']);
 const HEADER_FLAGS = new Set(['-H', '--header']);
 const FIELD_FLAGS = new Set(['-f', '-F', '--field', '--raw-field']);
+const DEFAULT_HOST = 'github.com';
 
 function normaliseRepo(v: string): string {
   const parts = v.replace(/\.git$/, '').split('/');
@@ -51,7 +52,9 @@ function normaliseRepo(v: string): string {
 
 /**
  * Canonical argv: -R/--repo values become host/owner/name; -H and -f/-F pairs are sorted and moved
- * after the other tokens (their relative order never matters to gh). Everything else keeps its order.
+ * after the other tokens (their relative order never matters to gh). `--hostname github.com` is
+ * dropped: ghx always passes the target's host explicitly, and fixtures recorded or written without
+ * it mean the same call. Everything else keeps its order.
  */
 export function canonicalArgv(argv: readonly string[]): string[] {
   const rest: string[] = [];
@@ -62,7 +65,9 @@ export function canonicalArgv(argv: readonly string[]): string[] {
     const eq = a.startsWith('--') ? a.indexOf('=') : -1;
     const flag = eq > 0 ? a.slice(0, eq) : a;
     const inline = eq > 0 ? a.slice(eq + 1) : undefined;
-    if (REPO_FLAGS.has(flag)) {
+    if (flag === '--hostname' && (inline ?? argv[i + 1]) === DEFAULT_HOST) {
+      if (inline === undefined) i++;
+    } else if (REPO_FLAGS.has(flag)) {
       rest.push('-R', normaliseRepo(inline ?? argv[++i] ?? ''));
     } else if (HEADER_FLAGS.has(flag)) {
       headers.push(inline ?? argv[++i] ?? '');

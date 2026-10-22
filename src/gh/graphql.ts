@@ -2,7 +2,7 @@
 // is trusted: a 200 with partial errors exits 1 but still carries `data`.
 import { GhxError } from '../core/errors.ts';
 import { isGraphqlMutation } from './guard.ts';
-import { DEFAULT_HOST, type RepoRef } from './types.ts';
+import type { RepoRef } from './types.ts';
 
 export interface GraphqlError {
   type?: string;
@@ -31,7 +31,8 @@ export function buildGraphqlArgs(
 ): { args: string[]; stdin?: string; mutation: boolean } {
   const mutation = isGraphqlMutation(query);
   const args = ['api', 'graphql', '--include'];
-  if (o.repo && o.repo.host !== DEFAULT_HOST) args.push('--hostname', o.repo.host);
+  // Always explicit, so an inherited GH_HOST cannot redirect a github.com target (see api.ts).
+  if (o.repo) args.push('--hostname', o.repo.host);
   const scalarOnly = Object.values(vars).every((v) => v === null || v === undefined || typeof v !== 'object');
   if (mutation || !scalarOnly) {
     if (!mutation) throw new GhxError('INTERNAL', 'read GraphQL queries take scalar variables only.');

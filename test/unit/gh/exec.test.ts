@@ -146,3 +146,20 @@ test('an aborted command signal surfaces as its reason', async () => {
   c.abort(new GhxError('INTERRUPTED', 'x', { details: { signal: 'SIGTERM' } }));
   await assert.rejects(p, (e) => isGhxError(e, 'INTERRUPTED'));
 });
+
+test('GH_HOST in the env never redirects a github.com target: --hostname is always explicit', async () => {
+  const { fake, gh } = setup('read', { env: { PATH: '/bin', GH_HOST: 'ghe.corp.example' } });
+  const restOk = 'HTTP/2.0 200 OK\nContent-Type: application/json\n\n{"number":1}';
+  const gqlOk = 'HTTP/2.0 200 OK\nContent-Type: application/json\n\n{"data":{"viewer":{"login":"x"}}}';
+  fake.on({ cmd: 'gh', args: ['api'] }, { stdout: restOk });
+  fake.on({ cmd: 'gh', args: ['api', 'graphql'] }, { stdout: gqlOk });
+  await gh.api({ path: 'repos/{owner}/{repo}/pulls/1', repo }, z.object({ number: z.number() }));
+  await gh.graphql('{ viewer { login } }', {}, z.object({ viewer: z.object({ login: z.string() }) }), { repo });
+  assert.equal(fake.calls.length, 2);
+  for (const call of fake.calls) {
+    const i = call.args.indexOf('--hostname');
+    assert.ok(i > 0, `--hostname missing from gh ${call.args.join(' ')}`);
+    assert.equal(call.args[i + 1], 'github.com');
+    assert.equal(call.env.GH_HOST, 'ghe.corp.example');
+  }
+});

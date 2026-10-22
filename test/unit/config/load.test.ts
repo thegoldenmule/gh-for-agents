@@ -58,7 +58,15 @@ test('target differs from the cwd: the remote default-branch file is fetched (se
     path: '.github/ghx.json',
   });
   assert.deepEqual(Object.keys(r.config.components), ['remote']);
-  assert.deepEqual(fake.calls[0]?.args, ['api', '--include', '-X', 'GET', 'repos/o/other/contents/.github/ghx.json']);
+  assert.deepEqual(fake.calls[0]?.args, [
+    'api',
+    '--include',
+    '-X',
+    'GET',
+    '--hostname',
+    'github.com',
+    'repos/o/other/contents/.github/ghx.json',
+  ]);
 });
 
 test('absent + required → CONFIG_MISSING with the ghx init hint; absent + optional → defaults', async () => {
