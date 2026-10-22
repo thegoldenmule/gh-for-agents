@@ -13,7 +13,7 @@ import type { CiSummary } from '../schemas/ci.ts';
 import type { Warning } from '../schemas/common.ts';
 import { riskRank, type Severity, severityRank, type Violation } from '../schemas/pr.ts';
 import { CI_GATE_CODES, CONFIG_MISSING_CHECK, checkSpec, MERGE_CHECKS, type MergeCheckCode } from './checks.ts';
-import type { Overrides } from './overrides.ts';
+import { type Overrides, parseOverrides } from './overrides.ts';
 import type { MergePlan, MergeState, PlanCheck, PlanCheckStatus } from './schemas.ts';
 import { isShared, type SharedRedMode, sharedRedWaived } from './shared-red.ts';
 
@@ -437,7 +437,11 @@ export function evaluateMerge(i: MergePolicyInput): MergeEvaluation {
   const s = i.snapshot;
   const open = s.state === 'OPEN';
   const notOpen = skip(`PR is ${s.state}`);
-  const overrides = new Set<string>(i.request?.overrides?.codes ?? []);
+  // The engine re-validates: an override built by hand (not by parseOverrides) must not slip through with
+  // an empty reason or a non-overridable code. VALIDATION, as at the flags.
+  const given = i.request?.overrides;
+  const valid = given ? parseOverrides(given.codes, given.reason) : null;
+  const overrides = new Set<string>(valid?.codes ?? []);
   const findings = findingsOpen(i);
 
   const results = new Map<MergeCheckCode, Result>([
@@ -493,7 +497,7 @@ export function evaluateMerge(i: MergePolicyInput): MergeEvaluation {
     const r = results.get(spec.code) as Result;
     if (r.status === 'fail' && spec.overridable && overrides.has(spec.code)) {
       checks.push({ code: spec.code, status: 'overridden', message: r.message });
-      used.push({ code: spec.code, reason: i.request?.overrides?.reason ?? '' });
+      used.push({ code: spec.code, reason: valid?.reason ?? '' });
       continue;
     }
     checks.push({ code: spec.code, status: r.status, message: r.message });

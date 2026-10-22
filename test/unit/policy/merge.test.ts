@@ -536,3 +536,20 @@ test('CONFIG_MISSING (pr status without config) is a non-overridable blocker', (
   );
   assert.equal(e.exitClass, 'policy');
 });
+
+test('the engine re-validates overrides: an empty reason or a non-overridable code is VALIDATION', () => {
+  const failingCi = { ci: red(failing('test', 'different')) };
+  for (const overrides of [
+    { codes: ['CI_RED' as const], reason: '' },
+    { codes: ['CI_RED' as const], reason: '  ' },
+    { codes: ['PR_DRAFT' as never], reason: 'user asked' },
+  ]) {
+    assert.throws(
+      () => evaluate({ ...failingCi, request: { overrides } }),
+      (e) => e instanceof Error && 'code' in e && e.code === 'VALIDATION',
+      JSON.stringify(overrides),
+    );
+  }
+  const ok = evaluate({ ...failingCi, request: { overrides: { codes: ['CI_RED'], reason: ' user asked ' } } });
+  assert.deepEqual(ok.plan.overrides, [{ code: 'CI_RED', reason: 'user asked' }]);
+});
