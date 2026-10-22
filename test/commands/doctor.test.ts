@@ -103,6 +103,23 @@ test('outside a checkout: config skipped, still ok', async () => {
   assert.equal(r.json.git.toplevel, null);
 });
 
+test('two GitHub remotes and no gh default: the repo check fails with a --repo hint, exit 2 (not 1)', async () => {
+  const dir = join(tmp, 'ambiguous');
+  mkdirSync(join(dir, '.github'), { recursive: true });
+  writeFileSync(join(dir, '.github', 'ghx.json'), VALID);
+  const git = fakeGit({
+    toplevel: dir,
+    remotes: [
+      { name: 'origin', url: 'git@github.com:me/fork.git' },
+      { name: 'upstream', url: 'git@github.com:org/repo.git' },
+    ],
+  });
+  const r = await doctor('doctor-ok', git);
+  assert.equal(r.exitCode, EXIT.USAGE, r.stdout);
+  assert.equal(check(r, 'repo').ok, false);
+  assert.match(check(r, 'repo').hint, /--repo/);
+});
+
 test('GHX_TEST_* in the environment is warned about', async () => {
   const r = await doctor('doctor-ok', undefined, { GHX_TEST_HOOKS: '1' });
   assert.deepEqual(

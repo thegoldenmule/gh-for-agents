@@ -8,7 +8,7 @@ import { defineCommand } from '../core/command.ts';
 import { GhxError, isGhxError } from '../core/errors.ts';
 import { ExitCode } from '../core/exit.ts';
 import { GhFailure } from '../gh/index.ts';
-import type { ResolvedRepo } from '../gh/repo.ts';
+import { type ResolvedRepo, resolveCwdRepo } from '../gh/repo.ts';
 import { DEFAULT_HOST, repoSlug } from '../gh/types.ts';
 import { MIN_GH_VERSION, versionAtLeast } from '../gh/version.ts';
 
@@ -88,6 +88,8 @@ export default defineCommand({
   exitCode: (o) => {
     if (!o.gh.ok || !o.auth.ok || !o.git.ok) return ExitCode.ENV;
     if (o.config.status === 'invalid' || o.config.status === 'missing') return ExitCode.CONFIG;
+    // An unresolvable repo (e.g. two remotes and no gh default) is fixed by passing --repo.
+    if (o.checks.some((c) => c.name === 'repo' && !c.ok)) return ExitCode.USAGE;
     return o.ok ? ExitCode.OK : ExitCode.INTERNAL;
   },
   async run(_input, ctx) {
@@ -140,6 +142,19 @@ export default defineCommand({
       add('repo', false, (e as Error).message, isGhxError(e) ? (e.hint ?? null) : null);
       return undefined;
     });
+    if (!resolved) {
+      // needs.repo is optional, so tryRepo() returns nothing on an ambiguous cwd; doctor must say so.
+      const cwd = await resolveCwdRepo(ctx.git, ctx.env);
+      if (cwd.ambiguous) {
+        const list = cwd.ambiguous.map((a) => `${a.remote} → ${repoSlug(a.repo)}`).join(', ');
+        add(
+          'repo',
+          false,
+          `several GitHub remotes and none is the gh default: ${list}`,
+          'Pass --repo owner/name, or run: gh repo set-default',
+        );
+      }
+    }
     const host = resolved?.repo.host ?? ctx.env.GH_HOST ?? DEFAULT_HOST;
     const auth: Output['auth'] = { host, login: null, ok: false, scopes: [] };
     let jsonProbe = false;
