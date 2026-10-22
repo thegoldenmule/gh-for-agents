@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "pr",
+    "list",
+    "--json",
+    "number,title",
+    "-R",
+    "github.com/octo/demo"
+  ],
+  "exitCode": 0,
+  "stdout": "[{\"number\":7,\"title\":\"feat(app): add the thing\"},{\"number\":6,\"title\":\"fix(app): handle empty input\"}]\n",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "gh pr list --json shape (gh 2.86.0), written by hand for the passthrough envelope"
+  }
+}

@@ -1,0 +1,554 @@
+// Passthrough policy (02 §10, 03 M7.1): allowlisted gh reads run in a bounded JSON envelope, wrapped
+// commands are refused with the replacement argv, other writes are refused, the rest is unknown.
+// Pure: decide() looks at argv only. The read guard (src/gh/guard.ts) stays the backstop: 'run' is
+// returned only when isReadAllowed() accepts the exact argv that will execute. The guard is wider on
+// purpose (pr view, pr checks, run view --log, auth status, graphql queries are reads ghx makes).
+//
+// The wrapped table is static, not derived from the specs' `replaces`: `ci wait` lists `gh run list`,
+// which 02 §10 allowlists, and several wrapped targets land in parallel waves.
+
+import type { GlobalOptions } from '../cli/args.ts';
+import { GhxError } from '../core/errors.ts';
+import { apiShape, isReadAllowed } from '../gh/guard.ts';
+
+/** 02 §10's allowlisted reads (besides `api`, which is checked by shape). */
+export const ALLOWED_READS: Readonly<Record<string, readonly string[]>> = {
+  pr: ['diff', 'list'],
+  issue: ['view', 'list'],
+  search: ['issues', 'prs', 'code', 'repos', 'commits'],
+  release: ['list', 'view'],
+  repo: ['view'],
+  workflow: ['list', 'view'],
+  run: ['list', 'view', 'download'],
+  label: ['list'],
+};
+
+/** Every allowlisted read as "group verb", plus "api", for suggestions and docs. */
+export const ALLOWED_NAMES: readonly string[] = [
+  ...Object.entries(ALLOWED_READS).flatMap(([g, subs]) => subs.map((s) => `${g} ${s}`)),
+  'api',
+];
+
+/** gh's built-in verb aliases (gh 2.86 `ALIASES` sections), canonicalised before any decision. */
+const VERB_ALIASES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  pr: { ls: 'list', new: 'create' },
+  issue: { ls: 'list', new: 'create' },
+  run: { ls: 'list' },
+  workflow: { ls: 'list' },
+  release: { ls: 'list', new: 'create' },
+  repo: { ls: 'list', new: 'create' },
+  label: { ls: 'list' },
+  gist: { ls: 'list', new: 'create' },
+  cache: { ls: 'list' },
+  secret: { ls: 'list' },
+  variable: { ls: 'list' },
+  codespace: { ls: 'list' },
+};
+
+/** Top-level aliases: `gh co` is `gh pr checkout`, `gh cs` is `gh codespace`. */
+const TOP_ALIASES: Readonly<Record<string, readonly string[]>> = { co: ['pr', 'checkout'], cs: ['codespace'] };
+
+/**
+ * gh subcommands that change GitHub, local git or gh's own state (gh 2.86 command tree). Wrapped
+ * commands are matched first, so `pr create` etc. never reach this table. A verb that is neither
+ * allowlisted nor listed here (gist list, auth token, org list, …) is an unknown command.
+ */
+const WRITES: Readonly<Record<string, readonly string[]>> = {
+  pr: ['checkout', 'lock', 'unlock', 'revert', 'update-branch'],
+  issue: [
+    'create',
+    'close',
+    'comment',
+    'delete',
+    'develop',
+    'edit',
+    'lock',
+    'pin',
+    'reopen',
+    'transfer',
+    'unlock',
+    'unpin',
+  ],
+  run: ['cancel', 'delete'],
+  workflow: ['disable', 'enable', 'run'],
+  release: ['create', 'delete', 'delete-asset', 'edit', 'upload'],
+  repo: [
+    'create',
+    'archive',
+    'clone',
+    'delete',
+    'edit',
+    'fork',
+    'rename',
+    'set-default',
+    'sync',
+    'unarchive',
+    'autolink create',
+    'autolink delete',
+    'deploy-key add',
+    'deploy-key delete',
+  ],
+  label: ['clone', 'create', 'delete', 'edit'],
+  gist: ['clone', 'create', 'delete', 'edit', 'rename'],
+  secret: ['delete', 'set'],
+  variable: ['delete', 'set'],
+  cache: ['delete'],
+  auth: ['login', 'logout', 'refresh', 'setup-git', 'switch'],
+  config: ['clear-cache', 'set'],
+  extension: ['create', 'exec', 'install', 'remove', 'upgrade'],
+  alias: ['delete', 'import', 'set'],
+  codespace: ['code', 'cp', 'create', 'delete', 'edit', 'jupyter', 'ports', 'rebuild', 'ssh', 'stop'],
+  project: [
+    'close',
+    'copy',
+    'create',
+    'delete',
+    'edit',
+    'field-create',
+    'field-delete',
+    'item-add',
+    'item-archive',
+    'item-create',
+    'item-delete',
+    'item-edit',
+    'link',
+    'mark-template',
+    'unlink',
+  ],
+  'ssh-key': ['add', 'delete'],
+  'gpg-key': ['add', 'delete'],
+  'agent-task': ['create'],
+};
+
+/** gh's read verbs that are not allowlisted (gh 2.86), so "not allowlisted" differs from "no such command". */
+const OTHER_READS: Readonly<Record<string, readonly string[]>> = {
+  pr: ['status'],
+  issue: ['status'],
+  release: ['download', 'verify', 'verify-asset'],
+  repo: ['list', 'gitignore', 'license', 'autolink', 'deploy-key'],
+  gist: ['list', 'view'],
+  secret: ['list'],
+  variable: ['get', 'list'],
+  cache: ['list'],
+  auth: ['status', 'token'],
+  config: ['get', 'list'],
+  extension: ['browse', 'list', 'search'],
+  alias: ['list'],
+  codespace: ['list', 'logs', 'view'],
+  project: ['field-list', 'item-list', 'list', 'view'],
+  org: ['list'],
+  ruleset: ['check', 'list', 'view'],
+  'ssh-key': ['list'],
+  'gpg-key': ['list'],
+  attestation: ['download', 'trusted-root', 'verify'],
+  'agent-task': ['list', 'view'],
+};
+
+/** gh top-level commands without verbs. */
+const GH_LEAVES = new Set(['browse', 'completion', 'copilot', 'preview', 'status']);
+
+/**
+ * Flags across gh's commands that take a value, so their value is not mistaken for the selector when
+ * a refusal builds the replacement argv. A miss only makes the suggested selector wrong, never runs gh.
+ */
+const VALUE_FLAGS = new Set([
+  '--json',
+  '-q',
+  '--jq',
+  '-t',
+  '--template',
+  '--title',
+  '-b',
+  '--body',
+  '-F',
+  '--body-file',
+  '-B',
+  '--base',
+  '-H',
+  '--head',
+  '-l',
+  '--label',
+  '--assignee',
+  '--milestone',
+  '--reviewer',
+  '-p',
+  '--project',
+  '--subject',
+  '--match-head-commit',
+  '--author-email',
+  '-j',
+  '--job',
+  '--attempt',
+  '-i',
+  '--interval',
+  '--color',
+  '-L',
+  '--limit',
+  '-S',
+  '--search',
+  '--state',
+  '-A',
+  '--author',
+  '-n',
+  '--name',
+  '-D',
+  '--dir',
+  '--workflow',
+  '-u',
+  '--user',
+  '--commit',
+  '--event',
+  '--branch',
+  '--add-label',
+  '--remove-label',
+  '--add-reviewer',
+  '--remove-reviewer',
+  '--add-assignee',
+  '--remove-assignee',
+]);
+
+/** What the passthrough handler runs (validated again as the synthetic spec's input). */
+export interface PassthroughPlan {
+  /** The synthetic command name: ['pr', 'diff'], ['api']. */
+  name: string[];
+  /** gh argv without the leading 'gh' and without any -R (injected by the handler). */
+  args: string[];
+  /** How the resolved repo is passed: -R flag, positional (repo view), endpoint placeholders (api), or not at all (search). */
+  inject: 'flag' | 'positional' | 'placeholders' | 'none';
+  /** --max-bytes, so the inline cap fits the caller's bound. */
+  maxBytes?: number;
+}
+
+export type Decision =
+  | { kind: 'run'; plan: PassthroughPlan; globals: Partial<GlobalOptions> }
+  | { kind: 'refuse'; error: GhxError }
+  /** Not a gh command passthrough knows; `ghKnown` is true for a real gh command that is not allowlisted. */
+  | { kind: 'unknown'; words: string[]; ghKnown: boolean };
+
+interface Globals {
+  rest: string[];
+  globals: Partial<GlobalOptions>;
+  maxBytes?: number;
+}
+
+/** Take ghx's own output flags (--pretty, --max-bytes N, --timeout D) out of the gh argv. */
+function takeGhxGlobals(tokens: readonly string[]): Globals {
+  const rest: string[] = [];
+  const globals: Partial<GlobalOptions> = {};
+  let maxBytes: number | undefined;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i] as string;
+    if (t === '--pretty') {
+      globals.pretty = true;
+      continue;
+    }
+    const m = /^--(max-bytes|timeout)(?:=(.*))?$/.exec(t);
+    if (m) {
+      const value = m[2] ?? tokens[i + 1];
+      const ok = m[1] === 'max-bytes' ? /^\d+$/.test(value ?? '') : /^\d+(ms|s|m|h)?$/.test(value ?? '');
+      if (ok && value !== undefined) {
+        if (m[2] === undefined) i++;
+        if (m[1] === 'max-bytes') {
+          globals.maxBytes = value;
+          maxBytes = Number(value);
+        } else {
+          globals.timeout = value;
+        }
+        continue;
+      }
+    }
+    rest.push(t);
+  }
+  return { rest, globals, ...(maxBytes !== undefined ? { maxBytes } : {}) };
+}
+
+/** Take -R/--repo (every pflag spelling) out of a non-api argv; the last one wins, like pflag. */
+export function takeRepoFlag(args: readonly string[]): { rest: string[]; repo?: string } {
+  const rest: string[] = [];
+  let repo: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i] as string;
+    if (t === '--') {
+      rest.push(...args.slice(i));
+      break;
+    }
+    if (t === '-R' || t === '--repo') {
+      const v = args[i + 1];
+      if (v !== undefined) {
+        repo = v;
+        i++;
+        continue;
+      }
+    } else if (t.startsWith('--repo=')) {
+      repo = t.slice('--repo='.length);
+      continue;
+    } else if (t.startsWith('-R') && t.length > 2) {
+      repo = t.slice(t[2] === '=' ? 3 : 2);
+      continue;
+    }
+    rest.push(t);
+  }
+  return repo !== undefined ? { rest, repo } : { rest };
+}
+
+/** The first positional of a verb's argv (after the verb), skipping flag values. */
+export function firstPositional(args: readonly string[]): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i] as string;
+    if (t === '--') return args[i + 1];
+    if (t.startsWith('-')) {
+      if (!t.includes('=') && VALUE_FLAGS.has(t)) i++;
+      continue;
+    }
+    return t;
+  }
+  return undefined;
+}
+
+const has = (args: readonly string[], ...flags: string[]): boolean =>
+  args.some((a) => flags.some((f) => a === f || a.startsWith(`${f}=`)));
+
+/** The replacement argv for a wrapped command, plus a one-line hint, or undefined if not wrapped. */
+interface Wrapped {
+  suggestion: string[];
+  hint: string;
+  alternatives?: string[][];
+}
+
+function wrapped(top: string, sub: string, args: readonly string[], repo: string | undefined): Wrapped | undefined {
+  const sel = firstPositional(args);
+  const pr = sel ?? '<pr>';
+  const R = repo !== undefined ? ['-R', repo] : [];
+  const prCmd = (...rest: string[]): string[] => ['ghx', ...rest.slice(0, 2), pr, ...rest.slice(2), ...R];
+  const key = `${top} ${sub}`;
+  switch (key) {
+    case 'pr view':
+      if (has(args, '--comments', '-c')) {
+        return {
+          suggestion: prCmd('pr', 'feedback'),
+          hint: 'reviews, inline and issue comments merged, with bots separated and ids to reply to',
+        };
+      }
+      return {
+        suggestion: prCmd('pr', 'status'),
+        hint: 'state, mergeable, CI for the head SHA and feedback in one object',
+      };
+    case 'pr checks':
+      return {
+        suggestion: prCmd('ci', 'wait'),
+        hint: 'run it with run_in_background: true; it returns once CI settles or first fails, with a diagnosis. For a one-off snapshot use ghx pr status',
+        alternatives: [prCmd('pr', 'status')],
+      };
+    case 'run view': {
+      if (!has(args, '--log', '--log-failed')) return undefined;
+      const suggestion =
+        sel !== undefined ? ['ghx', 'ci', 'why', '--run', sel, ...R] : ['ghx', 'ci', 'why', '<pr>', ...R];
+      return {
+        suggestion,
+        hint: 'the failing step, error lines and failed tests, read from the jobs-logs API (works while the run is in progress)',
+      };
+    }
+    case 'run watch':
+      return {
+        suggestion: ['ghx', 'ci', 'wait', '<pr>', ...R],
+        hint: 'ci wait takes the PR (or branch:<name>@<sha>); run it with run_in_background: true',
+      };
+    case 'run rerun':
+      return {
+        suggestion: ['ghx', 'ci', 'rerun', '<pr>', ...R],
+        hint: 'reruns the failed jobs of the head SHA; --flaky limits it to likely flakes',
+      };
+    case 'pr create':
+      return {
+        suggestion: ['ghx', 'pr', 'create', '--input', 'pr.json', ...R],
+        hint: 'write the structured PR JSON with your file tool first; ghx schema pr create lists the fields',
+      };
+    case 'pr edit':
+      return {
+        suggestion: prCmd('pr', 'edit', '--input', 'patch.json'),
+        hint: 'patch.json holds only the fields to change',
+      };
+    case 'pr ready':
+      return {
+        suggestion: prCmd('pr', 'edit', '--input', 'ready.json'),
+        hint: `ready.json is {"draft": ${has(args, '--undo') ? 'true' : 'false'}}`,
+      };
+    case 'pr merge':
+      return { suggestion: prCmd('pr', 'merge'), hint: 'policy-checked, pinned to the head SHA' };
+    case 'pr comment':
+      return {
+        suggestion: prCmd('pr', 'comment', '--input', 'comment.json'),
+        hint: 'a typed coordination comment; ghx schema pr comment lists the kinds',
+      };
+    case 'pr review':
+      return {
+        suggestion: prCmd('pr', 'review', '--input', 'review.json'),
+        hint: 'structured findings; ghx schema pr review lists the fields',
+      };
+    case 'pr close':
+      return {
+        suggestion: prCmd('pr', 'comment', '--close', '--input', 'comment.json'),
+        hint: 'records why in a typed comment, then closes',
+      };
+    case 'pr reopen':
+      return {
+        suggestion: prCmd('ci', 'retrigger'),
+        hint: 'if retriggering CI is the intent (it closes and reopens safely); otherwise reopen it in the GitHub UI',
+      };
+    default:
+      return undefined;
+  }
+}
+
+function wrappedError(top: string, sub: string, w: Wrapped): GhxError {
+  return new GhxError('USAGE_UNKNOWN_COMMAND', `'ghx ${top} ${sub}' is not a ghx command.`, {
+    hint: `Use: ${w.suggestion.join(' ')} (${w.hint}).`,
+    details: { suggestion: w.suggestion, ...(w.alternatives ? { alternatives: w.alternatives } : {}) },
+  });
+}
+
+function writeRefused(what: string, reason: string, hint: string): GhxError {
+  return new GhxError('PASSTHROUGH_WRITE_REFUSED', `'gh ${what}' is refused: ${reason}.`, {
+    hint,
+    details: { command: `gh ${what}` },
+  });
+}
+
+const WRITE_HINT =
+  'ghx passes through reads only; writes go through validated ghx commands (ghx --help). Ask the user to run it if it is needed.';
+
+/** `gh api`: GET only, no fields, no graphql, nothing ghx cannot parse. */
+function decideApi(args: string[], g: Globals): Decision {
+  if (args.some((a) => a === '-R' || a.startsWith('--repo') || /^-R./.test(a))) {
+    return {
+      kind: 'refuse',
+      error: new GhxError('USAGE_UNKNOWN_FLAG', "'gh api' has no flag '-R'.", {
+        hint: 'Put owner/repo in the endpoint (repos/owner/repo/…), or use {owner}/{repo}, which ghx fills from the resolved repo.',
+        details: { flag: '-R', suggestions: [] },
+      }),
+    };
+  }
+  const shape = apiShape(args);
+  const what = `api ${shape.endpoint ?? ''}`.trim();
+  if (shape.ambiguous) {
+    return {
+      kind: 'refuse',
+      error: writeRefused(
+        what,
+        'ghx cannot verify it is a GET (an unrecognised flag, a missing value or endpoint, an extra argument, or --)',
+        'Use: ghx api <endpoint> with only -H, -q/--jq, --paginate, --slurp, -i, --hostname or --cache.',
+      ),
+    };
+  }
+  if (shape.endpoint === 'graphql') {
+    return {
+      kind: 'refuse',
+      error: writeRefused(
+        what,
+        'gh api graphql is always a POST',
+        'Use ghx pr status / ghx pr feedback, or a REST GET such as ghx api repos/{owner}/{repo}/pulls/123.',
+      ),
+    };
+  }
+  if (shape.hasFields) {
+    return {
+      kind: 'refuse',
+      error: writeRefused(
+        what,
+        'gh switches -f/-F/--field/--raw-field/--input to POST',
+        'Put query parameters in the endpoint instead: ghx api "repos/{owner}/{repo}/pulls?state=open&per_page=50".',
+      ),
+    };
+  }
+  if (shape.method !== 'GET') {
+    return { kind: 'refuse', error: writeRefused(what, `method ${shape.method} is not GET`, WRITE_HINT) };
+  }
+  return guarded({ name: ['api'], args, inject: 'placeholders' }, g);
+}
+
+/** The final gate: the read guard must accept exactly what will run. */
+function guarded(plan: PassthroughPlan, g: Globals): Decision {
+  if (!isReadAllowed(plan.args)) {
+    return {
+      kind: 'refuse',
+      error: writeRefused(plan.args.slice(0, 2).join(' '), 'the read guard does not classify it as a read', WRITE_HINT),
+    };
+  }
+  return {
+    kind: 'run',
+    plan: { ...plan, ...(g.maxBytes !== undefined ? { maxBytes: g.maxBytes } : {}) },
+    globals: g.globals,
+  };
+}
+
+/** Decide what to do with an argv that names no ghx command. */
+export function decide(tokens: readonly string[]): Decision {
+  const g = takeGhxGlobals(tokens);
+  let argv = g.rest;
+  const first = argv[0];
+  if (first === undefined || first.startsWith('-')) return { kind: 'unknown', words: [], ghKnown: false };
+  const expanded = TOP_ALIASES[first];
+  if (expanded) argv = [...expanded, ...argv.slice(1)];
+  const top = argv[0] as string;
+  if (top === 'api') return decideApi(argv, g);
+
+  // search's -R is a filter, passed through as typed; everyone else's is ghx's repo.
+  const repoTaken = top === 'search' ? { rest: argv.slice(1) } : takeRepoFlag(argv.slice(1));
+  const [rawSub, ...args] = repoTaken.rest;
+  const repo = 'repo' in repoTaken ? repoTaken.repo : undefined;
+  if (rawSub === undefined || rawSub.startsWith('-'))
+    return { kind: 'unknown', words: [top], ghKnown: GH_LEAVES.has(top) };
+  const sub = VERB_ALIASES[top]?.[rawSub] ?? rawSub;
+
+  const w = wrapped(top, sub, args, repo);
+  if (w) return { kind: 'refuse', error: wrappedError(top, sub, w) };
+
+  if (ALLOWED_READS[top]?.includes(sub)) {
+    const globals: Partial<GlobalOptions> = { ...g.globals, ...(repo !== undefined ? { repo } : {}) };
+    const gg: Globals = { ...g, globals };
+    if (has(args, '--web') || (args.includes('-w') && `${top} ${sub}` !== 'run list')) {
+      return {
+        kind: 'refuse',
+        error: new GhxError('USAGE_UNKNOWN_FLAG', `'ghx ${top} ${sub}' has no flag '--web'.`, {
+          hint: 'ghx never opens a browser; drop --web to get the output as JSON.',
+          details: { flag: '--web', suggestions: [] },
+        }),
+      };
+    }
+    if (top === 'run' && sub === 'download' && !hasDir(args)) {
+      return {
+        kind: 'refuse',
+        error: new GhxError('VALIDATION', "'ghx run download' needs -D <dir>.", {
+          hint: 'Name the directory the artifacts go into: ghx run download <run-id> -D <dir>.',
+          details: { issues: [{ path: '-D', code: 'required', message: 'run download writes files; pass -D <dir>' }] },
+        }),
+      };
+    }
+    const inject =
+      top === 'search'
+        ? 'none'
+        : top === 'repo'
+          ? firstPositional(args) === undefined
+            ? 'positional'
+            : 'none'
+          : 'flag';
+    return guarded({ name: [top, sub], args: [top, sub, ...args], inject }, gg);
+  }
+
+  const third = args[0];
+  const writes = WRITES[top] ?? [];
+  if (writes.includes(sub) || (third !== undefined && writes.includes(`${sub} ${third}`))) {
+    return { kind: 'refuse', error: writeRefused(`${top} ${sub}`, 'it is a write ghx does not validate', WRITE_HINT) };
+  }
+  if (GH_LEAVES.has(top)) return { kind: 'unknown', words: [top], ghKnown: true };
+  return { kind: 'unknown', words: [top, sub], ghKnown: OTHER_READS[top]?.includes(sub) === true };
+}
+
+function hasDir(args: readonly string[]): boolean {
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i] as string;
+    if ((t === '-D' || t === '--dir') && args[i + 1] !== undefined && args[i + 1] !== '') return true;
+    if (/^--dir=./.test(t) || /^-D.+/.test(t)) return true;
+  }
+  return false;
+}

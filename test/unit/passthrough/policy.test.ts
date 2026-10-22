@@ -1,0 +1,469 @@
+// 02 §10 as a table (03 M7.1): every allowlisted read runs, every wrapped command is refused with its
+// replacement argv, every write and guard bypass form is refused, and nothing refused ever reaches gh.
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
+import { onUnknown } from '../../../src/cli/unknown.ts';
+import { isReadAllowed } from '../../../src/gh/guard.ts';
+import { ALLOWED_READS, type Decision, decide } from '../../../src/passthrough/policy.ts';
+import { finalArgs } from '../../../src/passthrough/run.ts';
+import { EXIT } from '../../contract/exit-table.ts';
+import { FakeGh } from '../../helpers/fake-gh.ts';
+import { defaultRegistry, runInProcess } from '../../helpers/harness.ts';
+
+const REPO = { host: 'github.com', owner: 'octo', name: 'demo' };
+
+function run(d: Decision) {
+  assert.equal(d.kind, 'run', JSON.stringify(d));
+  return d as Extract<Decision, { kind: 'run' }>;
+}
+
+function refused(d: Decision) {
+  assert.equal(d.kind, 'refuse', JSON.stringify(d));
+  return (d as Extract<Decision, { kind: 'refuse' }>).error;
+}
+
+type AllowRow = [argv: string[], args: string[], inject: string, repo?: string];
+
+const ALLOWED: AllowRow[] = [
+  [['pr', 'diff', '3169'], ['pr', 'diff', '3169'], 'flag'],
+  [['pr', 'diff', '3169', '-R', 'o/r'], ['pr', 'diff', '3169'], 'flag', 'o/r'],
+  [['pr', 'diff', '-Ro/r', '3169'], ['pr', 'diff', '3169'], 'flag', 'o/r'],
+  [['pr', 'diff', '--repo=o/r', '1', '--name-only'], ['pr', 'diff', '1', '--name-only'], 'flag', 'o/r'],
+  [['pr', '-R', 'o/r', 'diff', '1'], ['pr', 'diff', '1'], 'flag', 'o/r'],
+  [['pr', 'list', '--json', 'number'], ['pr', 'list', '--json', 'number'], 'flag'],
+  [['pr', 'ls'], ['pr', 'list'], 'flag'],
+  [['issue', 'view', '12', '--comments'], ['issue', 'view', '12', '--comments'], 'flag'],
+  [['issue', 'list'], ['issue', 'list'], 'flag'],
+  [['issue', 'ls', '-R', 'o/r'], ['issue', 'list'], 'flag', 'o/r'],
+  [['search', 'issues', 'bug', '-R', 'o/r'], ['search', 'issues', 'bug', '-R', 'o/r'], 'none'],
+  [['search', 'prs', '--author', '@me'], ['search', 'prs', '--author', '@me'], 'none'],
+  [['search', 'code', 'foo'], ['search', 'code', 'foo'], 'none'],
+  [['search', 'repos', 'ghx'], ['search', 'repos', 'ghx'], 'none'],
+  [['search', 'commits', 'fix'], ['search', 'commits', 'fix'], 'none'],
+  [['release', 'list'], ['release', 'list'], 'flag'],
+  [['release', 'ls'], ['release', 'list'], 'flag'],
+  [['release', 'view', 'v1.0.0'], ['release', 'view', 'v1.0.0'], 'flag'],
+  [['repo', 'view'], ['repo', 'view'], 'positional'],
+  [['repo', 'view', '-R', 'o/r', '--json', 'name'], ['repo', 'view', '--json', 'name'], 'positional', 'o/r'],
+  [['repo', 'view', 'cli/cli'], ['repo', 'view', 'cli/cli'], 'none'],
+  [['workflow', 'list'], ['workflow', 'list'], 'flag'],
+  [['workflow', 'ls'], ['workflow', 'list'], 'flag'],
+  [['workflow', 'view', 'ci.yml', '--yaml'], ['workflow', 'view', 'ci.yml', '--yaml'], 'flag'],
+  [['run', 'list', '-w', 'ci.yml'], ['run', 'list', '-w', 'ci.yml'], 'flag'],
+  [['run', 'ls'], ['run', 'list'], 'flag'],
+  [['run', 'view', '123'], ['run', 'view', '123'], 'flag'],
+  [['run', 'view', '123', '--job', '456'], ['run', 'view', '123', '--job', '456'], 'flag'],
+  [['run', 'download', '123', '-D', 'out'], ['run', 'download', '123', '-D', 'out'], 'flag'],
+  [['run', 'download', '123', '-Dout'], ['run', 'download', '123', '-Dout'], 'flag'],
+  [['run', 'download', '123', '--dir=out'], ['run', 'download', '123', '--dir=out'], 'flag'],
+  [
+    ['run', 'download', '123', '--dir', 'out', '-n', 'a'],
+    ['run', 'download', '123', '--dir', 'out', '-n', 'a'],
+    'flag',
+  ],
+  [['label', 'list'], ['label', 'list'], 'flag'],
+  [['label', 'ls'], ['label', 'list'], 'flag'],
+  [['api', 'repos/o/r/pulls'], ['api', 'repos/o/r/pulls'], 'placeholders'],
+  [
+    ['api', 'repos/{owner}/{repo}/pulls', '--paginate', '--slurp'],
+    ['api', 'repos/{owner}/{repo}/pulls', '--paginate', '--slurp'],
+    'placeholders',
+  ],
+  [['api', '-XGET', 'repos/o/r'], ['api', '-XGET', 'repos/o/r'], 'placeholders'],
+  [['api', '--method=GET', 'repos/o/r'], ['api', '--method=GET', 'repos/o/r'], 'placeholders'],
+  [
+    ['api', 'repos/o/r', '-H', 'Accept: application/vnd.github.raw', '-q', '.name'],
+    ['api', 'repos/o/r', '-H', 'Accept: application/vnd.github.raw', '-q', '.name'],
+    'placeholders',
+  ],
+  [['api', '"repos/o/r/pulls?state=open"'], ['api', '"repos/o/r/pulls?state=open"'], 'placeholders'],
+];
+
+describe('allowlisted reads run', () => {
+  for (const [argv, args, inject, repo] of ALLOWED) {
+    test(argv.join(' '), () => {
+      const d = run(decide(argv));
+      assert.deepEqual(d.plan.args, args);
+      assert.equal(d.plan.inject, inject);
+      assert.equal(d.globals.repo, repo);
+      // Policy-allows ⇒ guard-allows, before and after the repo is injected.
+      assert.ok(isReadAllowed(d.plan.args));
+      assert.ok(isReadAllowed(finalArgs(d.plan, REPO)));
+    });
+  }
+
+  test('ghx output flags are taken out of the gh argv', () => {
+    const d = run(decide(['pr', 'list', '--pretty', '--max-bytes', '20000', '--timeout=5m']));
+    assert.deepEqual(d.plan.args, ['pr', 'list']);
+    assert.deepEqual(d.globals, { pretty: true, maxBytes: '20000', timeout: '5m' });
+    assert.equal(d.plan.maxBytes, 20000);
+  });
+
+  test('every 02 §10 read is in the guard allowlist', () => {
+    for (const [group, subs] of Object.entries(ALLOWED_READS)) {
+      for (const sub of subs) assert.ok(isReadAllowed([group, sub]), `${group} ${sub}`);
+    }
+  });
+});
+
+describe('the repo goes where each verb takes it', () => {
+  test('-R host/owner/name, before any --', () => {
+    assert.deepEqual(finalArgs({ args: ['pr', 'list'], inject: 'flag' }, REPO), [
+      'pr',
+      'list',
+      '-R',
+      'github.com/octo/demo',
+    ]);
+    assert.deepEqual(finalArgs({ args: ['issue', 'list', '--', '-x'], inject: 'flag' }, REPO), [
+      'issue',
+      'list',
+      '-R',
+      'github.com/octo/demo',
+      '--',
+      '-x',
+    ]);
+  });
+
+  test('repo view takes it as the positional; search never gets one', () => {
+    assert.deepEqual(finalArgs({ args: ['repo', 'view', '--json', 'name'], inject: 'positional' }, REPO), [
+      'repo',
+      'view',
+      'github.com/octo/demo',
+      '--json',
+      'name',
+    ]);
+    assert.deepEqual(finalArgs({ args: ['search', 'issues', 'x'], inject: 'none' }, REPO), ['search', 'issues', 'x']);
+  });
+
+  test('api fills {owner}/{repo} in the endpoint only, not in a --jq value', () => {
+    assert.deepEqual(
+      finalArgs({ args: ['api', '-q', '{repo}', 'repos/{owner}/{repo}/pulls'], inject: 'placeholders' }, REPO),
+      ['api', '-q', '{repo}', 'repos/octo/demo/pulls'],
+    );
+    assert.deepEqual(
+      finalArgs(
+        { args: ['api', 'repos/{owner}/{repo}'], inject: 'placeholders' },
+        { host: 'ghe.example.com', owner: 'o', name: 'r' },
+      ),
+      ['api', 'repos/o/r', '--hostname', 'ghe.example.com'],
+    );
+    assert.deepEqual(finalArgs({ args: ['api', 'user'], inject: 'placeholders' }, REPO), ['api', 'user']);
+  });
+});
+
+type WrapRow = [argv: string[], suggestion: string[]];
+
+const WRAPPED: WrapRow[] = [
+  [
+    ['pr', 'view', '3198', '-R', 'powerhouse-inc/powerhouse'],
+    ['ghx', 'pr', 'status', '3198', '-R', 'powerhouse-inc/powerhouse'],
+  ],
+  [
+    ['pr', 'view'],
+    ['ghx', 'pr', 'status', '<pr>'],
+  ],
+  [
+    ['pr', 'view', '--json', 'title,body', '12'],
+    ['ghx', 'pr', 'status', '12'],
+  ],
+  [
+    ['pr', 'view', '12', '--comments'],
+    ['ghx', 'pr', 'feedback', '12'],
+  ],
+  [
+    ['pr', 'checks', '12'],
+    ['ghx', 'ci', 'wait', '12'],
+  ],
+  [
+    ['pr', 'checks', '12', '--watch', '--fail-fast'],
+    ['ghx', 'ci', 'wait', '12'],
+  ],
+  [
+    ['pr', 'checks', '--help'],
+    ['ghx', 'ci', 'wait', '<pr>'],
+  ],
+  [
+    ['run', 'view', '123', '--log'],
+    ['ghx', 'ci', 'why', '--run', '123'],
+  ],
+  [
+    ['run', 'view', '123', '--log-failed', '-R', 'o/r'],
+    ['ghx', 'ci', 'why', '--run', '123', '-R', 'o/r'],
+  ],
+  [
+    ['run', 'view', '--log-failed', '--job', '456'],
+    ['ghx', 'ci', 'why', '<pr>'],
+  ],
+  [
+    ['run', 'watch', '123'],
+    ['ghx', 'ci', 'wait', '<pr>'],
+  ],
+  [
+    ['run', 'rerun', '123', '--failed'],
+    ['ghx', 'ci', 'rerun', '<pr>'],
+  ],
+  [
+    ['pr', 'create', '--title', 'x', '--body', 'y'],
+    ['ghx', 'pr', 'create', '--input', 'pr.json'],
+  ],
+  [
+    ['pr', 'new'],
+    ['ghx', 'pr', 'create', '--input', 'pr.json'],
+  ],
+  [
+    ['pr', 'create', '--help'],
+    ['ghx', 'pr', 'create', '--input', 'pr.json'],
+  ],
+  [
+    ['pr', 'edit', '12', '--add-label', 'x'],
+    ['ghx', 'pr', 'edit', '12', '--input', 'patch.json'],
+  ],
+  [
+    ['pr', 'merge', '12', '--squash'],
+    ['ghx', 'pr', 'merge', '12'],
+  ],
+  [
+    ['pr', 'merge', '--squash', '12', '-R', 'o/r'],
+    ['ghx', 'pr', 'merge', '12', '-R', 'o/r'],
+  ],
+  [
+    ['pr', 'comment', '12', '-b', 'hi'],
+    ['ghx', 'pr', 'comment', '12', '--input', 'comment.json'],
+  ],
+  [
+    ['pr', 'review', '12', '--approve'],
+    ['ghx', 'pr', 'review', '12', '--input', 'review.json'],
+  ],
+  [
+    ['pr', 'ready', '12'],
+    ['ghx', 'pr', 'edit', '12', '--input', 'ready.json'],
+  ],
+  [
+    ['pr', 'close', '12', '--comment', 'dup'],
+    ['ghx', 'pr', 'comment', '12', '--close', '--input', 'comment.json'],
+  ],
+  [
+    ['pr', 'reopen', '12'],
+    ['ghx', 'ci', 'retrigger', '12'],
+  ],
+];
+
+describe('wrapped commands are refused with the replacement argv', () => {
+  for (const [argv, suggestion] of WRAPPED) {
+    test(argv.join(' '), () => {
+      const e = refused(decide(argv));
+      assert.equal(e.code, 'USAGE_UNKNOWN_COMMAND');
+      assert.equal(e.exitCode, EXIT.USAGE);
+      assert.deepEqual(e.details?.suggestion, suggestion);
+      assert.ok(e.hint?.startsWith(`Use: ${suggestion.join(' ')} (`), e.hint);
+    });
+  }
+
+  test('pr checks says to run ci wait in the background and offers pr status', () => {
+    const e = refused(decide(['pr', 'checks', '12']));
+    assert.match(e.hint ?? '', /run_in_background: true/);
+    assert.deepEqual(e.details?.alternatives, [['ghx', 'pr', 'status', '12']]);
+  });
+
+  test('pr ready names the patch; --undo flips it', () => {
+    assert.match(refused(decide(['pr', 'ready', '1'])).hint ?? '', /\{"draft": false\}/);
+    assert.match(refused(decide(['pr', 'ready', '1', '--undo'])).hint ?? '', /\{"draft": true\}/);
+  });
+
+  test('the 02 §6.2 example verbatim', () => {
+    const e = refused(decide(['pr', 'view', '3198', '-R', 'powerhouse-inc/powerhouse']));
+    assert.equal(e.message, "'ghx pr view' is not a ghx command.");
+    assert.equal(
+      e.hint,
+      'Use: ghx pr status 3198 -R powerhouse-inc/powerhouse (state, mergeable, CI for the head SHA and feedback in one object).',
+    );
+  });
+});
+
+const WRITES: string[][] = [
+  ['issue', 'create', '--title', 'x'],
+  ['issue', 'new'],
+  ['issue', 'comment', '1', '-b', 'x'],
+  ['issue', 'edit', '1'],
+  ['issue', 'close', '1'],
+  ['release', 'create', 'v1'],
+  ['release', 'upload', 'v1', 'a.zip'],
+  ['repo', 'create', 'x'],
+  ['repo', 'edit', '--visibility', 'public'],
+  ['repo', 'delete', 'o/r', '--yes'],
+  ['repo', 'fork'],
+  ['repo', 'deploy-key', 'add', 'k.pub'],
+  ['secret', 'set', 'X'],
+  ['variable', 'set', 'X'],
+  ['label', 'create', 'bug'],
+  ['workflow', 'run', 'ci.yml'],
+  ['workflow', 'enable', 'ci.yml'],
+  ['gist', 'create', 'a.txt'],
+  ['pr', 'checkout', '12'],
+  ['co', '12'],
+  ['pr', 'update-branch', '12'],
+  ['run', 'cancel', '123'],
+  ['run', 'delete', '123'],
+  ['cache', 'delete', '--all'],
+  ['auth', 'login'],
+  ['auth', 'setup-git'],
+  ['extension', 'install', 'x/gh-y'],
+  ['config', 'set', 'pager', 'less'],
+];
+
+/** gh api forms that write (or might): each must be refused, and the guard agrees. */
+const API_WRITES: string[][] = [
+  ['api', 'repos/o/r/issues', '-X', 'POST'],
+  ['api', '-XPOST', 'repos/o/r/issues'],
+  ['api', '-X=POST', 'repos/o/r/issues'],
+  ['api', '-iXPOST', 'repos/o/r/issues'],
+  ['api', '--method', 'POST', 'repos/o/r/issues'],
+  ['api', '--method=PATCH', 'repos/o/r/pulls/1'],
+  ['api', '-X', 'DELETE', 'repos/o/r/git/refs/heads/x'],
+  ['api', 'repos/o/r/issues', '-f', 'title=x'],
+  ['api', 'repos/o/r/issues', '-ftitle=x'],
+  ['api', 'repos/o/r/issues', '-F', 'title=x'],
+  ['api', 'repos/o/r/issues', '--field', 'title=x'],
+  ['api', 'repos/o/r/issues', '--raw-field', 'title=x'],
+  ['api', 'repos/o/r/issues', '--raw-field=title=x'],
+  ['api', 'repos/o/r/issues', '--input', 'body.json'],
+  ['api', 'repos/o/r/issues', '--input=body.json'],
+  ['api', '-XGET', 'repos/o/r/issues', '-f', 'state=open'],
+  ['api', 'graphql', '-F', 'query=@q.graphql'],
+  ['api', 'graphql', '-f', 'query=mutation { addStar(input:{starrableId:"x"}) { clientMutationId } }'],
+  ['api', 'repos/o/r', '--', '-XPOST'],
+  ['api', 'repos/o/r', '--frobnicate'],
+  ['api', 'repos/o/r', 'extra'],
+  ['api', 'repos/o/r', '-X'],
+  ['api', 'repos/o/r', '--help'],
+  ['api'],
+];
+
+describe('writes are refused (PASSTHROUGH_WRITE_REFUSED, exit 6)', () => {
+  for (const argv of [...WRITES, ...API_WRITES]) {
+    test(argv.join(' '), () => {
+      const e = refused(decide(argv));
+      assert.equal(e.code, 'PASSTHROUGH_WRITE_REFUSED');
+      assert.equal(e.exitCode, EXIT.POLICY);
+    });
+  }
+
+  test('the guard agrees on every gh api write form', () => {
+    for (const argv of API_WRITES) assert.ok(!isReadAllowed(argv), argv.join(' '));
+  });
+
+  test('a graphql query is a read to the guard but refused by passthrough (always a POST)', () => {
+    const argv = ['api', 'graphql', '-f', 'query={ viewer { login } }'];
+    assert.ok(isReadAllowed(argv));
+    assert.match(refused(decide(argv)).message, /always a POST/);
+  });
+
+  test('-f gets the "gh switches to POST" reason, an explicit -X the method', () => {
+    assert.match(refused(decide(['api', 'x', '-f', 'a=b'])).message, /switches/);
+    assert.match(refused(decide(['api', 'x', '-X', 'PUT'])).message, /method PUT/);
+  });
+});
+
+describe('the guard is wider than passthrough on purpose', () => {
+  for (const argv of [
+    ['pr', 'view', '1'],
+    ['pr', 'checks', '1'],
+    ['run', 'view', '1', '--log'],
+  ]) {
+    test(argv.join(' '), () => {
+      assert.ok(isReadAllowed(argv));
+      assert.equal(refused(decide(argv)).code, 'USAGE_UNKNOWN_COMMAND');
+    });
+  }
+  test('auth status', () => {
+    assert.ok(isReadAllowed(['auth', 'status']));
+    assert.equal(decide(['auth', 'status']).kind, 'unknown');
+  });
+});
+
+describe('usage refusals (exit 2)', () => {
+  for (const argv of [
+    ['pr', 'list', '--web'],
+    ['issue', 'view', '1', '-w'],
+    ['repo', 'view', '--web=true'],
+    ['run', 'view', '1', '-w'],
+  ]) {
+    test(`${argv.join(' ')}: no browser`, () => {
+      const e = refused(decide(argv));
+      assert.equal(e.code, 'USAGE_UNKNOWN_FLAG');
+      assert.equal(e.exitCode, EXIT.USAGE);
+    });
+  }
+
+  test('run download without -D is VALIDATION', () => {
+    for (const argv of [
+      ['run', 'download', '123'],
+      ['run', 'download', '123', '-D'],
+      ['run', 'download', '123', '-n', 'logs'],
+    ]) {
+      const e = refused(decide(argv));
+      assert.equal(e.code, 'VALIDATION', argv.join(' '));
+      assert.equal(e.exitCode, EXIT.USAGE);
+    }
+  });
+
+  test('gh api has no -R', () => {
+    for (const argv of [
+      ['api', '-R', 'o/r', 'repos/{owner}/{repo}'],
+      ['api', 'repos/{owner}/{repo}', '--repo=o/r'],
+    ]) {
+      const e = refused(decide(argv));
+      assert.equal(e.code, 'USAGE_UNKNOWN_FLAG', argv.join(' '));
+      assert.match(e.hint ?? '', /\{owner\}\/\{repo\}/);
+    }
+  });
+});
+
+describe('unknown commands', () => {
+  for (const argv of [['frobnicate'], ['--foo'], ['repo', 'list'], ['auth', 'token'], ['gist', 'list'], ['pr']]) {
+    test(argv.join(' '), () => assert.equal(decide(argv).kind, 'unknown'));
+  }
+
+  test('edit-distance suggestions cover ghx commands and passthrough reads', async () => {
+    const names = [
+      ['ci', 'wait'],
+      ['pr', 'status'],
+    ];
+    const r1 = await onUnknown(['pr', 'dif', '1'], { names });
+    assert.equal(r1.kind, 'refuse');
+    assert.deepEqual(r1.kind === 'refuse' && r1.error.details?.suggestions, ['pr diff']);
+    const r2 = await onUnknown(['ci', 'wiat'], { names });
+    assert.deepEqual(r2.kind === 'refuse' && r2.error.details?.suggestions, ['ci wait']);
+    assert.equal(r2.kind === 'refuse' && r2.error.exitCode, EXIT.USAGE);
+  });
+
+  test('a real gh command off the allowlist says so', async () => {
+    const r = await onUnknown(['repo', 'list'], { names: [] });
+    assert.equal(r.kind === 'refuse' && r.error.code, 'USAGE_UNKNOWN_COMMAND');
+    assert.match(r.kind === 'refuse' ? (r.error.hint ?? '') : '', /not on the passthrough allowlist/);
+  });
+});
+
+describe('refused argv never reaches gh (through runCli)', () => {
+  const rows: [string[], number][] = [
+    ...WRAPPED.map(([argv]) => [argv, EXIT.USAGE] as [string[], number]),
+    ...[...WRITES, ...API_WRITES].map((argv) => [argv, EXIT.POLICY] as [string[], number]),
+    [['run', 'download', '1'], EXIT.USAGE],
+    [['pr', 'list', '--web'], EXIT.USAGE],
+    [['frobnicate'], EXIT.USAGE],
+  ];
+  const registry = defaultRegistry();
+  for (const [argv, exit] of rows) {
+    test(argv.join(' '), async (t) => {
+      const words = argv.filter((a, i) => i < 3 && !a.startsWith('-'));
+      if (await registry.resolve(words)) {
+        t.skip(`ghx ${words.join(' ')} is a ghx command now`);
+        return;
+      }
+      const fake = new FakeGh();
+      const r = await runInProcess(argv, { gh: fake });
+      assert.equal(r.exitCode, exit, r.stdout);
+      assert.deepEqual(fake.calls, []);
+    });
+  }
+});

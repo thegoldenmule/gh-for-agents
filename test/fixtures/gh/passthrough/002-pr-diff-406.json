@@ -1,0 +1,16 @@
+{
+  "argv": [
+    "pr",
+    "diff",
+    "3169",
+    "-R",
+    "github.com/powerhouse-inc/powerhouse"
+  ],
+  "exitCode": 1,
+  "stdout": "",
+  "stderr": "could not find pull request diff: HTTP 406: Sorry, the diff exceeded the maximum number of files (300). Consider using 'List pull requests files' API or locally cloning the repository instead. (https://api.github.com/repos/powerhouse-inc/powerhouse/pulls/3169)\n",
+  "meta": {
+    "source": "corpus-shape",
+    "note": "R15: the verbatim 406 stderr of gh pr diff past 300 files (research §3.1, §9.10)"
+  }
+}
