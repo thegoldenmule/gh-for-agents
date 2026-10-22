@@ -54,7 +54,7 @@ const StatusRest = z.object({
 
 type CheckRunRest = z.infer<typeof CheckRunRest>;
 
-/** Check-run pages beyond the first conditional one (500 checks, like the GraphQL snapshot). */
+/** Check-run pages read per tick, each conditional (500 checks, like the GraphQL snapshot). */
 export const MAX_CHECK_RUN_PAGES = 5;
 /** Consecutive REST failures before the GraphQL fallback takes over (03 M4.3). */
 export const REST_FAILURES_BEFORE_FALLBACK = 2;
@@ -401,27 +401,15 @@ export function createPoller(o: PollerOptions): Poller {
       counter,
     );
     let runs = first.check_runs;
-    if (first.total_count > runs.length) {
-      // Pages 2..N only when the first page changed (or was never cached): a 304 means none changed.
-      const pagesKey = `${runsPath}#rest`;
-      const cachedRest = st.etags[pagesKey]?.body as CheckRunRest[] | undefined;
-      if (counter.changed || !Array.isArray(cachedRest)) {
-        const more: CheckRunRest[] = [];
-        for (let page = 2; page <= MAX_CHECK_RUN_PAGES && runs.length + more.length < first.total_count; page++) {
-          counter.calls++;
-          const r = await gh.api(
-            { path: runsPath, repo, fields: { filter: 'latest', per_page: 100, page } },
-            CheckRunsRest,
-          );
-          if (r.notModified) break;
-          more.push(...r.data.check_runs);
-          if (r.data.check_runs.length === 0) break;
-        }
-        st.etags[pagesKey] = { etag: '', body: more };
-        runs = [...runs, ...more];
-      } else {
-        runs = [...runs, ...z.array(CheckRunRest).parse(cachedRest)];
-      }
+    // Every page is its own conditional GET: page 1's ETag says nothing about pages 2..N.
+    for (let page = 2; page <= MAX_CHECK_RUN_PAGES && runs.length < first.total_count; page++) {
+      const more = await conditional(
+        { path: runsPath, repo, fields: { filter: 'latest', per_page: 100, page } },
+        CheckRunsRest,
+        counter,
+      );
+      if (more.check_runs.length === 0) break;
+      runs = [...runs, ...more.check_runs];
     }
     const status = await conditional(
       { path: `repos/{owner}/{repo}/commits/${target}/status`, repo, fields: { per_page: 100 } },

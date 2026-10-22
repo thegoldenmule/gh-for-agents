@@ -319,3 +319,18 @@ test('--stream prints every event and ends with the summary line', async () => {
   assert.equal(lines.at(-1).type, 'summary');
   assert.equal(lines.at(-1).outcome, 'green');
 });
+
+test('a check on page 2 of check-runs is re-read while page 1 is unchanged (a conditional GET per page)', async () => {
+  const jobs = Array.from({ length: 100 }, (_, i) => done(running(1000 + i, `shard ${i}`), 0));
+  const last = running(2000, 'shard last');
+  const { sim } = world([...jobs, last]);
+  change(sim, 3 * MIN, done(last, 3 * MIN));
+  const r = await wait(sim, ['o/r#7'], { maxMs: 30 * MIN });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout.slice(0, 300));
+  assert.ok(r.json.results[0].elapsedSec < 5 * 60);
+  const page2 = sim.calls.filter((c) => c.argv.some((a) => a.includes('check-runs') && a.includes('page=2')));
+  assert.ok(
+    page2.some((c) => c.status === 304),
+    'an unchanged page 2 costs a 304',
+  );
+});
