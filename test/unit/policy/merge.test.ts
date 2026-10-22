@@ -376,6 +376,16 @@ test('CI_PENDING: pending with only a baseline check missing blocks (04: §11.2/
   assert.match(e.plan.blockers[0]?.message ?? '', /e2e not reported yet/);
 });
 
+test('CI_PENDING: a green summary for a different SHA than the snapshot head blocks', () => {
+  const e = evaluate({ ci: ci({ headSha: 'b'.repeat(40) }) });
+  assert.equal(e.plan.allowed, false);
+  assert.deepEqual(
+    e.plan.blockers.map((b) => b.code),
+    ['CI_PENDING'],
+  );
+  assert.match(e.plan.blockers[0]?.message ?? '', /evaluated for bbbbbbb, not the head 9f2c4e1/);
+});
+
 test('CI_PENDING: a SHA-mismatched (registering) summary blocks; the ETA is in the message', () => {
   const e = evaluate({ ci: ci({ state: 'pending', phase: 'registering', counts: { ...ci().counts, pass: 0 } }) });
   assert.match(e.plan.blockers[0]?.message ?? '', /checks not registered yet for 9f2c4e1/);

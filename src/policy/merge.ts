@@ -209,6 +209,14 @@ const requiredMissing = (ci: CiSummary) =>
  */
 function ciPending(i: MergePolicyInput): Result {
   const { ci, snapshot: s } = i;
+  if (ci.headSha !== s.head.sha) {
+    // CI evaluated for another commit says nothing about this head (04).
+    return fail(`CI was evaluated for ${short(ci.headSha)}, not the head ${short(s.head.sha)}.`, {
+      ciHeadSha: ci.headSha,
+      headSha: s.head.sha,
+      hint: `Re-read CI for the head: ghx ci wait ${s.ref} --until mergeable (run it in the background).`,
+    });
+  }
   const missing = ci.expectedMissing.filter((e) => e.state === 'missing');
   const pendingState = ci.state === 'pending';
   if (ci.pending.length === 0 && missing.length === 0 && !pendingState) return pass('no checks pending');
