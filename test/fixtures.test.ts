@@ -25,12 +25,29 @@ const testSources = [
   .map((f) => readFileSync(f, 'utf8'))
   .join('\n');
 
+/** `ref` occurs in a test source as a whole token: not inside a longer name or path segment. */
+function isReferenced(ref: string, source: string = testSources): boolean {
+  const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^A-Za-z0-9_.-])${escaped}(?![A-Za-z0-9_-])`, 'm').test(source);
+}
+
 function dirMeta(
   file: string,
 ): { meta?: { source?: string }; files?: Record<string, { source?: string }> } | undefined {
   const m = join(dirname(file), '_meta.json');
   return existsSync(m) ? JSON.parse(readFileSync(m, 'utf8')) : undefined;
 }
+
+test('a fixture reference is a whole token, not a substring of another name', () => {
+  for (const src of ["body('crlf.md')", 'bodies/crlf.md', "'crlf'", 'FakeGh.fromScenario("crlf")', 'crlf']) {
+    assert.ok(isReferenced('crlf', src), src);
+  }
+  for (const src of ["'no-crlf.md'", "'crlfish'", 'x.crlf', 'bodies/crlf-v2.md', 'my_crlf']) {
+    assert.ok(!isReferenced('crlf', src), src);
+  }
+  assert.ok(isReferenced('ci-snapshot/pending', "fromScenario('ci-snapshot/pending')"));
+  assert.ok(!isReferenced('ci-snapshot/pending', "fromScenario('ci-snapshot/pending-long')"));
+});
 
 test('there are fixtures', () => {
   assert.ok(files.length > 20);
@@ -62,19 +79,15 @@ for (const file of files) {
       }
     }
 
-    // Referenced by at least one test: by file stem, or (for gh scenarios) by scenario directory.
+    // Referenced by at least one test: by file name or stem, or (for gh scenarios) by scenario
+    // directory, as a whole token. `crlf` matches 'crlf', "bodies/crlf.md" or `crlf.md`, but not
+    // `no-crlf` or `crlfish`, so one fixture's name cannot vouch for another's.
     const stem = basename(file).replace(/\.[^.]+$/, '');
     const scenario = rel.startsWith(`gh${'/'}`) ? dirname(rel).slice(3) : undefined;
     const refs = [stem, basename(file), ...(scenario ? [scenario] : [])];
     if (file.endsWith('.log')) refs.push(basename(dirname(file)));
     assert.ok(
-      refs.some(
-        (r) =>
-          testSources.includes(`'${r}'`) ||
-          testSources.includes(`"${r}"`) ||
-          testSources.includes(`/${r}'`) ||
-          testSources.includes(r),
-      ),
+      refs.some((r) => isReferenced(r)),
       `${rel} is not referenced by any test`,
     );
   });
