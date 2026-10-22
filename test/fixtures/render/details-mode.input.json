@@ -1,0 +1,16 @@
+{
+  "title": "feat(codegen): generate typed reducers for document models",
+  "description": "Codegen now emits a typed reducer stub per operation, so model authors get compile errors instead of runtime ones.",
+  "testing": [
+    {"kind": "unit", "command": "pnpm test -- reducers", "cwd": "packages/codegen", "result": "pass"},
+    {"kind": "build", "command": "pnpm build", "result": "pass"},
+    {"kind": "manual", "steps": ["Run ph generate on the todo-list model", "Open the generated reducer and remove one case", "Confirm tsc reports the missing operation"], "result": "pass"},
+    {"kind": "e2e", "command": "pnpm e2e -- codegen", "result": "skipped", "notes": "the e2e runner needs Docker"}
+  ],
+  "risk": "low",
+  "components": ["codegen"],
+  "revertPolicy": "revert-with-followup",
+  "revertNote": "Re-run codegen in every model package after reverting.",
+  "base": "main",
+  "head": "feat/codegen-typed-reducers"
+}

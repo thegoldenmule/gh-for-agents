@@ -1,0 +1,12 @@
+{
+  "title": "fix(vetra): keep café, 日本語 and 🤖 intact in document names",
+  "description": "Names with non-ASCII characters were cut at the first multi-byte char, so \"café\" became \"caf\".\nThe slug step now works on code points & keeps names like Q&A, a <-> b and a --> b as typed.",
+  "testing": [
+    {"kind": "unit", "command": "pnpm --filter @powerhousedao/vetra test -- names", "result": "pass", "notes": "covers é, 日本語, 🤖 and a --> b"}
+  ],
+  "risk": "low",
+  "components": ["vetra"],
+  "revertPolicy": "revert-safe",
+  "base": "main",
+  "head": "fix/vetra-unicode-names"
+}

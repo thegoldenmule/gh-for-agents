@@ -185,7 +185,9 @@ function descriptionRules(input: CreateRulesInput, ctx: CreateRuleContext): Issu
     }
   });
 
-  const marker = FOOTER_MARKERS.find((f) => d.includes(f));
+  const footer = ctx.config.render.footer?.trim();
+  const markers = footer ? [footer, ...FOOTER_MARKERS] : FOOTER_MARKERS;
+  const marker = markers.find((f) => d.includes(f));
   if (marker !== undefined) {
     out.push(
       issue('description', 'description.footer', `remove '${marker}'; ghx adds the footer and the metadata block`),

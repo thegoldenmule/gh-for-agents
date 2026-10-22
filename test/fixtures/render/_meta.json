@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "source": "synthetic",
+    "note": "PR body goldens (03 §5.1): <case>.input.json is a PrCreateInput, <case>.body.md its rendered body. Regenerate a body only after checking the diff by eye."
+  },
+  "files": {
+    "worked-example-3301.input.json": { "source": "synthetic", "note": "02 §14.1 verbatim" },
+    "worked-example-3301.body.md": {
+      "source": "synthetic",
+      "note": "02 §14.2: visible text byte for byte; the block has sorted keys, as the codec writes it (01 §6)"
+    }
+  }
+}

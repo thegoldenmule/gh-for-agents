@@ -1,0 +1,14 @@
+{
+  "title": "fix(connect): keep the drive list after a reconnect",
+  "description": "Reconnecting cleared the cached drive list, so the sidebar went empty until a full reload.\nThe cache now survives reconnects and is refreshed in place.",
+  "testing": [
+    {"kind": "unit", "command": "pnpm --filter @powerhousedao/connect test -- drives", "result": "pass"},
+    {"kind": "e2e", "command": "pnpm --filter @powerhousedao/connect e2e -- reconnect", "result": "pass"}
+  ],
+  "risk": "low",
+  "components": ["connect"],
+  "revertPolicy": "revert-safe",
+  "base": "main",
+  "head": "fix/connect-drive-cache",
+  "refs": {"closes": ["#2894", "#2901", "powerhouse-inc/connect#88"]}
+}

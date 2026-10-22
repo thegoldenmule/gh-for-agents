@@ -194,6 +194,9 @@ describe('description', () => {
     pass({ description: 'Mentions ghx as a tool.' });
     failOnly({ description: 'Done. 🤖 Generated with Claude Code' }, 'description.footer');
     failOnly({ description: 'See ghx: v1 for details.' }, 'description.footer');
+    const custom = ctxWith({ render: { footer: 'Made by the bot squad' } });
+    failOnly({ description: 'Fixed. Made by the bot squad' }, 'description.footer', custom);
+    pass({ description: 'Fixed. Made by the bot squad' }, ctxWith({ render: { footer: null } }));
     assert.deepEqual(codes({ description: 'x <!-- ghx:v1 {} -->' }), [
       'description.markdown_structure',
       'description.footer',

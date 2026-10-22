@@ -1,0 +1,12 @@
+{
+  "title": "docs(docs): explain component risk floors",
+  "description": "Documents minRisk in the config reference, with the release component as the example.",
+  "testing": [
+    {"kind": "build", "command": "pnpm docs:build", "result": "pass"}
+  ],
+  "risk": "trivial",
+  "components": ["docs"],
+  "revertPolicy": "revert-safe",
+  "base": "main",
+  "head": "docs/min-risk"
+}

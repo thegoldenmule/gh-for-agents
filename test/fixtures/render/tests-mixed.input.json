@@ -1,0 +1,15 @@
+{
+  "title": "perf(switchboard): batch document loads on startup",
+  "description": "Startup loaded documents one query at a time; it now batches them 100 per query.\nCold start on the staging dataset drops from 41 s to 9 s.",
+  "testing": [
+    {"kind": "unit", "command": "pnpm --filter @powerhousedao/switchboard test", "result": "pass"},
+    {"kind": "benchmark", "command": "pnpm bench:startup", "cwd": "apps/switchboard", "result": "pass", "notes": "41 s to 9 s on the staging dataset"},
+    {"kind": "manual", "steps": ["Start switchboard against a staging snapshot", "Open the drive list and confirm every drive loads"], "result": "not-run", "notes": "no staging snapshot available locally"}
+  ],
+  "risk": "medium",
+  "riskNote": "A batch that fails now fails all 100 documents in it instead of one.",
+  "components": ["switchboard"],
+  "revertPolicy": "revert-safe",
+  "base": "main",
+  "head": "perf/switchboard-batch-load"
+}

@@ -1,0 +1,15 @@
+{
+  "title": "feat(reactor): verify signatures on the read path",
+  "description": "Reads now verify action signatures with the same documentId binding as writes.\nBuilt on the write-path fix, so it targets that branch until it merges.",
+  "testing": [
+    {"kind": "unit", "command": "pnpm --filter @powerhousedao/reactor test -- verify", "result": "pass"}
+  ],
+  "risk": "low",
+  "components": ["reactor"],
+  "revertPolicy": "coordinated",
+  "revertWith": ["#3301"],
+  "base": "fix/reactor-bind-document-id",
+  "head": "feat/reactor-verify-reads",
+  "draft": true,
+  "refs": {"stackedOn": "#3301", "splitFrom": "#3290"}
+}
