@@ -12,7 +12,7 @@ import { newId } from '../../meta/ids.ts';
 import { type PrBlockRead, readPrBlock } from '../../meta/schemas.ts';
 import { parsePrBody, prBodyDrift, renderPrBody, toPrBlock } from '../../render/pr-body.ts';
 import { isLocalTarget } from '../create/plan.ts';
-import { changedFiles, runPreflight } from '../create/preflight.ts';
+import { changedFiles, PUSH_PERMISSIONS, runPreflight } from '../create/preflight.ts';
 import { canonicalRef, collectRefs, createNetworkRules, createRules, validationError } from '../create/rules.ts';
 import { PrCreateInput, type PrEditInput } from '../create/schema.ts';
 import { fetchPrSnapshot, openChildren, type PrSnapshot } from './snapshot.ts';
@@ -178,6 +178,22 @@ export async function planEdit(env: EditEnv): Promise<EditPlan> {
     head: input.head,
     refs: collectRefs(input).map((r) => r.ref),
   });
+  // Who may edit (02 §6.2, mirroring pr create): GitHub lets anyone with push access edit a PR, and lets a
+  // PR's author edit their own PR's title, body, base and draft state whatever their repository role (the
+  // REST update rule is write access to the head branch, which the author of a same-repo PR pushed). So
+  // READ/TRIAGE is GH_FORBIDDEN unless the viewer opened this PR; checked before anything is rendered,
+  // so a dry run fails the same way.
+  const isAuthor = pr.author != null && pr.author.login.toLowerCase() === pf.viewer.toLowerCase();
+  if (!isAuthor && (pf.permission === null || !PUSH_PERMISSIONS.has(pf.permission))) {
+    throw new GhxError(
+      'GH_FORBIDDEN',
+      `You cannot edit ${ref}: viewerPermission ${pf.permission ?? 'NONE'} on ${slug}, and the PR was opened by ${pr.author?.login ?? 'a deleted account'}, not ${pf.viewer}.`,
+      {
+        hint: 'Ask for write access, or ask the PR author to make the edit.',
+        details: { permission: pf.permission, author: pr.author?.login ?? null, viewer: pf.viewer },
+      },
+    );
+  }
   if (pf.baseOid === null) {
     throw new GhxError('BRANCH_MISSING', `Base branch '${input.base}' does not exist on ${slug}.`, {
       hint: 'Check the name, or create and push the base first.',

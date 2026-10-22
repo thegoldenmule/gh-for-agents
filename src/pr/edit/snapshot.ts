@@ -1,5 +1,5 @@
 // The `pr edit` reads and draft mutations (02 §3 gh calls 1, 3 and 5): the PR snapshot (node id, state,
-// draft, title, body, updatedAt, base and head), the same query again just before the PATCH, the open
+// draft, title, body, updatedAt, base, head and author), the same query again just before the PATCH, the open
 // PRs stacked on this one (HAS_CHILDREN), and the two GraphQL draft transitions.
 import { z } from 'zod';
 import { GhxError } from '../../core/errors.ts';
@@ -7,7 +7,7 @@ import type { Gh } from '../../gh/index.ts';
 import { type RepoRef, repoSlug } from '../../gh/types.ts';
 
 export const SNAPSHOT_QUERY =
-  'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id number url state isDraft title body updatedAt baseRefName headRefName headRefOid}}}';
+  'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id number url state isDraft title body updatedAt baseRefName headRefName headRefOid author{login}}}}';
 
 const SnapshotData = z.object({
   repository: z
@@ -25,6 +25,8 @@ const SnapshotData = z.object({
           baseRefName: z.string(),
           headRefName: z.string(),
           headRefOid: z.string(),
+          /** null for a deleted account (ghost); absent only in replies recorded before it was queried. */
+          author: z.object({ login: z.string() }).nullable().optional(),
         })
         .nullable(),
     })

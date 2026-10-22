@@ -56,7 +56,8 @@ export default defineCommand({
   description:
     'Write the patch with your file tool and pass --input patch.json; only the fields to change. ' +
     'DESCRIPTION_DRIFT when the visible text was edited in the UI (include it, or --discard-ui-edits); ' +
-    'NO_BLOCK unless "adopt": true with the full object.',
+    'NO_BLOCK unless "adopt": true with the full object. ' +
+    'GH_FORBIDDEN unless you have write access or opened the PR yourself (GitHub lets authors edit their own PRs).',
   kind: 'write',
   input: Input,
   output: Output,

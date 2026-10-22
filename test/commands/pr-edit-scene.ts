@@ -30,6 +30,8 @@ export interface PrState {
   updatedAt: string;
   baseRefName: string;
   headRefName: string;
+  /** The PR author; the preflight viewer is octocat. */
+  author: { login: string } | null;
 }
 
 export interface EditSceneOptions extends SceneOptions {
@@ -102,6 +104,7 @@ export function editScene(o: EditSceneOptions = {}): EditScene {
     updatedAt: UPDATED_AT,
     baseRefName: 'main',
     headRefName: INPUT.head,
+    author: { login: 'octocat' },
     ...o.pr,
   };
   const patched: Record<string, unknown>[] = [];

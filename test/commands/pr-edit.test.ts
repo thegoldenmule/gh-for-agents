@@ -215,6 +215,30 @@ test('a base that is not on the remote is BRANCH_MISSING (exit 9)', async () => 
   s.gh.expectNoMutations();
 });
 
+test('a READ viewer who is not the author is GH_FORBIDDEN, even under --dry-run', async () => {
+  for (const permission of ['READ', 'TRIAGE']) {
+    const s = editScene({ permission, pr: { author: { login: 'someone-else' } } });
+    const r = await run(s.gh, { description: NEW_DESCRIPTION }, ['--dry-run']);
+    assert.equal(r.exitCode, EXIT.GH_FAILED, r.stdout);
+    assert.equal(r.json.error.code, 'GH_FORBIDDEN');
+    assert.equal(r.json.error.details.permission, permission);
+    s.gh.expectNoMutations();
+  }
+});
+
+test('the PR author may edit their own PR without write permission (GitHub lets authors edit)', async () => {
+  const s = editScene({ permission: 'READ' });
+  const r = await run(s.gh, { description: NEW_DESCRIPTION });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(r.json.changed, ['body']);
+});
+
+test('a WRITE viewer may edit a PR someone else opened', async () => {
+  const s = editScene({ permission: 'WRITE', pr: { author: { login: 'someone-else' } } });
+  const r = await run(s.gh, { description: NEW_DESCRIPTION });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+});
+
 test('--dry-run reads, validates and renders, then halts at the PATCH', async () => {
   const s = editScene();
   const r = await run(s.gh, { description: NEW_DESCRIPTION }, ['--dry-run']);
