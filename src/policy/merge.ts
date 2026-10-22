@@ -4,6 +4,7 @@
 // means "pr merge would proceed now". All checks run and every violation is reported together.
 // Fails closed: an unknown severity or risk ranks high, an `unknown` precondition blocks, and an
 // addressed finding at or above merge.blockOnSeverity whose commit is still unverified counts as open (04).
+import type { Suspicious } from '../ci/key-steps.ts';
 import { GhxError } from '../core/errors.ts';
 import { effectiveSeverity, type FoldResult } from '../feedback/fold.ts';
 import type { Finding } from '../feedback/schemas.ts';
@@ -12,7 +13,6 @@ import type { CiSummary } from '../schemas/ci.ts';
 import type { Warning } from '../schemas/common.ts';
 import { riskRank, type Severity, severityRank, type Violation } from '../schemas/pr.ts';
 import { CI_GATE_CODES, CONFIG_MISSING_CHECK, checkSpec, MERGE_CHECKS, type MergeCheckCode } from './checks.ts';
-import type { SkippedKeyStep } from './key-steps.ts';
 import type { Overrides } from './overrides.ts';
 import type { MergePlan, MergeState, PlanCheck, PlanCheckStatus } from './schemas.ts';
 import { isShared, type SharedRedMode, sharedRedWaived } from './shared-red.ts';
@@ -29,7 +29,7 @@ export interface MergePolicyConfig {
     requireOwnPr: boolean;
   };
   // The index signature keeps GhxConfig['ci'] assignable while it has no `none` key (weak-type rule).
-  ci: { readonly none?: boolean; readonly [key: string]: unknown };
+  ci: { readonly none?: boolean; readonly keySteps?: readonly string[] | undefined; readonly [key: string]: unknown };
 }
 
 export type PolicySnapshot = Pick<
@@ -64,8 +64,13 @@ export interface MergeRequest {
 export interface CiFacts {
   /** `GET actions/workflows` total_count, for CI_NO_CHECKS's auto-pass. */
   workflowsTotal?: number | null;
-  /** From skippedKeySteps; null skips KEY_STEP_SKIPPED. */
-  keyStepsSkipped?: readonly SkippedKeyStep[] | null;
+  /**
+   * From findSuspicious (src/ci/key-steps.ts). null or absent: not evaluated, which skips KEY_STEP_SKIPPED
+   * only when ci.keySteps is not configured; with ci.keySteps configured it fails closed.
+   */
+  keyStepsSkipped?: readonly Pick<Suspicious, 'job' | 'step'>[] | null;
+  /** findSuspicious's `unchecked` run ids: their jobs could not be read, so KEY_STEP_SKIPPED fails closed. */
+  keyStepsUnchecked?: readonly number[];
 }
 
 export interface MergePolicyInput {
@@ -270,7 +275,19 @@ function ciRed(i: MergePolicyInput): Result {
 
 function keyStepSkipped(i: MergePolicyInput): Result {
   const skipped = i.ciFacts?.keyStepsSkipped;
-  if (skipped == null) return skip('ci.keySteps not evaluated');
+  const configured = (i.config.ci.keySteps ?? []).length > 0;
+  const hint = `Re-check: ghx ci why ${i.snapshot.ref}; a green job that skipped a key step proves nothing.`;
+  if (skipped == null) {
+    if (!configured) return skip('ci.keySteps not configured');
+    return fail('ci.keySteps is configured, but the job steps could not be read.', { hint });
+  }
+  const unchecked = i.ciFacts?.keyStepsUnchecked ?? [];
+  if (unchecked.length > 0) {
+    return fail(`ci.keySteps could not be checked for ${plural(unchecked.length, 'run')}: ${unchecked.join(', ')}.`, {
+      unchecked: [...unchecked],
+      hint,
+    });
+  }
   if (skipped.length === 0) return pass('no key step skipped');
   return fail(`Key step skipped in a green job: ${skipped.map((k) => `'${k.step}' in ${k.job}`).join(', ')}.`, {
     skipped,

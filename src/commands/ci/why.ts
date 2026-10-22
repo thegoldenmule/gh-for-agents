@@ -237,7 +237,7 @@ export default defineCommand({
       budgetMs: Math.max(0, Math.min(DIAGNOSIS_BUDGET_MS, remaining)),
     });
     const runIds = new Set(s.checks.flatMap((c) => (c.kind === 'actions' && c.runId !== null ? [c.runId] : [])));
-    const suspicious = await findSuspicious({
+    const { suspicious } = await findSuspicious({
       gh: ctx.gh,
       repo,
       runIds: [...runIds],

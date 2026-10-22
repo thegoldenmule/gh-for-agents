@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ERROR_CODES } from '../../../src/core/errors.ts';
 import { CI_GATE_CODES, MERGE_CHECKS } from '../../../src/policy/checks.ts';
-import { skippedKeySteps } from '../../../src/policy/key-steps.ts';
 import { mergeBlockedError, mergeStateOf } from '../../../src/policy/merge.ts';
 import { parseOverrides } from '../../../src/policy/overrides.ts';
 import * as policySchemas from '../../../src/policy/schemas.ts';
@@ -415,15 +414,30 @@ test('CI_PENDING: a SHA-mismatched (registering) summary blocks; the ETA is in t
   );
 });
 
-test('KEY_STEP_SKIPPED: skippedKeySteps finds a skipped key step only in a green job', () => {
-  const jobs = [
-    { name: 'test', conclusion: 'success', steps: [{ name: 'Run tests', conclusion: 'skipped' }] },
-    { name: 'lint', conclusion: 'failure', steps: [{ name: 'Run tests', conclusion: 'skipped' }] },
-    { name: 'build', conclusion: 'success', steps: [{ name: 'Run tests', conclusion: 'success' }] },
-  ];
-  assert.deepEqual(skippedKeySteps(jobs, ['Run tests']), [{ job: 'test', step: 'Run tests' }]);
-  assert.deepEqual(skippedKeySteps(jobs, []), []);
+test('KEY_STEP_SKIPPED: not evaluated is skipped only while ci.keySteps is not configured', () => {
   assert.equal(evaluate().plan.checks.find((c) => c.code === 'KEY_STEP_SKIPPED')?.status, 'skipped');
+  const keySteps = config({ ci: { keySteps: ['Run tests'] } });
+  for (const ciFacts of [undefined, {}, { keyStepsSkipped: null }]) {
+    const e = evaluate({ config: keySteps, ...(ciFacts ? { ciFacts } : {}) });
+    assert.deepEqual(
+      e.plan.blockers.map((b) => b.code),
+      ['KEY_STEP_SKIPPED'],
+      JSON.stringify(ciFacts),
+    );
+  }
+  assert.equal(evaluate({ config: keySteps, ciFacts: { keyStepsSkipped: [] } }).plan.allowed, true);
+});
+
+test('KEY_STEP_SKIPPED: a run whose jobs could not be read fails closed', () => {
+  const e = evaluate({
+    config: config({ ci: { keySteps: ['Run tests'] } }),
+    ciFacts: { keyStepsSkipped: [], keyStepsUnchecked: [37948190914] },
+  });
+  assert.deepEqual(
+    e.plan.blockers.map((b) => b.code),
+    ['KEY_STEP_SKIPPED'],
+  );
+  assert.match(e.plan.blockers[0]?.message ?? '', /could not be checked for 1 run: 37948190914/);
 });
 
 test('warnings: unresolved threads, a base change under 24 h, children, high risk; old base changes are quiet', () => {
