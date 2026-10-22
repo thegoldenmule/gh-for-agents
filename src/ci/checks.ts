@@ -7,7 +7,8 @@ import type { Bucket, Check } from '../schemas/ci.ts';
 import { matchesGlob } from '../util/glob.ts';
 
 // ── GraphQL shapes (statusCheckRollup.contexts.nodes) ───────────────────────
-// Enum-like fields stay strings: an unknown future value maps to `pending`, never a parse failure.
+// Enum-like fields stay strings, never a parse failure: an unknown future status maps to `pending`, an
+// unknown conclusion to `fail` (both fail closed).
 export const RollupCheckRun = z.object({
   __typename: z.literal('CheckRun'),
   databaseId: z.number().int().nullable(),
@@ -72,7 +73,9 @@ export function checkRunBucket(status: string, conclusion: string | null): Bucke
   if (c === 'CANCELLED') return 'cancelled';
   if (c === 'SKIPPED') return 'skipped';
   // NEUTRAL, and STALE (GitHub gave up on an incomplete run): neither passed nor failed.
-  return 'neutral';
+  if (c === 'NEUTRAL' || c === 'STALE') return 'neutral';
+  // A conclusion this ghx doesn't know fails closed: never a pass by accident.
+  return 'fail';
 }
 
 export function checkRunStatus(status: string): Check['status'] {

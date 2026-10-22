@@ -58,6 +58,10 @@ test('bucket mapping follows gh pr checks; cancelled is its own bucket', () => {
   assert.equal(checkRunBucket('COMPLETED', 'CANCELLED'), 'cancelled');
   assert.equal(checkRunBucket('COMPLETED', 'SKIPPED'), 'skipped');
   assert.equal(checkRunBucket('COMPLETED', 'NEUTRAL'), 'neutral');
+  assert.equal(checkRunBucket('COMPLETED', 'STALE'), 'neutral');
+  // An unknown future conclusion fails closed; an unknown status stays pending.
+  assert.equal(checkRunBucket('COMPLETED', 'SOMETHING_NEW'), 'fail');
+  assert.equal(checkRunBucket('SOMETHING_NEW', 'SOMETHING_NEW'), 'pending');
   assert.equal(checkRunBucket('IN_PROGRESS', null), 'pending');
   assert.equal(checkRunBucket('QUEUED', null), 'pending');
 });
