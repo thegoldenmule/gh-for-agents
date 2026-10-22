@@ -665,6 +665,9 @@ export async function* runWait(
       }
     }
     const st = r.st;
+    // Something changed since the stored answer (a `ci rerun`, a new attempt): it no longer stands, even if
+    // this run saves and ends before deciding again; else a later all-304 run would replay it (04, final review).
+    if (!res.notModified) st.terminal = null;
     if (head !== null && head !== st.boundSha && !r.advanced.has(head) && r.policy === 'stay') {
       r.advanced.add(head);
       yield { type: 'branch-advanced', target: r.label, boundSha: st.boundSha, branchHead: head };

@@ -2,7 +2,7 @@
 // identical command pays no repeated baseline or diagnosis calls, and a known terminal state returns
 // at once after one conditional (304) tick.
 import assert from 'node:assert/strict';
-import { readdirSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createShutdown } from '../../src/core/signals.ts';
@@ -111,6 +111,36 @@ test('a re-run after `ci rerun` on the same SHA waits for the new attempt instea
   const second = await wait(sim, ['o/r#7'], { artifacts: first.artifacts });
   assert.equal(second.exitCode, EXIT.OK, second.stdout);
   assert.equal(second.json.resumed, true);
+});
+
+test('a run interrupted after `ci rerun` drops the stored red: the next all-304 run waits instead of replaying it', async () => {
+  const { clock, sim, a, b } = world();
+  const passB = { ...b, status: 'completed' as const, conclusion: 'success', completedAt: 0 };
+  set(sim, 0, [{ ...a, status: 'completed', conclusion: 'failure', completedAt: 0 }, passB]);
+  const runA = await wait(sim, ['o/r#7']);
+  assert.equal(runA.exitCode, EXIT.CI_RED);
+  // `ci rerun`: a new attempt of unit starts on the same SHA and runs for a while.
+  const t = clock.monotonic() + 1;
+  set(sim, t, [{ ...a, id: 41, status: 'in_progress', startedAt: t }, passB]);
+  set(sim, t + 30 * MIN, [
+    { ...a, id: 41, status: 'completed', conclusion: 'success', completedAt: t + 30 * MIN },
+    passB,
+  ]);
+  await clock.advance(1);
+  const shutdown = createShutdown();
+  const runB = startWait(sim, ['o/r#7'], { artifacts: runA.artifacts, shutdown });
+  await clock.advance(MIN);
+  shutdown.trigger('SIGTERM');
+  await clock.runUntil(runB.isDone, { stepMs: 1_000, maxMs: 10_000 });
+  assert.equal((await runB.p).json.outcome, 'interrupted');
+  const file = join(runA.artifacts, 'github.com', 'o', 'r', 'ci-wait', `pr-7-${H}.json`);
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).terminal, null, 'B saw the new attempt: the old red is gone');
+  // Run C: nothing changed since B, so every read is a 304; it must wait for the attempt, not replay A's red.
+  const runC = startWait(sim, ['o/r#7'], { artifacts: runA.artifacts });
+  await clock.runUntil(runC.isDone, { stepMs: 5_000, maxMs: 40 * MIN });
+  const c = await runC.p;
+  assert.equal(c.exitCode, EXIT.OK, c.stdout);
+  assert.equal(c.json.resumed, true);
 });
 
 test('head moved since run 1: run 2 binds the new SHA fresh; the old state stays on disk', async () => {
