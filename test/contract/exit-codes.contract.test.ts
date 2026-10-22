@@ -3,8 +3,7 @@
 // their own contract files.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { setTimeout as sleep } from 'node:timers/promises';
-import { spawnGhx } from '../helpers/spawn.ts';
+import { readyPath, spawnGhx, waitForFile } from '../helpers/spawn.ts';
 import { EXIT } from './exit-table.ts';
 
 const HOOKS = { GHX_TEST_HOOKS: '1' };
@@ -41,8 +40,9 @@ test('exit 3 (CONFIG): see doctor.contract.test.ts; exit 130 and 143 (signals)',
     ['SIGTERM', EXIT.SIGTERM],
   ] as const) {
     let child: import('node:child_process').ChildProcess | undefined;
-    const p = spawnGhx(['test', 'sleep'], { env: HOOKS, onSpawn: (c) => (child = c) });
-    await sleep(1_200);
+    const ready = readyPath();
+    const p = spawnGhx(['test', 'sleep', '--ready-file', ready], { env: HOOKS, onSpawn: (c) => (child = c) });
+    await waitForFile(ready);
     child?.kill(signal);
     const r = await p;
     assert.equal(r.exitCode, exit);

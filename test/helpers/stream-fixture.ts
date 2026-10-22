@@ -1,5 +1,6 @@
 // The test-only stream command (01 §1 `_tick`): ticks on the Clock, then returns a summary. Flags
 // drive every runner path: failures, bad events, warnings, graceful vs ungraceful shutdown, big lines.
+import { writeFileSync } from 'node:fs';
 import { z } from 'zod';
 import { defineStreamCommand, type TimeoutSpec } from '../../src/core/command.ts';
 import { GhxError } from '../../src/core/errors.ts';
@@ -17,6 +18,7 @@ export const TickInput = z.strictObject({
   graceful: z.boolean().default(true),
   ignoreAbort: z.boolean().default(false),
   payloadBytes: z.number().int().min(0).default(0),
+  readyFile: z.string().optional(),
   red: z.boolean().default(false),
   summaryBytes: z.number().int().min(0).default(0),
 });
@@ -49,6 +51,7 @@ export function makeTick(o: { name?: [string, ...string[]]; timeout?: TimeoutSpe
     exitCode: (s) => (s.outcome === 'red' ? ExitCode.CI_RED : ExitCode.OK),
     async *run(input, ctx) {
       let ticks = 0;
+      if (input.readyFile) writeFileSync(input.readyFile, 'ready');
       for (let n = 1; n <= input.count; n++) {
         try {
           if (input.ignoreAbort) await new Promise(() => {});

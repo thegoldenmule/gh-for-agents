@@ -39,6 +39,21 @@ export function nodeBinDir(): string {
   return dir;
 }
 
+/** Poll until `path` exists (a child's readiness signal); real time, bounded. */
+export async function waitForFile(path: string, timeoutMs = 15_000): Promise<void> {
+  const started = Date.now();
+  while (!existsSync(path)) {
+    if (Date.now() - started > timeoutMs) throw new Error(`timed out waiting for ${path}`);
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
+let readySeq = 0;
+/** A fresh readiness-file path under the scratch dir. */
+export function readyPath(): string {
+  return join(scratchDir(), `ready-${process.pid}-${++readySeq}`);
+}
+
 export function baseEnv(o: SpawnOptions = {}): Record<string, string> {
   const path = [...(o.fakeGh ? [FAKE_BIN_DIR] : []), nodeBinDir(), '/usr/bin', '/bin'].join(':');
   const env: Record<string, string | undefined> = {

@@ -5,8 +5,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { setTimeout as sleep } from 'node:timers/promises';
-import { FAKE_BIN_DIR, nodeBinDir } from '../helpers/spawn.ts';
+import { FAKE_BIN_DIR, nodeBinDir, readyPath, waitForFile } from '../helpers/spawn.ts';
 
 const tmp = mkdtempSync(join(tmpdir(), 'ghx-fakebin-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
@@ -82,8 +81,13 @@ test('exit codes and stderr replay; an unmatched call exits 99 naming the neares
 
 test('a hang reply blocks until SIGTERM', async () => {
   let child: import('node:child_process').ChildProcess | undefined;
-  const p = runGh(['pr', 'checks', '9', '-R', 'o/r'], fakeEnv(), { onSpawn: (c) => (child = c) });
-  await sleep(700);
+  const ready = readyPath();
+  const p = runGh(
+    ['pr', 'checks', '9', '-R', 'o/r'],
+    { ...fakeEnv(), GHX_FAKE_READY: ready },
+    { onSpawn: (c) => (child = c) },
+  );
+  await waitForFile(ready);
   assert.equal(child?.exitCode, null);
   child?.kill('SIGTERM');
   assert.equal((await p).code, 143);

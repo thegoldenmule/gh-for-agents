@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { spawnGhx } from '../helpers/spawn.ts';
+import { readyPath, spawnGhx, waitForFile } from '../helpers/spawn.ts';
 import { EXIT } from './exit-table.ts';
 
 const HOOKS = { GHX_TEST_HOOKS: '1' };
@@ -50,13 +50,15 @@ test('ndjson: 1 MiB of lines arrives in full, last line is the summary (pipe flu
 
 test('no deadline: still running with empty stdout; SIGTERM then gives the interrupted document, exit 143', async () => {
   let child: import('node:child_process').ChildProcess | undefined;
-  const p = spawnGhx(['test', 'tick', '--count', '5', '--interval-ms', '600000'], {
+  const ready = readyPath();
+  const p = spawnGhx(['test', 'tick', '--count', '5', '--interval-ms', '600000', '--ready-file', ready], {
     env: HOOKS,
     onSpawn: (c) => (child = c),
   });
   let early = '';
   child?.stdout?.on('data', (c: Buffer) => (early += c.toString()));
-  await sleep(2_000);
+  await waitForFile(ready);
+  await sleep(1_000);
   assert.equal(child?.exitCode, null, 'still running');
   assert.equal(early, '');
   child?.kill('SIGTERM');
@@ -69,11 +71,12 @@ test('no deadline: still running with empty stdout; SIGTERM then gives the inter
 
 test('SIGINT gives exit 130; ndjson keeps exactly one terminal line, last', async () => {
   let child: import('node:child_process').ChildProcess | undefined;
-  const p = spawnGhx(['test', 'tick', '--stream', '--count', '5', '--interval-ms', '600000'], {
+  const ready = readyPath();
+  const p = spawnGhx(['test', 'tick', '--stream', '--count', '5', '--interval-ms', '600000', '--ready-file', ready], {
     env: HOOKS,
     onSpawn: (c) => (child = c),
   });
-  await sleep(1_500);
+  await waitForFile(ready);
   child?.kill('SIGINT');
   const r = await p;
   assert.equal(r.exitCode, EXIT.SIGINT);
@@ -87,13 +90,18 @@ test('SIGINT gives exit 130; ndjson keeps exactly one terminal line, last', asyn
 
 test('an ungraceful command: a second signal inside the grace window still produces the document', async () => {
   let child: import('node:child_process').ChildProcess | undefined;
-  const p = spawnGhx(['test', 'tick', '--count', '5', '--ignore-abort'], { env: HOOKS, onSpawn: (c) => (child = c) });
-  await sleep(1_500);
+  const ready = readyPath();
+  const p = spawnGhx(['test', 'tick', '--count', '5', '--ignore-abort', '--ready-file', ready], {
+    env: HOOKS,
+    onSpawn: (c) => (child = c),
+  });
+  await waitForFile(ready);
+  const signalled = Date.now();
   child?.kill('SIGTERM');
   await sleep(200);
   child?.kill('SIGTERM');
   const r = await p;
-  assert.ok(r.ms < 1_500 + 2_900, `exited after ${r.ms} ms (grace skipped)`);
+  assert.ok(Date.now() - signalled < 2_900, 'exited before the 3 s grace (second signal skipped it)');
   assert.equal(r.exitCode, EXIT.SIGTERM);
   assert.equal(JSON.parse(r.stdout).error.code, 'INTERRUPTED');
 });

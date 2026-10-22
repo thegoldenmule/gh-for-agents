@@ -86,6 +86,7 @@ async function reply() {
     process.on('SIGTERM', () => process.exit(143));
     process.on('SIGINT', () => process.exit(130));
     setInterval(() => {}, 60_000);
+    if (process.env.GHX_FAKE_READY) writeFileSync(process.env.GHX_FAKE_READY, 'ready');
     return;
   }
   const out = replyStdout(fixture);
