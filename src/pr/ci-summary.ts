@@ -15,6 +15,7 @@ import {
   diagnosisOrder,
   isDiagnosable,
 } from '../ci/diagnose.ts';
+import { countWorkflows } from '../ci/github.ts';
 import { findSuspicious } from '../ci/key-steps.ts';
 import { analyzeJob } from '../ci/logs/analyze.ts';
 import { type CiSnapshot, snapshotSummary } from '../ci/snapshot.ts';
@@ -266,25 +267,22 @@ async function compareFailing(o: CiSummaryOptions, failing: readonly Check[]): P
   return new Map(out);
 }
 
-const WorkflowsPage = z.object({ total_count: z.number().int() });
-
 /** CiFacts for evaluateMerge (02 §8.2 rows 10b and 12). */
 async function ciFacts(o: CiSummaryOptions, summary: CiSummary): Promise<CiFacts> {
   const workflowsTotal =
     summary.state === 'no-checks'
-      ? await optional(o, 'The workflow list', null, async () => {
-          const r = await o.gh.api(
-            { path: 'repos/{owner}/{repo}/actions/workflows', repo: o.repo, fields: { per_page: 1 } },
-            WorkflowsPage,
-          );
-          return r.notModified ? null : r.data.total_count;
-        })
+      ? await optional(o, 'The workflow list', null, () => countWorkflows({ gh: o.gh, repo: o.repo }))
       : null;
   const keySteps = o.config.keySteps ?? [];
   if (keySteps.length === 0) return { workflowsTotal, keyStepsSkipped: [] };
   const runIds = [...new Set(o.ci.checks.flatMap((c) => (c.kind === 'actions' && c.runId !== null ? [c.runId] : [])))];
   const found = await findSuspicious({ gh: o.gh, repo: o.repo, runIds, keySteps, warn: o.warn });
-  return { workflowsTotal, keyStepsSkipped: found.map((s) => ({ job: s.job, step: s.step })) };
+  // A run whose jobs could not be read fails KEY_STEP_SKIPPED closed (04, key steps).
+  return {
+    workflowsTotal,
+    keyStepsSkipped: found.suspicious.map((s) => ({ job: s.job, step: s.step })),
+    keyStepsUnchecked: found.unchecked,
+  };
 }
 
 /** The full CiSummary and the policy's CiFacts for a PR snapshot's CI part. */
