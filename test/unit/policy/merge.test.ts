@@ -83,11 +83,8 @@ const ROWS: Row[] = [
       }),
     },
     pass: {
-      ci: ci({
-        state: 'pending',
-        phase: 'partial',
-        expectedMissing: [{ name: 'e2e', workflow: null, source: 'baseline', state: 'missing' }],
-      }),
+      // A baseline check aged out of `missing` (expectedState … agedOut) no longer blocks.
+      ci: ci({ expectedMissing: [] }),
     },
   },
   {
@@ -361,6 +358,22 @@ test('a closed PR skips the mergeability checks instead of piling up noise', () 
   for (const code of ['MERGEABLE_UNKNOWN', 'MERGE_CONFLICT', 'BEHIND_BASE', 'BLOCKED_BY_PROTECTION']) {
     assert.equal(e.plan.checks.find((c) => c.code === code)?.status, 'skipped');
   }
+});
+
+test('CI_PENDING: pending with only a baseline check missing blocks (04: §11.2/§11.3 win over row 10a)', () => {
+  const e = evaluate({
+    ci: ci({
+      state: 'pending',
+      phase: 'partial',
+      expectedMissing: [{ name: 'e2e', workflow: null, source: 'baseline', state: 'missing' }],
+    }),
+  });
+  assert.equal(e.plan.allowed, false);
+  assert.deepEqual(
+    e.plan.blockers.map((b) => b.code),
+    ['CI_PENDING'],
+  );
+  assert.match(e.plan.blockers[0]?.message ?? '', /e2e not reported yet/);
 });
 
 test('CI_PENDING: a SHA-mismatched (registering) summary blocks; the ETA is in the message', () => {

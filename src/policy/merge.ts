@@ -202,15 +202,20 @@ function blockedByProtection(s: PolicySnapshot, explained: boolean): Result {
 const requiredMissing = (ci: CiSummary) =>
   ci.expectedMissing.filter((e) => e.state === 'missing' && e.source !== 'baseline');
 
+/**
+ * 02 §11.2/§11.3 win over §8.2 row 10a (04, CI_PENDING conflict): blocks whenever `ci.state` is pending,
+ * including when only baseline checks are missing. A baseline check stops blocking only once
+ * expectedState(…, agedOut) has aged it out of `missing`.
+ */
 function ciPending(i: MergePolicyInput): Result {
   const { ci, snapshot: s } = i;
-  const missing = requiredMissing(ci);
-  const registering = ci.state === 'pending' && ci.phase === 'registering';
-  if (ci.pending.length === 0 && missing.length === 0 && !registering) return pass('no checks pending');
+  const missing = ci.expectedMissing.filter((e) => e.state === 'missing');
+  const pendingState = ci.state === 'pending';
+  if (ci.pending.length === 0 && missing.length === 0 && !pendingState) return pass('no checks pending');
   const parts = [
     ...(ci.pending.length ? [`${plural(ci.pending.length, 'check')} pending`] : []),
     ...(missing.length ? [`${missing.map((m) => m.name).join(', ')} not reported yet`] : []),
-    ...(registering && ci.pending.length === 0 && missing.length === 0 ? ['checks not registered yet'] : []),
+    ...(pendingState && ci.pending.length === 0 && missing.length === 0 ? ['checks not registered yet'] : []),
   ];
   const eta = ci.eta ? ` (ETA ~${Math.max(1, Math.ceil(ci.eta.seconds / 60))}m)` : '';
   return fail(`${parts.join('; ')} for ${short(ci.headSha)}${eta}.`, {
