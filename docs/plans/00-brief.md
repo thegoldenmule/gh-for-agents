@@ -140,3 +140,22 @@ The user decided these after reading the 02-api plan's pushback items:
   - item 5: `riskNote`, `revertNote` and `revertWith`, plus the 500-char cap on the description;
   - item 6: the extended exit codes;
   - item 7: the passthrough envelope.
+
+## CI waiting protocol (2026-10-22, decided from research)
+
+The user's goal: Claude Code agents wait for CI as efficiently as possible and the same way every time, with the caller never choosing a duration. The design follows from tests and transcript evidence (02-api §11.0):
+
+- **One protocol.** The agent runs `ghx ci wait <pr>` via Bash with `run_in_background: true`, then works on or ends its turn. Claude Code re-invokes it on exit. stdout is one JSON summary, and the exit code is the outcome.
+  - Verified: an idle interactive agent wakes, a subagent wakes, a foreground overrun auto-backgrounds, and background runs of 45–88 min complete.
+- **No caller durations.**
+  - `ci wait` stops only on CI-derived states: green, red, red-shared, no-checks, superseded or closed, `stalled` (from baseline p90 and queue time, floored on GitHub's own job limits), and `interrupted`.
+  - `--timeout`, `--max`, `--if-eta-under` and the 8m default are removed.
+- **Resumable.**
+  - State is cached by repo, target and SHA, so re-running the identical command resumes the wait.
+  - Unattended sessions (`CLAUDE_CODE_SESSION_ATTENDED` not `1`) self-return `pending` (exit 15) at 25 min, to stay under the 30-min background cap documented for `-p`/SDK.
+- **Default `--until first-failure`.** Re-running on the same SHA continues to the next new failure or to settle.
+- **NDJSON is opt-in.** It is printed only with `--stream`, which is for humans and not the agent path. Events always go to `eventsPath`.
+- **Enforcement** extends the approved soft hook:
+  - A Bash call to `ghx ci wait` without `run_in_background` gets `updatedInput` setting it, with no auto-allow. This is still a spike.
+  - The hook matcher also covers `Monitor`, to redirect gh polling loops.
+- **Passthrough:** 02 §10 has been restored to allowlisted reads, matching the user's decision above.

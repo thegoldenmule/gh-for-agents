@@ -14,11 +14,11 @@ Status: draft. It follows `00-brief.md` (including the user's confirmed decision
 | Config | `.github/ghx.json` | brief 2026-10-22 |
 | PR selector | `N`, `#N`, `owner/repo#N` or a URL. Every output carries `ref: "owner/repo#N"` | §3.1, §4.1 sektar #3258 |
 | Read/write split | Reads (`pr status`, `pr feedback`, `ci why`, `ci wait`) run on 01's mechanically read-only gh client and never mutate, with no exceptions | §3.2, §9.7; brief |
-| Passthrough | None. An unknown command is refused with a hint: the ghx replacement, or the raw `gh` read to run | §2.4, §3.2, §7; brief steering |
+| Passthrough | Allowlisted gh reads run inside a bounded JSON envelope. Wrapped commands are refused with the exact replacement. Other writes and unknown commands are refused | §2.4, §3.2, §7; brief 2026-10-22 |
 | Hidden block | `<!-- ghx:v1 {json} -->` with 4 types: `pr`, `review`, `finding`, `comment`. Strict on write, lenient on read. Status changes are append-only events | §8c |
 | Trust | A block counts only if its author is `OWNER`, `MEMBER` or `COLLABORATOR` (configurable) | prompt-injection defence |
 | Merge | REST `PUT /pulls/N/merge` with `sha` pinned. The policy engine is shared with `pr status` `merge.blockers`. Overrides take a code plus `--reason` | §4.3, §7 |
-| `ci wait` | NDJSON events, an expected-check model, the diagnosis folded into the summary, ETA, multiple targets and flake signals. Default timeout 8m; `--max` for background runs | §5.2, §9.2; §11 |
+| `ci wait` | Run in the background; one JSON summary at exit; no caller durations. It terminates only on CI-derived states (including `stalled`), and is resumable. It has an expected-check model, the diagnosis folded in, ETA, multiple targets and flake signals | §5.2, §9.2; §11.0 |
 
 Gotcha tags used in the gh-call lists:
 
@@ -66,7 +66,7 @@ There is no `--json`, `--jq`, `--web`, `--watch` or pager. Every output has a fi
 stdout takes exactly one of three shapes:
 
 1. **One bounded JSON document.** It includes `ref` where applicable and `warnings: {code, message}[]`. Commands stay small by design: items are truncated (`truncated: true`) and logs go to artifact files (§6). The bound is 01's `maxBytes`, default **16 KB**.
-2. **NDJSON, `ci wait` only.** Each line is `{type, seq, at, …}`. The last line is always `summary` or `error`. Each line is at most 4,096 bytes.
+2. **NDJSON, only for `ci wait --stream`** (a human-directed watch, not the agent path, §11.0). Each line is `{type, seq, at, …}`. The last line is always `summary` or `error`. Each line is at most 4,096 bytes.
 3. **Spill.** If a document would exceed the bound, stdout is `{"spilled": true, "path", "bytes", "command"}` with exit 0.
 
 Errors are `{"error": {"code", "message", "hint", "details"}}`. All four keys are always present, with `null` when empty. The exit code is non-zero (§6).
@@ -471,15 +471,17 @@ This table starts from 01's provisional table and adds 9 STATE plus `ci wait` ou
 | 5 | NOT_FOUND | PR, repo, run, id or ref missing, including a cwd mismatch | Fix the selector or `--repo` |
 | 6 | POLICY | A ghx rule refused a write. Overridable codes are listed | Ask the user, or `--override CODE --reason` |
 | 7 | GH_FAILED | gh or API failure after retries, permission, rate limit, or a partial batch | Retry or fix access |
-| 8 | TIMEOUT | Deadline exceeded. For `ci wait`: budget used up (`outcome:"timeout"`, including `--if-eta-under`) | Background with `--max` |
+| 8 | TIMEOUT | Deadline exceeded (not used by `ci wait`, which has no deadline; see §11.1) | Retry |
 | 9 | STATE | GitHub state forbids it now: head moved, conflict, CI pending, branch missing, concurrent edit | Change state, then retry |
 | 10 | CI_RED | `ci wait`: a considered check failed and isn't shared with main | Read the diagnosis; fix it or `ci rerun --flaky` |
 | 11 | CI_RED_SHARED | `ci wait`, any mode: red, but every failure is shared with main (§1.5). Distinct because the user's rule makes it mergeable (§4.3) | Go to `pr merge` (waived) |
 | 12 | SUPERSEDED | `ci wait`: head moved (with `--on-head-change stop`), or the PR closed or merged | Re-read the state |
 | 13 | NO_CHECKS | `ci wait`: nothing registered within the grace period. This is not green (§3.1, 11 cases) | Check triggers, or `ci retrigger` |
+| 14 | CI_STALLED | `ci wait`: a check is running far past its baseline or stuck in the queue (§11.1) | Read `stalled[]`; `ci rerun`, or re-wait |
+| 15 | CI_PENDING_RESUME | `ci wait`: self-returned in an unattended session. State is cached | Re-run the identical command |
 | 130/143 | INTERRUPTED | SIGINT or SIGTERM. `ci wait` returns `outcome:"interrupted"` when it can | — |
 
-When `ci wait` watches several targets, the aggregate exit code is the first that applies: 10 > 13 > 12 > 8 > 11 > 0.
+When `ci wait` watches several targets, the aggregate exit code is the first that applies: 10 > 14 > 13 > 12 > 15 > 11 > 0.
 
 ### 6.2 Error catalogue
 
@@ -818,53 +820,119 @@ Why events instead of editing the finding:
 
 ## 10. Passthrough policy
 
-**Decision: no passthrough.** ghx never runs arbitrary gh subcommands. Unknown commands get `USAGE_UNKNOWN_COMMAND` (exit 2) with one of these hints:
+This follows the user's decision of 2026-10-22 (brief): allowlisted reads only. Passthrough runs on 01's read-mode gh client, so its allowlist **is** the read guard's allowlist, extended with the reads below.
 
-| Invocation | Hint |
-|---|---|
-| A gh command that ghx replaces (per `replaces`): `pr view`/`pr checks` → `pr status`/`ci wait`; `run view --log*` → `ci why`; `run watch`, `pr checks --watch` → `ci wait`; `run rerun` → `ci rerun`; `pr ready` → `pr edit {"draft":false}`; `pr close` → `pr comment --close` | The exact ghx argv in `details.suggestion` |
-| An unwrapped gh read (`pr diff`, `pr list`, `issue view`, `run list`, `api` GET, …) | "ghx does not wrap this read; run it with gh directly: `gh pr diff 3198 -R powerhouse-inc/powerhouse`" (repo filled in) |
-| An unwrapped gh write (`issue create`, `release create`, `api -X POST`, …) | "ghx does not perform this write, and raw gh writes may be denied by policy; ask the user." |
-| Anything else | Edit-distance suggestions (01 default) |
+**Decision.** Read-only gh commands on an allowlist run real `gh` inside a JSON envelope. Commands that ghx wraps are refused with a hint to the replacement. Any other write is refused, and so is any unknown command.
 
-Why:
-- **It matches the confirmed steering.** `permissions.deny` blocks raw gh PR writes, while raw reads stay allowed under a fail-open hook that nudges toward ghx. A passthrough would only add a route around the deny rules and another place where mutations could leak.
-- **No loop with the hook.** The hook fires only on commands in `replaces`, and ghx points to raw gh only for commands nothing replaces.
-- **Reads stay read-only.** They use 01's allowlist guard. Passthrough would need a bigger, separately audited exec path.
-- **The risk is in writes.** There were 0 `gh api` mutations (§2.4) and no reckless writes (§7); policy drift lives in writes. The harness refusals came from compound pipelines, not plain gh reads (§3.2).
-- **Almost no new code:** 01's `onUnknown` plus `replaces` (§15, ask 3).
-- **Trade-off:** unwrapped reads keep gh's output format. A structured `pr diff` with a fallback above 300 files (§9.10) is the top v1.1 candidate.
+| Category | Subcommands | Behaviour |
+|---|---|---|
+| Allowlisted reads | `pr diff`, `pr list`, `issue view`, `issue list`, `search issues\|prs\|code\|repos\|commits`, `release list\|view`, `repo view`, `workflow list\|view`, `run list`, `run view` (without `--log`/`--log-failed`), `run download` (requires `-D <dir>`; writes local files only), `label list`, `api` (GET only) | Runs `gh` with `-R` injected when the repo has been resolved, and with env `GH_PAGER=cat GH_PROMPT_DISABLED=1 NO_COLOR=1 GH_NO_UPDATE_NOTIFIER=1` |
+| Refused, wrapped replacement exists (exit 2, `USAGE_UNKNOWN_COMMAND` with the replacement) | `pr view` → `pr status`. `pr checks` (including `--watch`) → `ci wait` (run in background, §11.0) or `pr status`. `run view --log*` → `ci why`. `run watch` → `ci wait`. `run rerun` → `ci rerun`. `pr create\|edit\|merge\|comment\|review` → the ghx equivalents. `pr ready` → `pr edit {"draft":false}`. `pr close` → `pr comment --close`. `pr reopen` → `ci retrigger`, if retriggering is the intent | The hint carries the exact replacement argv |
+| Refused writes (exit 6, `PASSTHROUGH_WRITE_REFUSED`) | Every other mutating subcommand: issue create/comment/edit/close, release create, repo/secret/variable/label writes, workflow run/enable, gist, `pr checkout` (it mutates local git). Also `api` with `-X`/`--method` other than GET, `api` with any of `-f`, `-F`, `--field`, `--raw-field` or `--input` (**gh silently switches these to POST**), and `api graphql` (always a POST) | |
+| Unknown | anything else | Exit 2, `USAGE_UNKNOWN_COMMAND` |
+
+The envelope:
+
+```ts
+{ passthrough: { argv: string[], exitCode: number,
+  json?: unknown,              // stdout parsed as JSON when possible
+  text?: string,               // otherwise, ≤ 32 KB
+  stdoutPath?: string,         // > 32 KB: written to the artifact dir
+  stdoutBytes: number, stderr?: string /* ≤ 2 KB */ } }
+```
+
+- A non-zero gh exit becomes `GH_FAILED` (7) with the envelope in `details`.
+- `pr diff` failing with HTTP 406 becomes `DIFF_TOO_LARGE`, with a hint to run a local `git diff` **[G-300]**.
+
+Justification:
+- **Agents need these reads.** They use unwrapped reads all the time: `pr diff` (88 calls), `pr list` (59), `issue view` (20), `run list` (296) and `api` GETs (~300) (§2.1, §2.4). Refusing them would push agents back to raw `gh` and pipes.
+- **Writes are where the risk is.** There were 0 `gh api` mutations (§2.4) and no reckless writes (§7). The real risk is **policy drift** (§7), which lives in writes. Refusing unvalidated writes makes "writes never fall back silently" (brief 3) true by construction.
+- **Harness allowlisting gets simple.** A harness can allowlist `ghx …` knowing that ghx only mutates through validated verbs. That removes the cause of the 19 guard refusals and 6 classifier denials (§3.2).
+- **Redirects retrain habits.** Refusing `pr view`, `pr checks` and `run view --log` with the exact replacement retrains a habit worth 534 + 522 + 78 calls (§2.1). It also removes the in-progress log failures **[G-LOGS]**.
+- **The output contract holds.** The envelope keeps passthrough output in JSON and within the size bound (brief 3, §9.10).
 
 ---
 
 ## 11. `ci wait`: the CI watcher
 
 ```
-ghx ci wait <target> [<target>…] [--until settled|first-failure|mergeable] [--any]
-            [--timeout <dur> | --max <dur>] [--if-eta-under <dur>]
+ghx ci wait <target> [<target>…] [--until first-failure|settled|mergeable] [--any]
             [--grace <dur>] [--expect-grace <dur>] [--on-head-change restart|stop|stay]
-            [--check <glob>]… [--no-diagnose] [--no-compare-main]
+            [--check <glob>]… [--no-diagnose] [--no-compare-main] [--stream]
 ```
 
 A target is a PR selector, `branch:<name>` or `branch:<name>@<sha>`.
 
-The command blocks, or streams in the background, until CI for a bound SHA reaches the requested state. It emits one NDJSON line per transition and ends with a self-contained summary that includes the diagnosis. It replaces 232 sleep loops, 44 Monitor scripts, 41 `--watch` calls, 74 perl alarms and 98 background runs (§5.2, §9.2). It is a pure read, using 01's stream mode and the read-only client.
+The command waits until CI for a bound SHA reaches a terminal state that ghx derives from CI itself. It then prints **one** self-contained JSON summary, with the diagnosis included, and exits with an outcome code. **The caller never supplies a duration.** It replaces 232 sleep loops, 44 Monitor scripts, 41 `--watch` calls, 74 perl alarms and 98 background runs (§5.2, §9.2). It is a pure read on 01's read-only client.
 
-### 11.1 Agent-harness fit
+### 11.0 The canonical protocol (one way, every time)
 
-The two budget flags are mutually exclusive (`VALIDATION`). Both set 01's `ctx.deadline`; the spec is `timeout: {defaultMs: 8m, maxMs: 6h}`.
+This is the only way agents wait for CI. The agent snippet (01 §7) states it verbatim:
 
-| Flag | Default | Range | Use |
-|---|---|---|---|
-| `--timeout` | **8m** | 10s–9m30s | Blocking call inside the Bash tool's 10-minute cap. Values over 9m30s are refused with "use `--max` and run in background", not accepted only to be killed |
-| `--max` | — | 1m–6h | Background run under a line monitor. Turns on 01's 60 s heartbeat and a 30 s interval floor |
+> Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then continue other work or end your turn. Do not poll, sleep, or use Monitor for CI. You will be re-invoked when it exits. Its stdout is the full answer and its exit code is the outcome (§6.1).
 
-- **Why 8m:** it leaves at least 90 s of the 10-minute cap for the final diagnosis and process start.
-- **Diagnosis budget:** ≤5 jobs × 2 log fetches (8 MB and 20 s cap each) plus the main comparison, all under its own 60 s deadline. If it overruns, the summary says `diagnosis.partial:true`.
-- **Soft stop:** at `deadline − 90 s` the generator stops polling, diagnoses, and returns `outcome:"timeout"` (exit 8). 01's hard abort never fires in normal operation.
-- **Lines** are `{type, seq, at, …}`, flushed one at a time, ≤4,096 bytes each. The last line is always `summary` or `error`.
-- **Signals** produce `outcome:"interrupted"` through 01's graceful path, exit 130/143.
-- **`--if-eta-under <dur>`:** if the p90 ETA exceeds `dur`, ghx returns at once with `outcome:"timeout", reason:"eta-exceeds"` (exit 8). A blocking caller sees nothing until exit, so this is how it decides to background instead. `pr status.ci.eta` shows the same ETA.
+Evidence for each property this relies on (2026-10-22, Claude Code 2.1.280):
+
+| Property | Evidence |
+|---|---|
+| Background Bash has no 10-minute cap in interactive sessions | Transcripts: 29 of 101 background commands ran over 10 min and completed, 14 of them gh CI waits. The longest successful run was 88 min. Spike: a 14-minute background command, run on this version. Docs: "no time limit" for interactive sessions |
+| Completion re-invokes an idle interactive agent | Spike: the coordinator session was idle and was woken by the completion notification. The docs claim this only happens in `-p`; observed behaviour contradicts that |
+| Completion re-invokes an idle subagent | Spike: a subagent ran `sleep 45` in the background and ended its turn. It was re-invoked with the output. The docs say background commands stop when a subagent's run ends, so this is **version-dependent**, and resumability (§11.1) makes it harmless either way |
+| A foreground call that overruns is not lost | Spike: a foreground command past its timeout was moved to the background and notified on completion (except commands starting with `sleep`). So an agent that forgets `run_in_background` loses at most 2 minutes of blocking, not the result |
+| The agent receives stdout and the exit code on wake | Docs: the read-back window is ~30k chars. The summary stays far below it (§11.9) |
+
+Why not Monitor:
+- Every Monitor event is a conversation message, so per-check lines spend context on transitions the agent can't act on.
+- Monitor expires at 30 min and must be re-armed, which is agent work.
+- Its own tool description ships the `gh pr checks` diff loop as an example; that loop is where the 44 hand-written scripts came from (§5.2).
+
+`--stream` exists only for a human-directed watch. It is not the agent path.
+
+**Enforcement** extends 01 §7's hook:
+1. **Bash calls to `^ghx ci wait` without `run_in_background: true`** get `updatedInput` setting it. The hook does **not** send `permissionDecision: "allow"`, so normal permission rules still apply to the rewritten call. **Spike (03):** confirm that `updatedInput` without a decision is honoured, and that it can change a field other than `command`. If not, fall back to a deny whose reason quotes the exact correct call.
+2. **The hook matcher covers `Monitor` as well as `Bash`.** A command containing `gh pr checks`, `gh run watch`, `gh run list` or `gh run view` in a loop gets the soft-hook response (ask mode, fail-open, as confirmed). Its reason names `ghx ci wait <pr>` with `run_in_background`.
+
+### 11.1 Termination without caller durations
+
+`ci wait` ends only on states it can observe:
+
+| Outcome | Exit | When |
+|---|---:|---|
+| `green` | 0 | Settled with no considered failures |
+| `red` | 10 | A considered check failed and isn't shared with main |
+| `red-shared` | 11 | Every failure is shared with main (§1.5) |
+| `superseded` / `closed` | 12 | The head moved (with `--on-head-change stop`), or the PR closed or merged |
+| `no-checks` | 13 | Nothing registered within `--grace` (default 120 s) |
+| `stalled` | 14 | See the stall rules below |
+| `pending` | 15 | Self-return in an unattended session (below). Re-run the identical command |
+| `interrupted` | 130/143 | SIGINT or SIGTERM |
+
+**Stall rules.** Stall detection is an early exit. It is not the safety net. GitHub cancels jobs at `timeout-minutes` (default 360) and queued jobs after 24 h, and `cancelled` counts as red, so ghx never waits forever. A check is stalled when either holds:
+- **Running too long:** it has run longer than `max(3 × p90, p90 + 15 min)` of its baseline. On a first run with no baseline, ghx uses the job's `timeout-minutes` from the workflow file, or 360 min.
+- **Stuck in the queue:** it has been queued longer than `ci.stall.queuedMinutes` (default 30) while no other job in its run has started. This signals a runner shortage or an outage, as when one session polled githubstatus.com during an Actions outage (§5.2).
+
+A stall ends the wait with the diagnosis so far, the stalled checks, and `next` suggestions (`ci rerun`, or re-wait).
+
+**Resumability.** This is the guarantee that makes the protocol robust.
+- **State on disk.** State lives in 01's cache dir, keyed by `repo + target + boundSha`: check states, expected set, baselines, the diagnosis so far, and ETags.
+- **Re-running resumes.** Re-running the identical command resumes the wait. It pays no repeat baseline or diagnosis calls, and it returns immediately if a terminal state is already known.
+- **Interruptions are harmless.** A kill (harness limit, subagent end, Ctrl-C) costs at most one extra call.
+- **Expiry.** State expires 24 h after the SHA's last check completes.
+
+**Unattended sessions** (`claude -p`, SDK). The docs cap background commands at 30 min by default and 2 h at most.
+- When `CLAUDE_CODE_SESSION_ATTENDED` is not `1`, ghx returns `pending` (exit 15) after 25 min of waiting, with `next: [the identical command]`.
+- The env var is a hint, not a dependency. If detection is wrong, resumability still holds.
+- In attended sessions there is no self-imposed limit.
+
+**Default mode: `first-failure`.** The agent wants the earliest actionable signal. A failure is actionable immediately, because the agent can start fixing while slower jobs finish. Waiting for `settled` makes it idle behind the slowest green job.
+- **Re-running the same command on the same SHA** continues past failures already reported, and returns at the next new failure or at settle. So the first call gives the earliest fix, and a second call gives the full picture when the agent wants it.
+- **`pr merge` flows** use `--until mergeable`.
+
+**Output.** stdout is exactly one JSON document, the `WaitSummary` (§11.9), always within 01's 16 KB bound.
+- The summary is **never spilled**. A spill would turn the wake into a second tool call. If 10 targets would overflow it, per-target detail is cut to its compact form and the full JSON goes to `diagnosisPath`.
+- Transitions are appended to `eventsPath` (NDJSON in the cache dir) for debugging and `--stream`.
+- **Diagnosis budget:** ≤5 jobs × 2 log fetches (8 MB and 20 s cap each) plus the main comparison, all under a 60 s deadline. If it overruns, the summary says `diagnosis.partial:true`.
+- **Signals** produce `outcome:"interrupted"` with the current summary.
 
 ### 11.2 Until-modes
 
@@ -934,7 +1002,7 @@ Phases:
 | running | eta/6, clamped to 15–60 s |
 | within 60 s of an expected completion | 10 s |
 | after the ETA is overrun | 30 s |
-| `--max` mode | at least 30 s |
+| unattended session | at least 30 s |
 
 - When <10% of the rate budget remains, the interval is multiplied by 4 and a `rate-limit` event is emitted. When the budget is exhausted, ghx pauses until `resetAt`.
 - All intervals get ±10% jitter.
@@ -963,13 +1031,13 @@ Phases:
 
 ### 11.9 Schemas
 
-01 adds `type`, `seq` and `at` to every line, and emits its own `warning` and `heartbeat` lines.
+Events are written to `eventsPath` and printed only with `--stream`. 01 adds `type`, `seq` and `at` to every line.
 
 ```ts
 const T = { target: z.string() };
 const WaitEvent = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("start"), ...T, headSha: Sha, until: z.string(), budgetSec: z.number(), phase: z.string(),
-    counts: CiSummary.shape.counts, expected: z.array(ExpectedCheck), eta: CiSummary.shape.eta, advice: z.enum(["block","background"]) }),
+  z.object({ type: z.literal("start"), ...T, headSha: Sha, until: z.string(), phase: z.string(),
+    counts: CiSummary.shape.counts, expected: z.array(ExpectedCheck), eta: CiSummary.shape.eta }),
   z.object({ type: z.literal("phase"), ...T, headSha: Sha, from: z.string(), to: z.string() }),
   z.object({ type: z.literal("check"), ...T, headSha: Sha, name: z.string(), workflow: z.string().nullable(),
     from: z.union([Bucket, z.literal("absent")]), to: Bucket, conclusion: z.string().nullable(), required: z.boolean(),
@@ -981,7 +1049,7 @@ const WaitEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("branch-advanced"), ...T, boundSha: Sha, branchHead: Sha }),
   z.object({ type: z.literal("rate-limit"), ...T, remaining: z.number(), resetAt: Iso, intervalSec: z.number() }),
 ]);
-const Outcome = z.enum(["green","red","red-shared","timeout","superseded","closed","no-checks","interrupted"]);
+const Outcome = z.enum(["green","red","red-shared","superseded","closed","no-checks","stalled","pending","interrupted"]);
 const CompactDiagnosis = z.object({ job: z.string(), workflow: z.string(), jobId: z.number(), step: z.string().nullable(),
   tests: z.array(z.string()).max(5), firstError: z.string().nullable(), logPath: z.string().nullable(),
   sameOnMain: SameOnMain.shape.verdict, flake: Flake.shape.score });
@@ -991,10 +1059,12 @@ const TargetSummary = z.object({ target: z.string(), outcome: Outcome, reason: z
     failing: z.array(z.object({ name: z.string(), workflow: z.string().nullable(), jobId: z.number().nullable(), runId: z.number().nullable() })),
     expectedMissing: z.array(z.string()) }),
   diagnosis: z.object({ jobs: z.array(CompactDiagnosis).max(5), partial: z.boolean() }).nullable(),
+  stalled: z.array(z.object({ name: z.string(), state: z.enum(["queued","running"]), forSec: z.number(), thresholdSec: z.number(), basis: z.string() })),
   rerunCandidates: z.array(z.number()),
   merge: z.object({ mergeable: z.string(), ready: z.boolean(), blockers: z.array(z.string()), waivers: z.array(z.string()) }).nullable(),
   next: z.array(z.string()) });
-const WaitSummary = z.object({ outcome: Outcome, exitCode: z.number(), results: z.array(TargetSummary), diagnosisPath: z.string().nullable() });
+const WaitSummary = z.object({ outcome: Outcome, exitCode: z.number(), results: z.array(TargetSummary), diagnosisPath: z.string().nullable(),
+  eventsPath: z.string(), resumed: z.boolean() });   // the only stdout of the default (non --stream) protocol
 ```
 
 - `progress` is emitted at most every 60 s when nothing else happens.
@@ -1204,10 +1274,10 @@ Addressed in 9f2c4e1.
 
 ### 14.4 `ci wait` stream for head `9f2c4e1`
 
-The command was `ghx ci wait powerhouse-inc/powerhouse#3301 --until first-failure --max 30m`, run in the background.
+The command was `ghx ci wait powerhouse-inc/powerhouse#3301`, run with `run_in_background: true` (the default mode is first-failure). With the default protocol, the agent receives **only the final `summary` line** on stdout when it is woken. The lines below are the `eventsPath` log, the same lines `--stream` would print.
 
 ```
-{"type":"start","seq":0,"at":"2026-10-21T16:23:05Z","target":"powerhouse-inc/powerhouse#3301","headSha":"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d","until":"first-failure","budgetSec":1800,"phase":"partial","counts":{"pass":0,"fail":0,"pending":9,"skipped":0,"cancelled":0,"neutral":0,"ignored":1},"expected":[{"name":"Test Reactor (shard 1/3)","workflow":"CI","source":"baseline","state":"reported"},{"name":"e2e-tests","workflow":"E2E","source":"baseline","state":"missing"}],"eta":{"seconds":1080,"p90Seconds":1320,"basis":"CI@main: 10 runs, E2E@main: 8 runs"},"advice":"background"}
+{"type":"start","seq":0,"at":"2026-10-21T16:23:05Z","target":"powerhouse-inc/powerhouse#3301","headSha":"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d","until":"first-failure","phase":"partial","counts":{"pass":0,"fail":0,"pending":9,"skipped":0,"cancelled":0,"neutral":0,"ignored":1},"expected":[{"name":"Test Reactor (shard 1/3)","workflow":"CI","source":"baseline","state":"reported"},{"name":"e2e-tests","workflow":"E2E","source":"baseline","state":"missing"}],"eta":{"seconds":1080,"p90Seconds":1320,"basis":"CI@main: 10 runs, E2E@main: 8 runs"},"advice":"background"}
 {"type":"phase","seq":1,"at":"2026-10-21T16:23:41Z","target":"powerhouse-inc/powerhouse#3301","headSha":"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d","from":"partial","to":"running"}
 {"type":"check","seq":2,"at":"2026-10-21T16:27:12Z","target":"powerhouse-inc/powerhouse#3301","headSha":"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d","name":"Typecheck","workflow":"CI","from":"pending","to":"pass","conclusion":"success","required":true,"runId":37948190914,"jobId":111978835001,"url":"https://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835001"}
 {"type":"check","seq":3,"at":"2026-10-21T16:41:05Z","target":"powerhouse-inc/powerhouse#3301","headSha":"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d","name":"Test Reactor (shard 1/3)","workflow":"CI","from":"pending","to":"fail","conclusion":"failure","required":false,"runId":37948190914,"jobId":111978835495,"url":"https://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835495"}
@@ -1216,8 +1286,7 @@ The command was `ghx ci wait powerhouse-inc/powerhouse#3301 --until first-failur
 ```
 
 How to read this stream:
-- The start event advises `background` because p90 (22m) exceeds the 8m default. A blocking caller using `--if-eta-under 7m` would have got exit 8 at once.
-- The run took 1,095 s of its 1,800 s budget.
+- The run took 1,095 s. The agent spent one tool call on it and was woken once.
 - `running` means `e2e-tests` registered, so nothing is left in `expectedMissing`.
 
 ### 14.5 `ghx pr status powerhouse-inc/powerhouse#3301` (after settle)
@@ -1371,9 +1440,9 @@ How to read this stream:
 5. **Exit codes go beyond the four outcomes the coordinator named.**
    - 11 (red, shared with main) exists because the user's rule makes it mergeable (§4.3).
    - 13 (no checks) exists because treating "nothing registered" as green is the misread behind 11 cases in §3.1.
-   - A `ci wait` timeout reuses 8.
+   - `ci wait` has no timeout outcome; 14 (stalled) and 15 (pending, resume) replace it (§11.1).
    - The numbering starts from 01's provisional table, which 02 now finalizes.
-6. **No passthrough.** Raw reads remain available under the confirmed steering, so ghx refuses unknown commands and points to the right tool. Unwrapped reads keep gh's output format.
+6. **Passthrough returns an envelope, not raw gh output** (§10). This keeps the JSON and size contract, at the cost of nesting gh's stdout under `passthrough.json` or `passthrough.text`.
 
 ### Critical files
 - /Users/benjaminjordan/projects/thegoldenmule/gh-for-agents/docs/plans/00-brief.md
