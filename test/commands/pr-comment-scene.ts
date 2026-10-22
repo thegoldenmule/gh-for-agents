@@ -4,7 +4,7 @@
 import { isMutating } from '../../src/gh/guard.ts';
 import { FakeGh, type FakeGhCall, type GhReply } from '../helpers/fake-gh.ts';
 import { httpReply, ok } from '../unit/ci/_helpers.ts';
-import { HEAD, isPrCommits, isQ1, prCommitsReply, q1Pr, q1Reply } from '../unit/pr/snapshot-fixture.ts';
+import { HEAD, isPrCommits, isQ1, OLD_HEAD, prCommitsReply, q1Pr, q1Reply } from '../unit/pr/snapshot-fixture.ts';
 
 export { BASE_OID, HEAD, OLD_HEAD } from '../unit/pr/snapshot-fixture.ts';
 
@@ -35,6 +35,7 @@ export function label(call: Pick<FakeGhCall, 'argv' | 'stdin'>): string {
   if (write && /\/pulls\/\d+$/.test(path)) return 'close';
   if (write && /\/pulls\/\d+\/reviews$/.test(path)) return 'post-review';
   if (write && /\/comments\/\d+\/replies$/.test(path)) return 'reply';
+  if (path.includes('/contents/.github/ghx.json')) return 'config';
   if (/\/pulls\/\d+\/files/.test(path)) return 'files';
   if (/\/reviews\/\d+\/comments/.test(path)) return 'review-comments';
   return `other:${a.join(' ')}`;
@@ -81,6 +82,10 @@ export interface WriteSceneOptions {
   reviewPost?: GhReply;
   /** Reply to GET reviews/{id}/comments (default: one comment per posted inline comment). */
   reviewComments?: GhReply;
+  /** The PR's commits for the addressed check (default [OLD_HEAD, HEAD]). */
+  commits?: string[];
+  /** Reply to resolveReviewThread / unresolveReviewThread (default success). */
+  threadMutation?: GhReply;
 }
 
 export const REVIEW_DB_ID = 2398765432;
@@ -167,7 +172,21 @@ export function writeScene(o: WriteSceneOptions = {}): WriteScene {
       posted.map((c, i) => ({ id: 1834567890 + i, body: c.body, html_url: `${PR_URL}#discussion_r${1834567890 + i}` })),
     );
   });
+  dynamic(gh, 'config', () => reply(404, { message: 'Not Found' }, 'Not Found'));
+  dynamic(gh, 'commits', () => prCommitsReply(o.commits ?? [OLD_HEAD, HEAD]));
+  dynamic(gh, 'reply', ({ stdin }) => {
+    record('reply', stdin);
+    const id = ++nextId;
+    return reply(201, { id, html_url: `${PR_URL}#discussion_r${id}` }, 'Created');
+  });
+  for (const kind of ['resolve', 'unresolve']) {
+    dynamic(gh, kind, ({ stdin }) => {
+      record(kind, stdin);
+      return (
+        o.threadMutation ??
+        reply(200, { data: { [`${kind}ReviewThread`]: { thread: { isResolved: kind === 'resolve' } } } })
+      );
+    });
+  }
   return { gh, sent };
 }
-
-export { HEAD as HEAD_SHA, prCommitsReply };

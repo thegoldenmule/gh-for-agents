@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "api",
+    "graphql",
+    "--include",
+    "--hostname",
+    "github.com",
+    "-f",
+    "query=query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid commits(first:100,after:$after){totalCount pageInfo{hasNextPage endCursor} nodes{commit{oid}}}}}}",
+    "-f",
+    "name=demo",
+    "-F",
+    "number=7",
+    "-f",
+    "owner=octo"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"data\":{\"repository\":{\"pullRequest\":{\"headRefOid\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"commits\":{\"totalCount\":2,\"pageInfo\":{\"hasNextPage\":false,\"endCursor\":null},\"nodes\":[{\"commit\":{\"oid\":\"cccccccccccccccccccccccccccccccccccccccc\"}},{\"commit\":{\"oid\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}}]}}}}}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "the PR commit list (PR_COMMITS_QUERY) for the addressed check: bbbbbbb is the head"
+  }
+}
