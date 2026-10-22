@@ -51,7 +51,10 @@ test('smoke/ci-wait: stdout is exactly one WaitSummary document; eventsPath is g
   assert.ok(lines(d.log).length > 0);
 });
 
-test('10 targets, each with 5 failing jobs: one document under 16 384 bytes, never spilled, full detail on disk', async () => {
+// Slow by nature (~7 s): every gh call is a fake-gh process, and 10 targets make ~100 of them.
+test('10 targets, each with 5 failing jobs: one document under 16 384 bytes, never spilled, full detail on disk', {
+  timeout: 120_000,
+}, async () => {
   const checks: SimState['checks'] = {};
   const prs: NonNullable<SimState['prs']> = {};
   for (let n = 1; n <= 10; n++) {
@@ -113,7 +116,10 @@ for (const [sig, code] of [
   });
 }
 
-test('no default deadline: a healthy pending CI is still waiting after 5 s, with nothing on stdout', async () => {
+// Slow by design (~6 s): 03 §4.3 asks for 5 real seconds of an alive, silent wait.
+test('no default deadline: a healthy pending CI is still waiting after 5 s, with nothing on stdout', {
+  timeout: 60_000,
+}, async () => {
   const { scenario, calls } = await recordScenario(pendingState(), ['o/r#7']);
   const d = dirs();
   let stdoutAt5s = 'unset';

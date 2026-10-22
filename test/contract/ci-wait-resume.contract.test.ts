@@ -57,7 +57,10 @@ async function waitForCalls(path: string, n: number, timeoutMs = 15_000): Promis
   }
 }
 
-test('SIGKILL mid-wait, then the identical command resumes with no repeated baseline or diagnosis calls', async () => {
+// ~3 s: two spawned runs, each replaying its calls through fake-gh processes.
+test('SIGKILL mid-wait, then the identical command resumes with no repeated baseline or diagnosis calls', {
+  timeout: 60_000,
+}, async () => {
   const sim = new GitHubSim(new FakeClock(Date.now()), state());
   const rec: Recorded[] = [];
   const recArtifacts = join(dirs().dir, 'artifacts');
