@@ -366,3 +366,14 @@ test('ci wait caches the base branch’s required checks for pr status’s quiet
     files.join('\n').slice(0, 400),
   );
 });
+
+test('--max-bytes and GHX_MAX_BYTES cannot make ci wait spill: the summary is always one document', async () => {
+  const a = running(321, 'unit');
+  const { sim } = world([a]);
+  change(sim, MIN, done(a, MIN, 'failure', { tests: ['src/a.test.ts > adds'] }));
+  const r = await wait(sim, ['o/r#7', '--max-bytes', '300'], { env: { GHX_MAX_BYTES: '400' } });
+  assert.equal(r.exitCode, EXIT.CI_RED, r.stdout);
+  assert.equal(r.json.spilled, undefined, r.stdout.slice(0, 200));
+  WaitSummary.parse(r.json);
+  assert.ok(r.json.results[0].diagnosis.jobs.length > 0, 'not compacted to the flag either');
+});

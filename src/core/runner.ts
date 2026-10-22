@@ -206,6 +206,7 @@ export async function runCommandWith(
     return { exitCode: await emitError(deps.stdout, e, fallback, deps.clock), forced: false };
   }
   if (spec.mode === 'stream') {
+    if (spec.maxBytes === 'fixed') out = { ...out, maxBytes: DEFAULT_MAX_BYTES };
     const { runStream } = await import('./stream.ts');
     return runStream(spec, globals, deps, rawInput, out);
   }

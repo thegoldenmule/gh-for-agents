@@ -88,6 +88,8 @@ export interface StreamCommandSpec<I extends z.ZodObject, E extends z.ZodType, S
    * object as one JSON document. 'ndjson': every line also goes to stdout. Default 'ndjson'.
    */
   outputMode?: StreamOutputMode | ((input: z.output<I>) => StreamOutputMode);
+  /** 'fixed': the output bound is always DEFAULT_MAX_BYTES; --max-bytes and GHX_MAX_BYTES are ignored. */
+  maxBytes?: 'fixed';
   run(input: z.output<I>, ctx: StreamContext): AsyncGenerator<z.input<E>, z.input<S>, void>;
   exitCode?(summary: z.output<S>): ExitCode;
 }

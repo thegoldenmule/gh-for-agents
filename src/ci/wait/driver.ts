@@ -814,8 +814,8 @@ export async function* runWait(
     const agg = interruptedBy
       ? { outcome: 'interrupted' as const, exitCode: exitForSignal(interruptedBy) }
       : aggregate(done.length > 0 ? done : results);
-    const maxBytes =
-      Math.min(DEFAULT_MAX_BYTES, Number(ctx.env.GHX_MAX_BYTES) || DEFAULT_MAX_BYTES) - WARNINGS_RESERVE_BYTES;
+    // Fixed at 16 KB: the command ignores --max-bytes and GHX_MAX_BYTES (spec maxBytes 'fixed'), never spills.
+    const maxBytes = DEFAULT_MAX_BYTES - WARNINGS_RESERVE_BYTES;
     const eventsPath = await ctx.events.path();
     const build = (diagnosisPath: string | null) => (lvl: number) => ({
       outcome: agg.outcome,

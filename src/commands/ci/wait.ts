@@ -45,7 +45,7 @@ const Input = z.strictObject({
 export default defineStreamCommand({
   name: ['ci', 'wait'],
   summary: 'Wait for CI on a PR or branch; one JSON summary, exit code = outcome (run in background)',
-  description: PROTOCOL,
+  description: `${PROTOCOL} The summary is never spilled: it is compacted to 16 KB, and --max-bytes and GHX_MAX_BYTES are ignored.`,
   kind: 'read',
   input: Input,
   positionals: ['targets'],
@@ -54,6 +54,7 @@ export default defineStreamCommand({
   event: WaitEvent,
   summarySchema: WaitSummary,
   outputMode: (input) => (input.stream ? 'ndjson' : 'final'),
+  maxBytes: 'fixed',
   replaces: ['gh pr checks --watch', 'gh run watch', 'gh pr checks', 'gh run list'],
   examples: [
     { argv: 'ghx ci wait 3301 -R powerhouse-inc/powerhouse', note: 'Run with run_in_background: true' },
