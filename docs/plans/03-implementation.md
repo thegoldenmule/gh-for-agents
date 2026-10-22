@@ -94,6 +94,8 @@ Each commit lists **Files**, **Proves** and **Tests**. Test paths:
 - `test/live/**`: the opt-in sandbox suite (§4.4).
 
 Fixtures live under `test/fixtures/`. The full inventory is in §6.2.
+- Until a sandbox exists (Q2), fixtures marked `live:sandbox` are recorded from public repos (`live:public`) or written as `synthetic`.
+- Runner log fixtures (vitest, jest, node:test, pytest, go) come from failed runs in public repos.
 
 ---
 
@@ -106,7 +108,7 @@ The three unverified behaviours from 02 §15 (ask 5) were resolved on 2026-10-22
 - Proves: the §3 assumptions can be re-checked in one command after any gh upgrade. The live workflow (§7.2) runs it too.
 - Tests: none. It's a probe; its outputs become fixtures in M1.6 and M1.7.
 
-**M0.2 `test(sandbox): sandbox repo template and init script`**
+**M0.2 `test(sandbox): sandbox repo template and init script`**: **deferred to post-v1** (Q2: the user deferred the live suite)
 - Files: `test/sandbox-template/**` (the full contents of the sandbox repo, §4.4.1) and `scripts/sandbox/init.ts`. The script pushes the template to `$GHX_SANDBOX_REPO`. The user runs it once, because it mutates a repo they create.
 - Proves: the sandbox is version-controlled and reproducible.
 - Tests: `test/unit/sandbox-template.test.ts`. It line-checks every workflow file (`on:`, `jobs:`, and that the controlling `ci/mode.json` exists) and validates the template's `.github/ghx.json` with `ConfigSchema`.
@@ -1146,17 +1148,22 @@ The PR commands are dogfooded on the sandbox, by the live suite and by the accep
    - By default stdout is one `WaitSummary` (or one error document), never spilled, and under 16 KB with 10 targets. `--stream` keeps the NDJSON invariants.
    - It ends only on CI-derived outcomes (green, red, red-shared, superseded, closed, no-checks, stalled), on `pending` when unattended at 25 min, or on a signal (`interrupted`).
    - The stall, resume and unattended tests (M4.5–M4.7) pass on FakeClock, and the contract tests pass with no deadline set (§4.3).
-7. **Live run.** One manual run of `live.yml` passes, including the moved-head race and both stall cases, and `fixtures:verify` reports no drift.
+7. **Live run.** **Deferred to post-v1** (Q2). v1 instead requires the moved-head race and both stall cases as fixture-backed regression tests (R01 and the M4.5 stall tests).
 8. **Discovery.** `ghx --help`, `<cmd> --help` and `<cmd> --schema` describe every command, and `docs/agents/*` is generated and not stale.
 9. **Steering.** The steering kit is documented and works.
    - With the `permissions.deny` rules and the hook in ask mode, a raw `gh pr merge` is blocked, and `gh pr checks` (including inside a Monitor loop) gets a `ghx ci wait` suggestion.
    - A foreground `ghx ci wait` is rewritten to `run_in_background: true`.
    - Checked by `test/commands/hook.test.ts` plus `scripts/spike-hook.ts` against the installed Claude Code.
-10. **Acceptance.** The agent acceptance run (§8.2) passes three times in a row.
+10. **Acceptance.** v1: `scripts/acceptance/score.ts` is run over the Claude Code session JSONL of **three real PRs** the user works on with ghx installed. Each must meet the §8.2 thresholds. The scripted sandbox run is post-v1 (Q2).
 
 ### 8.2 Agent acceptance
 
-**The scripted run**, `scripts/acceptance/run.ts`, needs a sandbox and `claude` on PATH. It has three steps.
+**v1 acceptance (no sandbox, per Q2).**
+- `score.ts` takes a session JSONL from `~/.claude/projects/` as input, so ordinary work on real PRs is the acceptance run.
+- The scoring rules below apply unchanged.
+- Steps 1–2 (scripted setup and the `claude -p` session) are post-v1, once a sandbox exists.
+
+**The scripted run (post-v1)**, `scripts/acceptance/run.ts`, needs a sandbox and `claude` on PATH. It has three steps.
 
 1. **Setup.** This step is scripted; the agent doesn't do it.
    - Create branch `accept/<id>` from `main`, with a real bug in `app/vitest/sum.ts` that makes the vitest job fail. `ci/mode.json` stays `none`, so the failure is genuine.

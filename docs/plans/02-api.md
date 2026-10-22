@@ -907,7 +907,7 @@ Why not Monitor:
 | `pending` | 15 | Self-return in an unattended session (below). Re-run the identical command |
 | `interrupted` | 130/143 | SIGINT or SIGTERM |
 
-**Stall rules.** Stall detection is an early exit. It is not the safety net. GitHub cancels jobs at `timeout-minutes` (default 360) and queued jobs after 24 h, and `cancelled` counts as red, so ghx never waits forever. A check is stalled when either holds:
+**Stall rules.** Stall detection is an early exit. It is not the safety net. GitHub cancels jobs at `timeout-minutes` (default 360) and queued jobs after 24 h, and `cancelled` counts as red, so ghx never waits forever. A check is stalled when any of these holds (the third rule, for required or config checks that never register, is in §11.3):
 - **Running too long:** it has run longer than `max(3 × p90, p90 + 15 min)` of its baseline. On a first run with no baseline, ghx uses the job's `timeout-minutes` from the workflow file, or 360 min.
 - **Stuck in the queue:** it has been queued longer than `ci.stall.queuedMinutes` (default 30) while no other job in its run has started. This signals a runner shortage or an outage, as when one session polled githubstatus.com during an Actions outage (§5.2).
 
@@ -950,7 +950,7 @@ A stall ends the wait with the diagnosis so far, the stalled checks, and `next` 
 
 | Source | How | If it never reports |
 |---|---|---|
-| required | `GET repos/o/r/rules/branches/<base>` plus the protection summary from `GET repos/o/r/branches/<base>`, plus `isRequired`. **Spike:** both readable without admin (`…/protection` needs admin and is not used) | Never green. Stays in `expectedMissing` until the budget runs out |
+| required | `GET repos/o/r/rules/branches/<base>` plus the protection summary from `GET repos/o/r/branches/<base>`, plus `isRequired`. **Spike:** both readable without admin (`…/protection` needs admin and is not used) | Never green. If it is still missing once everything else has settled and `ci.stall.missingMinutes` (default 10) has passed, the wait ends `stalled` with `state:"missing"` (§11.1). A workflow that never triggers is a misconfiguration, so it gets a short fuse |
 | config | `ci.expected: [{name, workflow?, paths?}]`, applied when the paths match | Same as required |
 | baseline | Check names, in priority order: (1) the PR's previous head SHA (for branch targets, the previous commit); (2) the last PR merged into the base; (3) the base head (`confidence:"low"`). Cached | Ages to `absent` after `--expect-grace` (90 s) once everything else settles, emitting `expected-absent`. Covers path-filtered and main-only jobs |
 
@@ -1059,7 +1059,7 @@ const TargetSummary = z.object({ target: z.string(), outcome: Outcome, reason: z
     failing: z.array(z.object({ name: z.string(), workflow: z.string().nullable(), jobId: z.number().nullable(), runId: z.number().nullable() })),
     expectedMissing: z.array(z.string()) }),
   diagnosis: z.object({ jobs: z.array(CompactDiagnosis).max(5), partial: z.boolean() }).nullable(),
-  stalled: z.array(z.object({ name: z.string(), state: z.enum(["queued","running"]), forSec: z.number(), thresholdSec: z.number(), basis: z.string() })),
+  stalled: z.array(z.object({ name: z.string(), state: z.enum(["queued","running","missing"]), forSec: z.number(), thresholdSec: z.number(), basis: z.string() })),
   rerunCandidates: z.array(z.number()),
   merge: z.object({ mergeable: z.string(), ready: z.boolean(), blockers: z.array(z.string()), waivers: z.array(z.string()) }).nullable(),
   next: z.array(z.string()) });
