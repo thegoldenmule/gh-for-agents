@@ -58,3 +58,13 @@ test('R17 race: merged by someone else at H between the read and the PUT (405) â
   assert.equal(r.json.mergeCommit, MERGE_COMMIT);
   assert.equal(puts(fake).length, 1);
 });
+
+test('R17 race: a 405 re-read merged at H without a merge commit yet is polled, not a failure', async () => {
+  const fake = installMerge();
+  fake.on(isPut, put405());
+  fake.on(isPullGet, [okJson(pullJson({ merge_commit_sha: null })), okJson(pullJson())]);
+  const r = await runMerge(['pr', 'merge', REF], fake);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.alreadyMerged, true);
+  assert.equal(r.json.mergeCommit, MERGE_COMMIT);
+});

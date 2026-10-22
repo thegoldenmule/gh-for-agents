@@ -159,13 +159,18 @@ function notMergeable(o: PutMergeOptions, pull: MergePull, github: string, statu
   });
 }
 
-/** Poll GET pulls/N until it reports merged at H; READBACK_MISMATCH after VERIFY_MS (never a false success). */
-async function verify(o: PutMergeOptions, putSha: string): Promise<MergeOutcome> {
+/**
+ * Poll GET pulls/N until it reports merged at H with a merge commit; READBACK_MISMATCH after VERIFY_MS
+ * (never a false success). `first` is a read already made (a re-read after a refused or failed PUT), so a
+ * merge commit GitHub has not filled in yet is waited for rather than reported as a failure.
+ */
+async function verify(o: PutMergeOptions, putSha: string | null, first?: MergePull): Promise<MergeOutcome> {
   const h = headOf(o);
   const until = o.ctx.clock.monotonic() + VERIFY_MS;
-  let last: MergePull | null = null;
-  for (;;) {
-    last = await tryRead(o);
+  let last: MergePull | null = first ?? null;
+  for (let read = first === undefined; ; read = true) {
+    if (read) last = await tryRead(o);
+    const mergeCommit = last?.merge_commit_sha ?? putSha;
     if (last?.merged) {
       if (last.head.sha !== h) {
         throw new GhxError(
@@ -177,19 +182,16 @@ async function verify(o: PutMergeOptions, putSha: string): Promise<MergeOutcome>
           },
         );
       }
-      return {
-        mergeCommit: last.merge_commit_sha ?? putSha,
-        mergedAt: mergedAt(last, o),
-        recoveredFromTransient: false,
-        alreadyMerged: false,
-      };
+      if (mergeCommit) {
+        return { mergeCommit, mergedAt: mergedAt(last, o), recoveredFromTransient: false, alreadyMerged: false };
+      }
     }
     if (o.ctx.clock.monotonic() + VERIFY_INTERVAL_MS > until) break;
     await o.ctx.clock.sleep(VERIFY_INTERVAL_MS, o.ctx.signal);
   }
   throw new GhxError(
     'READBACK_MISMATCH',
-    `GitHub accepted the merge of ${o.ref}, but the PR did not read back as merged within ${VERIFY_MS / 1000} s.`,
+    `${o.ref} did not read back as merged with a merge commit within ${VERIFY_MS / 1000} s.`,
     {
       hint: `Check it: ghx pr status ${o.ref}. Re-running pr merge is safe: a merged PR reports alreadyMerged.`,
       details: { ref: o.ref, field: 'merged', sent: true, stored: last?.merged ?? null, mergeCommit: putSha },
@@ -232,23 +234,15 @@ export async function putMerge(o: PutMergeOptions): Promise<MergeOutcome> {
           cause: failure,
         });
       }
-      if (pull.merged && pull.head.sha === h) {
-        const sha = pull.merge_commit_sha;
-        if (sha)
-          return { mergeCommit: sha, mergedAt: mergedAt(pull, o), recoveredFromTransient: false, alreadyMerged: true };
-      }
+      // Merged at H by someone else between the read and the PUT: the PR is merged where it was evaluated.
+      if (pull.merged && pull.head.sha === h) return { ...(await verify(o, null, pull)), alreadyMerged: true };
       throw notMergeable(o, pull, github, status);
     }
     if (!failure.failure.transient) throw failure;
     // Transient (#3214): the PUT may have gone through. Look before sending it again.
     const pull = await tryRead(o);
-    if (pull?.merged && pull.head.sha === h && pull.merge_commit_sha) {
-      return {
-        mergeCommit: pull.merge_commit_sha,
-        mergedAt: mergedAt(pull, o),
-        recoveredFromTransient: true,
-        alreadyMerged: false,
-      };
+    if (pull?.merged && pull.head.sha === h) {
+      return { ...(await verify(o, null, pull)), recoveredFromTransient: true };
     }
     const openAtH = pull !== null && !pull.merged && pull.state === 'open' && pull.head.sha === h;
     if (pull !== null && !openAtH) throw notMergeable(o, pull, github, status);

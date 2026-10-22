@@ -90,3 +90,14 @@ test('R16: a transient failure whose re-read also fails is GH_FAILED with no sec
   assert.match(r.json.error.hint, /merge state is unknown/);
   assert.equal(puts(fake).length, 1);
 });
+
+test('R16: merged at H before GitHub fills in the merge commit → polled, still recovered, one PUT', async () => {
+  const fake = installMerge();
+  fake.on(isPut, put502());
+  fake.on(isPullGet, [okJson(pullJson({ merge_commit_sha: null })), okJson(pullJson())]);
+  const r = await runMerge(['pr', 'merge', REF], fake);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.recoveredFromTransient, true);
+  assert.equal(r.json.mergeCommit, MERGE_COMMIT);
+  assert.equal(puts(fake).length, 1);
+});
