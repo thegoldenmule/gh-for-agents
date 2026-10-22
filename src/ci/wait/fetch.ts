@@ -16,6 +16,7 @@ import {
   type RequiredSources,
   rulesRequiredContexts,
 } from './expected.ts';
+import { scanJobTimeouts, type WorkflowTimeouts } from './job-timeouts.ts';
 
 type Warn = (w: { code: string; message: string }) => void;
 
@@ -333,4 +334,49 @@ export async function fetchEtaStats(o: {
   }
   if (dirty) o.cache?.set(key, s, ETA_TTL_MS);
   return baselineStats(o.jobNames, s.push, s.pullRequest ?? {});
+}
+
+// ── Workflow timeouts (03 M4.5, Q6) ───────────────────────────────────────
+const Contents = z.object({ sha: z.string(), encoding: z.string().nullish(), content: z.string().nullish() });
+const CachedTimeouts = z.object({
+  jobs: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string().nullable(),
+      timeoutMinutes: z.number().nullable(),
+      matrix: z.boolean(),
+      uses: z.boolean(),
+    }),
+  ),
+});
+
+/**
+ * The scanned workflow file at a commit (`GET contents/<path>?ref=<sha>`), or null when it cannot be
+ * read (404, or not base64). Content at a commit SHA never changes, so the scan is cached forever.
+ */
+export async function fetchWorkflowTimeouts(o: {
+  gh: Gh;
+  repo: RepoRef;
+  /** The workflow file, e.g. `.github/workflows/ci.yml` (CiSnapshot.runs[…].workflowPath). */
+  path: string;
+  /** The bound head SHA. */
+  ref: string;
+  cache?: JsonCache;
+}): Promise<WorkflowTimeouts | null> {
+  const key = `timeouts:${o.path}@${o.ref}`;
+  const hit = o.cache?.get(key, CachedTimeouts);
+  if (hit) return hit;
+  const file = await getOrNull(
+    o.gh,
+    {
+      path: `repos/{owner}/{repo}/contents/${o.path.split('/').map(encodeURIComponent).join('/')}`,
+      repo: o.repo,
+      fields: { ref: o.ref },
+    },
+    Contents,
+  );
+  if (file?.encoding !== 'base64' || typeof file.content !== 'string') return null;
+  const scan = scanJobTimeouts(Buffer.from(file.content, 'base64').toString('utf8'));
+  o.cache?.set(key, scan, null);
+  return scan;
 }

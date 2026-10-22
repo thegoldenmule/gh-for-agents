@@ -40,5 +40,13 @@ export const CiSection = z
         }),
       )
       .optional(),
+    // M4.5 (02 §11.1, 03 Q1): stall fuses for ci wait. Optional; src/ci/wait/stall.ts fills the defaults
+    // (queuedMinutes 30, missingMinutes 10).
+    stall: z
+      .strictObject({
+        queuedMinutes: z.number().int().positive().optional(),
+        missingMinutes: z.number().int().positive().optional(),
+      })
+      .optional(),
   })
   .prefault({});

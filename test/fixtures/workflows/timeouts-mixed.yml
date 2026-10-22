@@ -1,0 +1,53 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  timeout-minutes: 999 # a top-level env var, not a job limit
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10 # literal
+    steps:
+      - uses: actions/checkout@v4
+      - run: pnpm lint
+        timeout-minutes: 3
+
+  build:
+    name: "Build"
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.slow && 90 || 30 }}
+    steps:
+      - run: pnpm build
+
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [22, 24]
+    timeout-minutes: 45
+    steps:
+      - run: pnpm test
+
+  e2e:
+    name: E2E ${{ matrix.shard }}/4
+    strategy:
+      matrix:
+        shard: [1, 2, 3, 4]
+    timeout-minutes: '25'
+    steps:
+      - run: pnpm e2e
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo no limit
+        timeout-minutes: 2
+
+  release:
+    uses: ./.github/workflows/release.yml
+    secrets: inherit
