@@ -44,6 +44,7 @@ export const ERROR_CODES = {
   CONFIG_INVALID_JSON: { exit: ExitCode.CONFIG },
   CONFIG_INVALID: { exit: ExitCode.CONFIG },
   CONFIG_UNSUPPORTED_VERSION: { exit: ExitCode.CONFIG },
+  CONFIG_EXISTS: { exit: ExitCode.CONFIG, hint: 'Pass --force to overwrite it, or edit the file.' },
 
   // ── 4 ENV ────────────────────────────────────────────────────────────────
   ENV_GH_MISSING: {
