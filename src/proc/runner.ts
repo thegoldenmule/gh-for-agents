@@ -108,8 +108,9 @@ export function createSpawnRunner(deps: { clock: Clock }): ProcessRunner {
       };
 
       const collect = (bucket: Buffer[], which: 'out' | 'err') => (chunk: Buffer) => {
-        const n = which === 'out' ? (outBytes += chunk.length) : (errBytes += chunk.length);
-        if (n > maxBuffer) {
+        if (which === 'out') outBytes += chunk.length;
+        else errBytes += chunk.length;
+        if ((which === 'out' ? outBytes : errBytes) > maxBuffer) {
           outputTooLarge = true;
           kill();
           return;
