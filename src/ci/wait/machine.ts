@@ -43,7 +43,7 @@ export interface MachineState {
   expected: ExpectedDef[];
   /** Baseline checks aged out to `absent`. */
   agedOut: string[];
-  /** Epoch ms since everything except missing baseline checks has settled; null otherwise. */
+  /** Epoch ms everything except missing baseline checks had settled (CI completion time); null otherwise. */
   othersSettledAt: number | null;
   /** Failure keys observed in this binding (each is diagnosed at most once). */
   seenFailures: string[];
@@ -175,7 +175,9 @@ export function observe(prev: MachineState, obs: Observation, cfg: MachineConfig
     checks.length > 0 &&
     !checks.some((c) => c.bucket === 'pending') &&
     !before.some((e) => e.state === 'missing' && e.source !== 'baseline');
-  const othersSettledAt = othersSettled ? (prev.othersSettledAt ?? now) : null;
+  // From CI time, never first observation (04, final review), as stall.ts measures `missing`: CI that
+  // settled long ago does not grant a missing baseline check another grace on every fresh wait.
+  const othersSettledAt = othersSettled ? (prev.othersSettledAt ?? Math.min(lastCompletion(checks) ?? now, now)) : null;
   if (othersSettledAt !== null && now - othersSettledAt >= cfg.expectGraceMs) {
     const aging = before.filter((e) => e.state === 'missing' && e.source === 'baseline').map((e) => e.name);
     if (aging.length > 0) {
@@ -216,6 +218,12 @@ export function observe(prev: MachineState, obs: Observation, cfg: MachineConfig
     phase,
     expected,
   };
+}
+
+/** The latest completedAt among the checks (epoch ms), or null when none carries one. */
+function lastCompletion(checks: readonly Check[]): number | null {
+  const times = checks.map((c) => (c.completedAt ? Date.parse(c.completedAt) : Number.NaN)).filter(Number.isFinite);
+  return times.length > 0 ? Math.max(...times) : null;
 }
 
 export interface Decision {

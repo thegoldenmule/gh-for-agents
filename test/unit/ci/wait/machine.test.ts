@@ -89,6 +89,17 @@ test('a missing baseline check ages out after expect-grace once everything else 
   assert.equal(r.decision?.outcome, 'green');
 });
 
+test('expect-grace counts from when CI completed, not first observation: long-settled CI ages a baseline at once', () => {
+  const s = fresh([{ name: 'copilot', workflow: null, source: 'baseline' }]);
+  const r = tick(s, [passed('test', 0)], 100);
+  assert.deepEqual(
+    r.events.filter((e) => e.type === 'expected-absent').map((e) => e.type === 'expected-absent' && e.name),
+    ['copilot'],
+  );
+  assert.equal(r.decision?.outcome, 'green');
+  assert.equal(tick(s, [passed('test', 0)], 89).decision, null, 'within 90 s of the completion it still waits');
+});
+
 test('first-failure ends on the first failure, before the rest settles', () => {
   const r = tick(fresh(), [failed('lint', 11), check('test')], 60);
   assert.deepEqual(
