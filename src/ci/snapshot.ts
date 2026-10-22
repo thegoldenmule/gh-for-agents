@@ -5,6 +5,7 @@
 //
 // pr status (M6.3) builds a bigger Q1; it embeds CI_COMMIT_FIELDS under `commits(last:1){nodes{commit{…}}}`
 // and passes `rollupNodes(commit)` to `normaliseRollup` (checks.ts), so both share one normalisation.
+// completeRollup does the rest for such a caller: the head-SHA re-query and the context pagination.
 import { z } from 'zod';
 import { GhxError } from '../core/errors.ts';
 import type { Gh } from '../gh/index.ts';
@@ -105,7 +106,10 @@ interface PageResult {
   commit: CiCommit | null;
 }
 
-async function queryPage(o: FetchCiSnapshotOptions, after: string | null): Promise<PageResult> {
+async function queryPage(
+  o: Pick<FetchCiSnapshotOptions, 'gh' | 'repo' | 'number'>,
+  after: string | null,
+): Promise<PageResult> {
   const data = await o.gh.graphql(
     CI_SNAPSHOT_QUERY,
     { owner: o.repo.owner, name: o.repo.name, number: o.number, after },
@@ -130,35 +134,73 @@ export function rollupNodes(commit: CiCommit | null): RollupContext[] {
   return (commit?.statusCheckRollup?.contexts.nodes ?? []).filter((n): n is RollupContext => n !== null);
 }
 
-export async function fetchCiSnapshot(o: FetchCiSnapshotOptions): Promise<CiSnapshot> {
-  let queries = 1;
-  let first = await queryPage(o, null);
-  if (first.commit?.oid !== first.data.headRefOid) {
+/** One page of a PR's rollup: the PR head at query time and its last commit (CI_COMMIT_FIELDS). */
+export interface RollupPage {
+  headSha: string;
+  commit: CiCommit | null;
+}
+/** Fetch the rollup page after `after`; null re-runs the first page. */
+export type RollupPageFetcher = (after: string | null) => Promise<RollupPage>;
+
+export interface CompleteRollupOptions {
+  gh: Gh;
+  repo: RepoRef;
+  number: number;
+  /** headRefOid from the caller's query. */
+  headSha: string;
+  /** The commit node from the caller's query (CI_COMMIT_FIELDS under `commits(last:1)`), or null. */
+  firstPage: CiCommit | null;
+  /** How a page is fetched. Default: CI_SNAPSHOT_QUERY (needs only gh, repo and number). */
+  fetchPage?: RollupPageFetcher;
+  warn?: (w: SnapshotWarning) => void;
+}
+
+export type CompletedRollup =
+  | {
+      forHeadSha: true;
+      /** The head the nodes belong to (the re-queried head, if a re-query ran). */
+      headSha: string;
+      nodes: RollupContext[];
+      /** More than MAX_CONTEXT_PAGES pages existed (warned CI_CHECKS_TRUNCATED). */
+      truncated: boolean;
+      /** GraphQL calls made here, beyond the caller's own. */
+      queries: number;
+    }
+  | { forHeadSha: false; headSha: string; rollupOid: string | null; queries: number };
+
+/**
+ * Finish a rollup a caller started in its own query [G-SHA]: if the first page's commit is not the head,
+ * re-query once (02 §4.3 step 3); then follow `hasNextPage` up to MAX_CONTEXT_PAGES, bailing out if the head
+ * moves between pages. A rollup that never matches the head warns CI_SHA_MISMATCH and has `forHeadSha:false`.
+ */
+export async function completeRollup(o: CompleteRollupOptions): Promise<CompletedRollup> {
+  const fetchPage: RollupPageFetcher =
+    o.fetchPage ??
+    (async (after) => {
+      const p = await queryPage(o, after);
+      return { headSha: p.data.headRefOid, commit: p.commit };
+    });
+  let queries = 0;
+  let headSha = o.headSha;
+  let first = o.firstPage;
+  if (first?.oid !== headSha) {
     // Eventual consistency right after a push: re-query once (02 §4.3 step 3).
     queries++;
-    first = await queryPage(o, null);
+    const again = await fetchPage(null);
+    headSha = again.headSha;
+    first = again.commit;
   }
-  const headSha = first.data.headRefOid;
-  const base = {
-    repo: o.repo,
-    number: first.data.number,
-    prState: first.data.state,
-    headSha,
-    headRef: first.data.headRefName,
-    baseRef: first.data.baseRefName,
-    defaultBranch: first.defaultBranch,
-  };
-  const mismatch = (oid: string | undefined): CiSnapshot => {
+  const mismatch = (oid: string | undefined): CompletedRollup => {
     o.warn?.({
       code: 'CI_SHA_MISMATCH',
       message: `The check rollup is for ${oid?.slice(0, 7) ?? 'no commit'}, not the head ${headSha.slice(0, 7)}; CI is reported as pending.`,
     });
-    return { ...base, forHeadSha: false, checks: [], ignored: [], runs: {}, truncated: false, queries };
+    return { forHeadSha: false, headSha, rollupOid: oid ?? null, queries };
   };
-  if (first.commit?.oid !== headSha) return mismatch(first.commit?.oid);
+  if (first?.oid !== headSha) return mismatch(first?.oid);
 
-  const nodes = rollupNodes(first.commit);
-  let page = first.commit.statusCheckRollup?.contexts.pageInfo;
+  const nodes = rollupNodes(first);
+  let page = first.statusCheckRollup?.contexts.pageInfo;
   let pages = 1;
   let truncated = false;
   while (page?.hasNextPage && page.endCursor) {
@@ -172,14 +214,50 @@ export async function fetchCiSnapshot(o: FetchCiSnapshotOptions): Promise<CiSnap
     }
     queries++;
     pages++;
-    const next = await queryPage(o, page.endCursor);
+    const next = await fetchPage(page.endCursor);
     // A push between pages: the remaining pages belong to another commit.
-    if (next.data.headRefOid !== headSha || next.commit?.oid !== headSha) return mismatch(next.commit?.oid);
+    if (next.headSha !== headSha || next.commit?.oid !== headSha) return mismatch(next.commit?.oid);
     nodes.push(...rollupNodes(next.commit));
     page = next.commit.statusCheckRollup?.contexts.pageInfo;
   }
-  const norm = normaliseRollup(nodes, { repo: o.repo, headSha, ...(o.ignore ? { ignore: o.ignore } : {}) });
-  return { ...base, forHeadSha: true, ...norm, truncated, queries };
+  return { forHeadSha: true, headSha, nodes, truncated, queries };
+}
+
+export async function fetchCiSnapshot(o: FetchCiSnapshotOptions): Promise<CiSnapshot> {
+  const first = await queryPage(o, null);
+  // completeRollup's first-page re-query refreshes the PR fields too.
+  let latest = first;
+  const r = await completeRollup({
+    gh: o.gh,
+    repo: o.repo,
+    number: o.number,
+    headSha: first.data.headRefOid,
+    firstPage: first.commit,
+    ...(o.warn ? { warn: o.warn } : {}),
+    fetchPage: async (after) => {
+      const p = await queryPage(o, after);
+      if (after === null) latest = p;
+      return { headSha: p.data.headRefOid, commit: p.commit };
+    },
+  });
+  const queries = 1 + r.queries;
+  const base = {
+    repo: o.repo,
+    number: latest.data.number,
+    prState: latest.data.state,
+    headSha: r.headSha,
+    headRef: latest.data.headRefName,
+    baseRef: latest.data.baseRefName,
+    defaultBranch: latest.defaultBranch,
+  };
+  if (!r.forHeadSha)
+    return { ...base, forHeadSha: false, checks: [], ignored: [], runs: {}, truncated: false, queries };
+  const norm = normaliseRollup(r.nodes, {
+    repo: o.repo,
+    headSha: r.headSha,
+    ...(o.ignore ? { ignore: o.ignore } : {}),
+  });
+  return { ...base, forHeadSha: true, ...norm, truncated: r.truncated, queries };
 }
 
 /** The CiSummary for a snapshot. `expected`, `eta` and `next` come from the caller (M4.1, M4.2). */

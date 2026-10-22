@@ -2,7 +2,7 @@
 // test/commands/ (03's ci-snapshot.test.ts) because there is no command yet; it drives createGh directly.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fetchCiSnapshot, snapshotSummary } from '../../../src/ci/snapshot.ts';
+import { type CiCommit, completeRollup, fetchCiSnapshot, snapshotSummary } from '../../../src/ci/snapshot.ts';
 import { isGhxError } from '../../../src/core/errors.ts';
 import { CiSummary } from '../../../src/schemas/ci.ts';
 import { loadScenario } from '../../helpers/fixture-match.ts';
@@ -199,5 +199,88 @@ test('a missing PR is PR_NOT_FOUND', async () => {
   });
   await assert.rejects(fetchCiSnapshot({ gh: env.gh, repo: repoOf('o/r'), number: 99999 }), (e) =>
     isGhxError(e, 'PR_NOT_FOUND'),
+  );
+});
+
+// completeRollup: the re-query and pagination for callers that embed CI_COMMIT_FIELDS in their own query.
+const SHA_C = 'c'.repeat(40);
+const statusCtx = (name: string, state: string) => ({
+  __typename: 'StatusContext',
+  context: name,
+  state,
+  targetUrl: null,
+  createdAt: '2026-10-22T10:00:00Z',
+  isRequired: false,
+});
+const commitOf = (oid: string, nodes: unknown[], hasNextPage: boolean, endCursor: string | null) => ({
+  oid,
+  statusCheckRollup: { contexts: { pageInfo: { hasNextPage, endCursor }, nodes } },
+});
+const ciPage = (headRefOid: string, commit: unknown) =>
+  httpReply(
+    'HTTP/2.0 200 OK',
+    JSON.stringify({
+      data: {
+        repository: {
+          defaultBranchRef: { name: 'main' },
+          pullRequest: {
+            number: 1,
+            state: 'OPEN',
+            headRefOid,
+            headRefName: 'feat',
+            baseRefName: 'main',
+            commits: { nodes: [{ commit }] },
+          },
+        },
+      },
+    }),
+  );
+
+test('completeRollup pages on from a caller first page, passing the cursor as $after', async () => {
+  const env = ciEnv();
+  env.fake.on((argv) => argv.includes('after=CUR1'), {
+    exitCode: 0,
+    stdout: ciPage(SHA_C, commitOf(SHA_C, [statusCtx('b', 'FAILURE')], false, null)),
+    stderr: '',
+  });
+  const firstPage = commitOf(SHA_C, [statusCtx('a', 'SUCCESS')], true, 'CUR1') as CiCommit;
+  const r = await completeRollup({ gh: env.gh, repo: repoOf('o/r'), number: 1, headSha: SHA_C, firstPage });
+  assert.equal(r.forHeadSha, true);
+  if (r.forHeadSha) {
+    assert.deepEqual(
+      r.nodes.map((n) => (n.__typename === 'StatusContext' ? n.context : n.name)),
+      ['a', 'b'],
+    );
+    assert.equal(r.truncated, false);
+  }
+  assert.equal(r.queries, 1);
+  env.fake.assertAllConsumed();
+});
+
+test('completeRollup re-queries once on an oid mismatch, then reports CI_SHA_MISMATCH', async () => {
+  const stale = commitOf('d'.repeat(40), [], false, null) as CiCommit;
+  const fixed = ciEnv();
+  fixed.fake.on(() => true, {
+    exitCode: 0,
+    stdout: ciPage(SHA_C, commitOf(SHA_C, [statusCtx('a', 'SUCCESS')], false, null)),
+    stderr: '',
+  });
+  const ok = await completeRollup({ gh: fixed.gh, repo: repoOf('o/r'), number: 1, headSha: SHA_C, firstPage: stale });
+  assert.deepEqual([ok.forHeadSha, ok.headSha, ok.queries], [true, SHA_C, 1]);
+  const still = ciEnv();
+  still.fake.on(() => true, { exitCode: 0, stdout: ciPage(SHA_C, stale), stderr: '' });
+  const bad = await completeRollup({
+    gh: still.gh,
+    repo: repoOf('o/r'),
+    number: 1,
+    headSha: SHA_C,
+    firstPage: stale,
+    warn: still.warn,
+  });
+  assert.equal(bad.forHeadSha, false);
+  if (!bad.forHeadSha) assert.equal(bad.rollupOid, 'd'.repeat(40));
+  assert.deepEqual(
+    still.warnings.map((w) => w.code),
+    ['CI_SHA_MISMATCH'],
   );
 });
