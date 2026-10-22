@@ -63,17 +63,21 @@ export interface StripResult {
 
 /**
  * Stream `src` to `dest`, one cleaned line at a time. `onLine` sees each cleaned line, its 0-based
- * index in `dest`, and its runner timestamp (for step attribution).
+ * index in `dest`, and its runner timestamp (for step attribution). With `start > 0` reading begins
+ * at that byte offset and the (partial) line it lands in is dropped, so `dest` starts on a line.
  */
 export async function stripLogFile(
   src: string,
   dest: string,
   onLine?: (text: string, index: number, ts: string | null) => void,
+  o: { start?: number } = {},
 ): Promise<StripResult> {
+  const start = o.start ?? 0;
   const out = createWriteStream(dest, { encoding: 'utf8' });
   let index = 0;
   let bytes = 0;
   let carry = '';
+  let skipping = start > 0;
   const emit = async (raw: string): Promise<void> => {
     const { text, ts } = stripLineWithTs(raw);
     onLine?.(text, index, ts);
@@ -83,12 +87,19 @@ export async function stripLogFile(
     if (!out.write(chunk)) await once(out, 'drain');
   };
   try {
-    for await (const chunk of createReadStream(src, { encoding: 'utf8', highWaterMark: 64 * 1024 })) {
-      const parts = (carry + (chunk as string)).split('\n');
+    for await (const chunk of createReadStream(src, { encoding: 'utf8', highWaterMark: 64 * 1024, start })) {
+      let text = chunk as string;
+      if (skipping) {
+        const nl = text.indexOf('\n');
+        if (nl === -1) continue;
+        text = text.slice(nl + 1);
+        skipping = false;
+      }
+      const parts = (carry + text).split('\n');
       carry = parts.pop() ?? '';
       for (const p of parts) await emit(p);
     }
-    if (carry !== '') await emit(carry);
+    if (carry !== '' && !skipping) await emit(carry);
   } finally {
     out.end();
     await once(out, 'close');

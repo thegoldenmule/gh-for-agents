@@ -77,3 +77,12 @@ test('stripLogFile streams a 2.3 MB log line by line, reporting timestamps per l
   // Heap growth is only meaningful with --expose-gc; without it, correctness is what is asserted.
   if (gc) assert.ok(peak - before < 3 * statSync(src).size, `heap grew ${peak - before} bytes`);
 });
+
+test('stripLogFile with a start offset drops the partial first line and keeps the tail', async () => {
+  const src = join(tempRoot(), 'offset.raw');
+  const dest = join(tempRoot(), 'offset.log');
+  writeFileSync(src, 'first line\nsecond line\nthird line\n');
+  const r = await stripLogFile(src, dest, undefined, { start: 3 });
+  assert.equal(readFileSync(dest, 'utf8'), 'second line\nthird line\n');
+  assert.equal(r.lines, 2);
+});

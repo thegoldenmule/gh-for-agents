@@ -81,6 +81,6 @@ export async function analyzeJob(o: AnalyzeJobOptions): Promise<JobAnalysis> {
     logPath: fetched.log.path,
     logBytes: fetched.log.bytes,
     lines,
-    warnings: [],
+    warnings: fetched.log.warning ? [fetched.log.warning] : [],
   };
 }

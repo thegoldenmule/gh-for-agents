@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { fetchJobLog } from '../../../../src/ci/logs/fetch.ts';
+import { fetchJobLog, LOG_CAP_BYTES } from '../../../../src/ci/logs/fetch.ts';
 import { isGhxError } from '../../../../src/core/errors.ts';
 import { ciEnv, notFound, repoOf } from '../_helpers.ts';
 
@@ -58,4 +58,33 @@ test('a GitHub JSON 404 (no such job) is RUN_NOT_FOUND', async () => {
     isGhxError(e, 'RUN_NOT_FOUND'),
   );
   env.fake.expectCalls([['api', '--include', '-X', 'GET', 'repos/o/r/actions/jobs/1/logs']], { exhaustive: true });
+});
+
+test('a log over the cap keeps only its tail and warns LOG_TRUNCATED (02 §11.4: 8 MB per log)', async () => {
+  assert.equal(LOG_CAP_BYTES, 8 * 1024 * 1024);
+  const env = ciEnv('logs-api');
+  const r = await fetchJobLog({
+    gh: env.gh,
+    artifacts: env.artifacts,
+    repo: repoOf('cli/cli'),
+    jobId: 119137909038,
+    maxBytes: 8192,
+  });
+  assert.ok(r.ok);
+  assert.equal(r.log.warning?.code, 'LOG_TRUNCATED');
+  assert.ok(r.log.omittedBytes > 0);
+  const text = readFileSync(r.log.path, 'utf8');
+  assert.ok(r.log.bytes <= 8192, `kept ${r.log.bytes} bytes`);
+  assert.ok(!text.startsWith('Current runner version'), 'the head was dropped');
+  assert.ok(text.includes('##[error]Process completed with exit code 1.'), 'the failure near the end is kept');
+  assert.ok(text.endsWith('Cleaning up orphan processes\n'), 'the tail is intact');
+  assert.equal(r.log.lines, text.split('\n').length - 1);
+});
+
+test('a log under the cap is kept whole, with no warning', async () => {
+  const env = ciEnv('logs-api');
+  const r = await fetchJobLog({ gh: env.gh, artifacts: env.artifacts, repo: repoOf('cli/cli'), jobId: 119137909038 });
+  assert.ok(r.ok);
+  assert.equal(r.log.warning, null);
+  assert.equal(r.log.omittedBytes, 0);
 });
