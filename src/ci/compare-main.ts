@@ -7,6 +7,8 @@
 //   either the PR's failing tests are non-empty and a subset of main's (`same-tests`), or neither side
 //   yields test names and the failing step names are equal (`same-step`). A job-name match alone never
 //   counts (§4.3, §7 #3246).
+// - A PR test list the cap cut (`testsTruncated`) is never a subset proof. `same-step` needs a parsed log on
+//   both sides (`logParsed`): with a missing or not-ready log, "no test names" is not evidence.
 // - A main run without a same-named job, or whose job did not fail or pass, is `different`.
 import { z } from 'zod';
 import type { ArtifactStore } from '../core/artifacts.ts';
@@ -16,7 +18,7 @@ import type { RepoRef } from '../gh/types.ts';
 import { CI_CAPS, type SameOnMain } from '../schemas/ci.ts';
 import { type JsonCache, repoCache } from './cache.ts';
 import { type ActionsJob, type ActionsRun, fetchRun, listRunJobs, listWorkflowRuns } from './github.ts';
-import { analyzeJob } from './logs/analyze.ts';
+import { analyzeJob, type JobAnalysis } from './logs/analyze.ts';
 
 /** How long a "latest main run for this workflow" lookup is reused. */
 export const MAIN_RUN_TTL_MS = 5 * 60_000;
@@ -30,12 +32,41 @@ export interface FailingJobFacts {
   workflowId?: number | null;
   tests: readonly string[];
   step: { number: number; name: string } | null;
+  /**
+   * The test cap cut `tests`. When omitted, a list of exactly CI_CAPS.tests entries counts as cut (fails
+   * closed: it is then never `same-tests`).
+   */
+  testsTruncated?: boolean;
+  /** The job log was fetched and parsed. Omitted counts as false, so `same-step` cannot match. */
+  logParsed?: boolean;
+}
+
+/** FailingJobFacts from a JobAnalysis, with both evidence flags set right. Prefer it to building one by hand. */
+export function failingJobFacts(
+  a: Pick<JobAnalysis, 'job' | 'tests' | 'step' | 'logPath' | 'testsTruncated'>,
+  workflowId?: number | null,
+): FailingJobFacts {
+  return {
+    name: a.job.name,
+    runId: a.job.run_id,
+    workflowId: workflowId ?? null,
+    tests: a.tests,
+    step: a.step,
+    ...(a.testsTruncated !== undefined ? { testsTruncated: a.testsTruncated } : {}),
+    logParsed: a.logPath !== null,
+  };
 }
 
 export interface MainSide {
   run: Pick<ActionsRun, 'id' | 'head_sha' | 'created_at' | 'run_started_at'> | null;
   /** The same-named job on that run, if any. */
-  job: { conclusion: string | null; tests: readonly string[]; step: { number: number; name: string } | null } | null;
+  job: {
+    conclusion: string | null;
+    tests: readonly string[];
+    step: { number: number; name: string } | null;
+    /** The job log was fetched and parsed. Omitted counts as false, so `same-step` cannot match. */
+    logParsed?: boolean;
+  } | null;
 }
 
 const cap = (xs: readonly string[]): string[] => xs.slice(0, CI_CAPS.tests);
@@ -56,7 +87,7 @@ export function notCompared(mainBranch: string): SameOnMain {
 
 /** The verdict from both sides (pure). */
 export function compareVerdict(
-  pr: Pick<FailingJobFacts, 'tests' | 'step'>,
+  pr: Pick<FailingJobFacts, 'tests' | 'step' | 'testsTruncated' | 'logParsed'>,
   main: MainSide,
   mainBranch: string,
 ): SameOnMain {
@@ -75,8 +106,11 @@ export function compareVerdict(
   if (!main.job) return { ...out, verdict: 'different' };
   if (main.job.conclusion === 'success') return { ...out, verdict: 'main-green' };
   if (main.job.conclusion !== 'failure') return { ...out, verdict: 'different' };
-  if (pr.tests.length > 0 && newTests.length === 0) return { ...out, verdict: 'same-tests' };
+  const prTruncated = pr.testsTruncated ?? pr.tests.length === CI_CAPS.tests;
+  if (pr.tests.length > 0 && newTests.length === 0 && !prTruncated) return { ...out, verdict: 'same-tests' };
   if (
+    pr.logParsed === true &&
+    main.job.logParsed === true &&
     pr.tests.length === 0 &&
     mainTests.length === 0 &&
     pr.step !== null &&
@@ -94,6 +128,7 @@ const CachedRun = z
 const CachedTests = z.object({
   tests: z.array(z.string()),
   step: z.object({ number: z.number(), name: z.string() }).nullable(),
+  testsTruncated: z.boolean().optional(),
 });
 
 export interface MainComparerOptions {
@@ -114,8 +149,16 @@ export interface MainComparer {
   mainRun(workflowId: number): Promise<MainSide['run']>;
   /** The jobs of a main run (memoized per invocation). */
   mainJobs(runId: number): Promise<ActionsJob[]>;
-  /** Parsed failing tests and step of a job (disk-cached by job id; logs are immutable). */
-  jobTests(job: ActionsJob): Promise<{ tests: string[]; step: { number: number; name: string } | null }>;
+  /**
+   * Parsed failing tests and step of a job (disk-cached by job id; logs are immutable). `logParsed` is false
+   * when the log was missing or not ready; `testsTruncated` when the cap cut the list.
+   */
+  jobTests(job: ActionsJob): Promise<{
+    tests: string[];
+    step: { number: number; name: string } | null;
+    logParsed?: boolean;
+    testsTruncated?: boolean;
+  }>;
 }
 
 export function createMainComparer(o: MainComparerOptions): MainComparer {
@@ -177,7 +220,8 @@ export function createMainComparer(o: MainComparerOptions): MainComparer {
     const c = await cache();
     const key = `tests:job-${job.id}`;
     const hit = c.get(key, CachedTests);
-    if (hit) return hit;
+    // Only a parsed log is cached, so a hit is parsed evidence.
+    if (hit) return { tests: hit.tests, step: hit.step, logParsed: true, testsTruncated: hit.testsTruncated ?? false };
     const a = await analyzeJob({
       gh: o.gh,
       artifacts: o.artifacts,
@@ -187,10 +231,10 @@ export function createMainComparer(o: MainComparerOptions): MainComparer {
       ...(o.logPatterns ? { logPatterns: o.logPatterns } : {}),
     });
     for (const w of a.warnings) o.warn?.({ code: w.code, message: `${o.defaultBranch} comparison: ${w.message}` });
-    const value = { tests: a.tests, step: a.step };
+    const testsTruncated = a.testsTruncated ?? false;
     // Only a parsed log is immutable; a not-ready or expired log is not cached.
-    if (a.logPath !== null) c.set(key, value, null);
-    return value;
+    if (a.logPath !== null) c.set(key, { tests: a.tests, step: a.step, testsTruncated }, null);
+    return { tests: a.tests, step: a.step, logParsed: a.logPath !== null, testsTruncated };
   };
 
   return {

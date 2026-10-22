@@ -16,6 +16,8 @@ export interface JobAnalysis {
   /** From the jobs API, never "UNKNOWN STEP". */
   step: { number: number; name: string } | null;
   tests: string[];
+  /** The test cap cut `tests` (always set by analyzeJob; optional so hand-built values stay valid). */
+  testsTruncated?: boolean;
   errors: string[];
   exitLine: string | null;
   excerpt: string;
@@ -55,6 +57,7 @@ export async function analyzeJob(o: AnalyzeJobOptions): Promise<JobAnalysis> {
       job,
       step,
       tests: [],
+      testsTruncated: false,
       errors: [],
       exitLine: null,
       excerpt: '',
@@ -74,6 +77,7 @@ export async function analyzeJob(o: AnalyzeJobOptions): Promise<JobAnalysis> {
     job,
     step,
     tests: f.tests,
+    testsTruncated: f.testsTruncated,
     errors: f.errors,
     exitLine: f.exitLine,
     excerpt: excerpt(lines, f.firstLine, { ...(o.excerptLines !== undefined ? { maxLines: o.excerptLines } : {}) }),

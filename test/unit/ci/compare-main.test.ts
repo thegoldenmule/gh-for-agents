@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { compareVerdict, createMainComparer, type FailingJobFacts, notCompared } from '../../../src/ci/compare-main.ts';
+import {
+  compareVerdict,
+  createMainComparer,
+  type FailingJobFacts,
+  failingJobFacts,
+  notCompared,
+} from '../../../src/ci/compare-main.ts';
 import { SameOnMain } from '../../../src/schemas/ci.ts';
 import { GH_FIXTURE_ROOT } from '../../helpers/fixture-match.ts';
 import { ciEnv, httpReply, ok, repoOf } from './_helpers.ts';
@@ -85,6 +91,7 @@ const prJob = (tests: string[], step: string | null = 'Run pnpm test'): FailingJ
   workflowId: 5,
   tests,
   step: step ? { number: 4, name: step } : null,
+  logParsed: true,
 });
 
 test('a job-name match with different tests is different (a job-name match alone never counts)', async () => {
@@ -249,4 +256,74 @@ test('compareVerdict: cancelled main job is different; notCompared is the inert 
   );
   assert.equal(capped.verdict, 'same-tests');
   SameOnMain.parse(capped);
+});
+
+test('same-step needs a parsed log on both sides: a missing PR or main log is different', async () => {
+  const lockfile = logReply('2026-10-22T09:00:06.0Z ERR_PNPM_OUTDATED_LOCKFILE Cannot install\n');
+  const pr = setup({ jobs: [job(910, 'test', 'failure', 'Run pnpm install')], logs: { 910: lockfile } });
+  assert.equal(
+    (await pr.comparer.compare({ ...prJob([], 'Run pnpm install'), logParsed: false })).verdict,
+    'different',
+  );
+  const unknown = setup({ jobs: [job(911, 'test', 'failure', 'Run pnpm install')], logs: { 911: lockfile } });
+  const { logParsed: _omit, ...noFlag } = prJob([], 'Run pnpm install');
+  assert.equal((await unknown.comparer.compare(noFlag)).verdict, 'different', 'unknown counts as not parsed');
+  const notReady = { exitCode: 1, stdout: httpReply('HTTP/2.0 410 Gone', ''), stderr: 'gh: Server Error (HTTP 410)\n' };
+  const main = setup({ jobs: [job(912, 'test', 'failure', 'Run pnpm install')], logs: { 912: notReady } });
+  assert.equal((await main.comparer.compare(prJob([], 'Run pnpm install'))).verdict, 'different');
+  const runRef = { id: 1, head_sha: MAIN_SHA, created_at: '2026-10-22T09:00:00Z', run_started_at: null };
+  const step = { number: 4, name: 'Run pnpm install' };
+  assert.equal(
+    compareVerdict(
+      { tests: [], step, logParsed: true },
+      { run: runRef, job: { conclusion: 'failure', tests: [], step } },
+      'main',
+    ).verdict,
+    'different',
+  );
+  assert.equal(
+    compareVerdict(
+      { tests: [], step, logParsed: true },
+      { run: runRef, job: { conclusion: 'failure', tests: [], step, logParsed: true } },
+      'main',
+    ).verdict,
+    'same-step',
+  );
+});
+
+test('a truncated PR test list is never same-tests', () => {
+  const runRef = { id: 1, head_sha: MAIN_SHA, created_at: '2026-10-22T09:00:00Z', run_started_at: null };
+  const thirty = Array.from({ length: 30 }, (_, i) => `t${i}`);
+  const main = { run: runRef, job: { conclusion: 'failure', tests: thirty, step: null, logParsed: true } };
+  assert.equal(compareVerdict({ tests: thirty, step: null, testsTruncated: true }, main, 'main').verdict, 'different');
+  assert.equal(
+    compareVerdict({ tests: thirty, step: null }, main, 'main').verdict,
+    'different',
+    'exactly the cap: maybe cut',
+  );
+  assert.equal(
+    compareVerdict({ tests: thirty, step: null, testsTruncated: false }, main, 'main').verdict,
+    'same-tests',
+  );
+  assert.equal(compareVerdict({ tests: ['t1'], step: null }, main, 'main').verdict, 'same-tests');
+});
+
+test('failingJobFacts carries logParsed and testsTruncated from a JobAnalysis', () => {
+  const a = {
+    job: job(920, 'test', 'failure') as never,
+    tests: [],
+    step: { number: 4, name: 'Run pnpm test' },
+    logPath: null,
+    testsTruncated: false,
+  };
+  assert.deepEqual(failingJobFacts(a, 5), {
+    name: 'test',
+    runId: 900,
+    workflowId: 5,
+    tests: [],
+    step: { number: 4, name: 'Run pnpm test' },
+    testsTruncated: false,
+    logParsed: false,
+  });
+  assert.equal(failingJobFacts({ ...a, logPath: '/x.log' }).logParsed, true);
 });

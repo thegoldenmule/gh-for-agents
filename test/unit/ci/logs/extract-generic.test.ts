@@ -52,3 +52,11 @@ test('excerpt: starts 2 lines before the first failure, drops markers, honours l
   const long = Array.from({ length: 60 }, () => 'z'.repeat(299));
   assert.ok(excerpt(long, 0, { maxLines: 60 }).length <= 2000);
 });
+
+test('extractFailures flags a test list cut at the cap', () => {
+  const lines = Array.from({ length: 35 }, (_, i) => `--- FAIL: Test${i} (0.00s)`);
+  const f = extractFailures(lines);
+  assert.equal(f.tests.length, 30);
+  assert.equal(f.testsTruncated, true);
+  assert.equal(extractFailures(lines.slice(0, 30)).testsTruncated, false);
+});

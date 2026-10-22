@@ -1,6 +1,6 @@
 // Failing-test and error extraction (02 §12 step 4; 03 M2.4, §5.1). Runner extractors are picked by
 // signature; `generic` and `ci.logPatterns` always run. Results are deduplicated and capped to the
-// FailingJob limits (30 tests, 20 errors, 300 chars per line). A log no extractor recognises still
+// FailingJob limits (30 tests, 20 errors, 300 chars per line); `testsTruncated` says the test cap cut the list. A log no extractor recognises still
 // yields errors, an exit line and an excerpt, never an empty diagnosis.
 import { CI_CAPS } from '../../../schemas/ci.ts';
 import { END_ACTION } from '../steps.ts';
@@ -18,6 +18,8 @@ export interface Failures {
   /** Extractors whose signature matched. */
   runners: string[];
   tests: string[];
+  /** More distinct failing tests than `tests` holds (the cap cut the list): never a subset proof. */
+  testsTruncated: boolean;
   errors: string[];
   exitLine: string | null;
   /** Index (in the input lines) of the first failure line, or null. */
@@ -37,16 +39,21 @@ export function capLine(s: string, max: number = CI_CAPS.lineChars): string {
 }
 
 function dedupe(xs: readonly string[], cap: number): string[] {
+  return dedupeCounted(xs, cap).out;
+}
+
+/** Deduplicated and capped, plus whether anything distinct was left out by the cap. */
+function dedupeCounted(xs: readonly string[], cap: number): { out: string[]; truncated: boolean } {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const x of xs) {
     const v = capLine(x.trim());
     if (v === '' || seen.has(v)) continue;
+    if (out.length >= cap) return { out, truncated: true };
     seen.add(v);
     out.push(v);
-    if (out.length >= cap) break;
   }
-  return out;
+  return { out, truncated: false };
 }
 
 export function extractFailures(lines: readonly string[], o: ExtractOptions = {}): Failures {
@@ -65,9 +72,11 @@ export function extractFailures(lines: readonly string[], o: ExtractOptions = {}
   const g = generic(lines, compilePatterns(o.logPatterns ?? []));
   errors.push(...g.errors);
   firstLine = firstOf(firstLine, g.firstLine);
+  const t = dedupeCounted(tests, o.maxTests ?? CI_CAPS.tests);
   return {
     runners,
-    tests: dedupe(tests, o.maxTests ?? CI_CAPS.tests),
+    tests: t.out,
+    testsTruncated: t.truncated,
     errors: dedupe(errors, o.maxErrors ?? CI_CAPS.errors),
     exitLine: g.exitLine === null ? null : capLine(g.exitLine),
     firstLine,
