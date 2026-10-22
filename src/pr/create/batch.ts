@@ -185,16 +185,36 @@ export async function runBatch(input: PrBatchInput, env: BatchEnv): Promise<Batc
       rethrowControlFlow(e);
       const notAttempted = order.slice(k + 1);
       if (!(e instanceof GhxError)) throw e;
-      if (created.length === 0) throw tagged(e, i, notAttempted);
+      // A read-back mismatch means the PR exists: it counts as created, and re-running it is DUPLICATE_PR.
+      const mismatched = e.code === 'READBACK_MISMATCH' && typeof e.details?.ref === 'string' ? e.details.ref : null;
+      const createdRefs = [...created.map((c) => c.ref), ...(mismatched ? [mismatched] : [])];
+      if (createdRefs.length === 0) throw tagged(e, i, notAttempted);
       const existing = typeof e.details?.ref === 'string' ? { ref: e.details.ref } : {};
+      const rerun = mismatched ? notAttempted : [i, ...notAttempted];
+      const hint = [
+        mismatched
+          ? `items[${i}] was created as ${mismatched}, but GitHub stored a different ${String(e.details?.field ?? 'field')}: fix it with ghx pr edit ${mismatched} --input patch.json.`
+          : `Fix items[${i}].`,
+        rerun.length > 0 ? `Then re-run --batch with only items ${rerun.join(', ')}.` : '',
+        'Do not re-run the created PRs; they would now be DUPLICATE_PR.',
+      ]
+        .filter((x) => x !== '')
+        .join(' ');
       throw new GhxError(
         'PARTIAL_FAILURE',
-        `Batch created ${created.length} of ${order.length} PRs; items[${i}] failed with ${e.code}: ${e.message}`,
+        `Batch created ${createdRefs.length} of ${order.length} PRs; items[${i}] failed with ${e.code}: ${e.message}`,
         {
-          hint: `Fix items[${i}], then re-run --batch with only items ${[i, ...notAttempted].join(', ')}; the created PRs would now be DUPLICATE_PR.`,
+          hint,
           details: {
-            created: created.map((c) => c.ref),
-            failed: { index: i, head: plan.input.head, code: e.code, message: e.message, ...existing },
+            created: createdRefs,
+            failed: {
+              index: i,
+              head: plan.input.head,
+              code: e.code,
+              message: e.message,
+              ...existing,
+              ...(mismatched ? { created: true, readbackMismatch: true } : {}),
+            },
             notAttempted,
           },
           cause: e,

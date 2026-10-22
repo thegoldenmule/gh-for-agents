@@ -180,6 +180,24 @@ test('a mid-batch failure is PARTIAL_FAILURE (exit 7) with created, failed and n
   assert.equal(sequence(s.gh).filter((c) => c === 'post').length, 2, 'the batch stops at the failure');
 });
 
+test('a created PR whose read-back differs counts as created, flagged, and is never suggested for a re-run', async () => {
+  const s = scene({ branches: OIDS, readback: { title: 'feat(app): drifted' } });
+  const r = await runInProcess(ARGV, { gh: s.gh, stdin: batch([item('1'), item('2')]) });
+  assert.equal(r.exitCode, EXIT.GH_FAILED, r.stdout);
+  assert.equal(r.json.error.code, 'PARTIAL_FAILURE');
+  const d = r.json.error.details;
+  assert.deepEqual(d.created, ['octo/demo#101']);
+  assert.deepEqual(
+    [d.failed.index, d.failed.code, d.failed.created, d.failed.readbackMismatch],
+    [0, 'READBACK_MISMATCH', true, true],
+  );
+  assert.deepEqual(d.notAttempted, [1]);
+  assert.match(r.json.error.message, /created 1 of 2 PRs/);
+  assert.match(r.json.error.hint, /ghx pr edit octo\/demo#101/);
+  assert.match(r.json.error.hint, /re-run --batch with only items 1\./);
+  assert.doesNotMatch(r.json.error.hint, /items 0/);
+});
+
 test('a failure on the first POST is that item’s own error, not PARTIAL_FAILURE', async () => {
   const s = scene({
     branches: OIDS,
