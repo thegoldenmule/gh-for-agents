@@ -14,7 +14,7 @@ import { isAbort } from '../../core/signals.ts';
 import { DryRunHalt, GhFailure } from '../../gh/index.ts';
 import { enrichNotFound, type ResolvedRepo } from '../../gh/repo.ts';
 import { type RepoRef, repoSlug } from '../../gh/types.ts';
-import { PR_CI_CACHE_NS } from '../../pr/ci-summary.ts';
+import { PR_CI_CACHE_NS, REQUIRED_TTL_MS, requiredCacheKey } from '../../pr/ci-summary.ts';
 import type {
   Check,
   ExpectedCheck,
@@ -448,6 +448,13 @@ export async function* runWait(
         const req = await fetchRequiredSources({ gh: ctx.gh, repo: r.repo, base, warn });
         required = requiredChecks(req.sources);
         baseHeadSha = req.baseHeadSha;
+        // pr status's quiet read (no REST) shows required checks from this cached set.
+        const { rules, branch } = req.sources;
+        r.cache.set(
+          requiredCacheKey(base),
+          { rules: rules ? [...rules] : null, branch: branch ? [...branch] : null },
+          REQUIRED_TTL_MS,
+        );
       } catch (e) {
         degrade('required checks', e);
       }

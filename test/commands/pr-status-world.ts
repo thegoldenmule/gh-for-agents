@@ -164,8 +164,8 @@ export function install(fake: FakeGh = new FakeGh(), o: InstallOptions = {}): Fa
 }
 
 /** Run `ghx <argv>` against `fake` at NOW (or `clock`), with its own artifact dir. */
-export async function run(argv: string[], fake: FakeGh, o: { clock?: FakeClock } = {}) {
-  const artifacts = mkdtempSync(join(scratchDir(), 'pr-status-'));
+export async function run(argv: string[], fake: FakeGh, o: { clock?: FakeClock; artifacts?: string } = {}) {
+  const artifacts = o.artifacts ?? mkdtempSync(join(scratchDir(), 'pr-status-'));
   const r = await runInProcess(argv, {
     gh: fake,
     clock: o.clock ?? new FakeClock(NOW),

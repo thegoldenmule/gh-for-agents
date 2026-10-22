@@ -1,6 +1,7 @@
 // ghx ci wait <pr> (02 §11; 03 M4.5, M4.7), in-process on FakeClock against the ETag-aware GitHub sim.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { WaitEvent, WaitSummary } from '../../src/schemas/ci.ts';
 import { EXIT } from '../contract/exit-table.ts';
@@ -346,4 +347,22 @@ test('one check set: a REST check the GraphQL rollup leaves out (copilot review)
   assert.equal(r.json.results[0].ci.counts.pending, 0);
   const lookups = sim.calls.filter((c) => c.argv[1] === 'graphql').length;
   assert.ok(lookups <= 2, `${lookups} GraphQL suite lookups: only when the suites change, plus one confirmation`);
+});
+
+test('ci wait caches the base branch’s required checks for pr status’s quiet read', async () => {
+  const t = running(311, 'test');
+  const { sim } = world([t], { required: ['e2e'] });
+  change(sim, 2 * MIN, done(t, 2 * MIN));
+  sim.at(3 * MIN, (s) => {
+    s.checks[H] = [done(t, 2 * MIN), done(running(312, 'e2e'), 3 * MIN)];
+    return s;
+  });
+  const r = await wait(sim, ['o/r#7']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  const dir = join(r.artifacts, 'github.com', 'o', 'r', 'cache', 'ci-expected');
+  const files = readdirSync(dir).map((f) => readFileSync(join(dir, f), 'utf8'));
+  assert.ok(
+    files.some((f) => f.includes('"branch":["e2e"]')),
+    files.join('\n').slice(0, 400),
+  );
 });

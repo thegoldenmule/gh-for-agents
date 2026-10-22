@@ -1,14 +1,18 @@
 // ghx pr status <pr> (02 §4; 03 M6.5), in-process over the worked-example world (pr-status-world.ts).
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { repoCache } from '../../src/ci/cache.ts';
+import { createArtifactStore } from '../../src/core/artifacts.ts';
 import { byteLength } from '../../src/core/output.ts';
+import { PR_CI_CACHE_NS, REQUIRED_TTL_MS, requiredCacheKey } from '../../src/pr/ci-summary.ts';
 import { PrStatusOutput } from '../../src/pr/status/schema.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeClock } from '../helpers/fake-clock.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
-import { isMergeable, isQ1, mergeableReply, q1Reply } from '../unit/pr/snapshot-fixture.ts';
+import { scratchDir } from '../helpers/harness.ts';
+import { isMergeable, isQ1, mergeableReply, q1Reply, REPO } from '../unit/pr/snapshot-fixture.ts';
 import { install, NOW, REF, run, workedPr } from './pr-status-world.ts';
 
 const GOLDEN = JSON.parse(
@@ -29,7 +33,17 @@ async function runTimed(argv: string[], fake: FakeGh, clock: FakeClock) {
 
 test('02 §14.5: the worked example matches the golden document field by field', async () => {
   const fake = install();
-  const r = await run(['pr', 'status', REF], fake);
+  // After settle (02 §14.5): an earlier read cached main's required checks (none), so the quiet read warns nothing.
+  const artifacts = mkdtempSync(join(scratchDir(), 'pr-status-'));
+  const clock = new FakeClock(NOW);
+  const cache = await repoCache({
+    artifacts: createArtifactStore({ root: artifacts, clock }),
+    repo: REPO,
+    clock,
+    ns: PR_CI_CACHE_NS,
+  });
+  cache.set(requiredCacheKey('main'), { rules: null, branch: null }, REQUIRED_TTL_MS);
+  const r = await run(['pr', 'status', REF], fake, { artifacts, clock });
   assert.equal(r.exitCode, EXIT.OK, r.stdout);
   PrStatusOutput.parse(r.json);
   for (const key of Object.keys(GOLDEN)) {

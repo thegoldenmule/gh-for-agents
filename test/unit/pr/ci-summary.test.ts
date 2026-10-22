@@ -3,8 +3,9 @@
 // as keyStepsUnchecked, so KEY_STEP_SKIPPED fails closed (04, key steps).
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { repoCache } from '../../../src/ci/cache.ts';
 import type { CiSnapshot } from '../../../src/ci/snapshot.ts';
-import { buildCiSummary, type CiSummaryConfig } from '../../../src/pr/ci-summary.ts';
+import { buildCiSummary, type CiSummaryConfig, PR_CI_CACHE_NS } from '../../../src/pr/ci-summary.ts';
 import type { Check } from '../../../src/schemas/ci.ts';
 import { ciEnv, httpReply, ok, repoOf } from '../ci/_helpers.ts';
 
@@ -139,4 +140,27 @@ test('checks reported: no workflow-list call', async () => {
   const r = await facts([check()], {}, env);
   assert.equal(r.facts.workflowsTotal, null);
   assert.ok(!env.fake.calls.some((c) => path(c.argv) === 'repos/o/r/actions/workflows'));
+});
+
+test('quiet read: a cached required check that never registered stays missing (no REST call)', async () => {
+  const env = ciEnv();
+  const cache = await repoCache({ artifacts: env.artifacts, repo: REPO, clock: env.clock, ns: PR_CI_CACHE_NS });
+  cache.set('required:main', { rules: null, branch: ['e2e'] }, 60 * 60_000);
+  const r = await facts([check()], {}, env);
+  assert.deepEqual(
+    r.summary.expectedMissing.map((e) => [e.name, e.source, e.state]),
+    [['e2e', 'required', 'missing']],
+  );
+  assert.notEqual(r.summary.state, 'green');
+  assert.deepEqual(env.fake.calls, [], 'quiet: no gh call');
+});
+
+test('quiet read with no cached required set: warned, not silently green', async () => {
+  const env = ciEnv();
+  const r = await facts([check()], {}, env);
+  assert.equal(r.summary.state, 'green');
+  assert.ok(
+    env.warnings.some((w) => w.code === 'REQUIRED_CHECKS_UNCACHED'),
+    JSON.stringify(env.warnings),
+  );
 });

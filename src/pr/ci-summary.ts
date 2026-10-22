@@ -52,6 +52,8 @@ import type { Warning } from '../schemas/common.ts';
 export const PR_CI_CACHE_NS = 'ci-expected';
 /** How long the required-check sources of a base branch are reused. */
 export const REQUIRED_TTL_MS = 60 * 60_000;
+/** The PR_CI_CACHE_NS key of a base branch's required-check sources (ci wait writes it too). */
+export const requiredCacheKey = (base: string): string => `required:${base}`;
 /** 02 §11.4's diagnosis budget also bounds the comparison pass. */
 export const COMPARE_BUDGET_MS = 60_000;
 /** 02 §11.3 `--expect-grace`: a missing baseline check ages to `absent` this long after the rest settled. */
@@ -126,10 +128,19 @@ async function expectedSet(o: CiSummaryOptions, quiet: boolean, graceOver: boole
     : null;
   let sources: RequiredSources = { rules: null, branch: null };
   let baseline: Baseline | null = null;
-  if (!quiet) {
-    const cache = await repoCache({ artifacts: o.artifacts, repo: o.repo, clock: o.clock, ns: PR_CI_CACHE_NS });
-    const key = `required:${o.base}`;
-    const hit = cache.get(key, CachedRequired);
+  const cache = await repoCache({ artifacts: o.artifacts, repo: o.repo, clock: o.clock, ns: PR_CI_CACHE_NS });
+  const key = requiredCacheKey(o.base);
+  const hit = cache.get(key, CachedRequired);
+  if (quiet) {
+    // No REST call, but a required check that never registered must not vanish (04): the cached set.
+    if (hit) sources = hit;
+    else {
+      o.warn({
+        code: 'REQUIRED_CHECKS_UNCACHED',
+        message: `The required checks for ${o.base} were not read (no cached set); a required check that never registered is not shown. ghx ci wait ${o.ref} reads them.`,
+      });
+    }
+  } else {
     let baseHeadSha: string | null | undefined;
     if (hit) {
       sources = hit;
