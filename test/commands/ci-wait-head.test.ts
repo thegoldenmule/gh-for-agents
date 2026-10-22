@@ -152,3 +152,26 @@ test('target parsing, keys and default head policies', () => {
   assert.equal(headPolicy(parseWaitTarget('branch:main@9f2c4e1'), 'restart'), 'stay');
   assert.equal(headPolicy(parseWaitTarget('12'), 'stop'), 'stop');
 });
+
+test('a branch target expects no PR-required contexts: only config and the previous commit’s checks', async () => {
+  const clock = new FakeClock();
+  const H1 = sha('1');
+  const build: SimJob = {
+    id: 71,
+    runId: 710,
+    name: 'build',
+    status: 'completed',
+    conclusion: 'success',
+    completedAt: 0,
+  };
+  const sim = new GitHubSim(
+    clock,
+    { pr: { state: 'open', head: sha('a') }, branches: { main: H1 }, checks: { [H1]: [build] } },
+    { required: ['pr-only e2e', 'pr-only lint'] },
+  );
+  const r = await wait(sim, ['branch:main', '-R', 'o/r']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(r.json.results[0].ci.expectedMissing, []);
+  assert.equal(sim.callsTo(/\/rules\/branches\//).length, 0, 'no required-checks read');
+  assert.equal(sim.callsTo(/\/pulls$/).length, 0, 'no last-merged-PR baseline');
+});

@@ -420,12 +420,15 @@ export async function* runWait(
     };
     let required: string[] = [];
     let baseHeadSha: string | null | undefined;
-    try {
-      const req = await fetchRequiredSources({ gh: ctx.gh, repo: r.repo, base, warn });
-      required = requiredChecks(req.sources);
-      baseHeadSha = req.baseHeadSha;
-    } catch (e) {
-      degrade('required checks', e);
+    // Required contexts (rules, branch protection) gate PRs; a branch push never runs PR-only checks (04).
+    if (r.target.kind === 'pr') {
+      try {
+        const req = await fetchRequiredSources({ gh: ctx.gh, repo: r.repo, base, warn });
+        required = requiredChecks(req.sources);
+        baseHeadSha = req.baseHeadSha;
+      } catch (e) {
+        degrade('required checks', e);
+      }
     }
     const entries = r.ci.expected ?? [];
     let changed: string[] | null = null;
@@ -448,7 +451,7 @@ export async function* runWait(
         base,
         headSha: sha,
         previousHeads,
-        ...(r.target.kind === 'pr' ? { number: r.target.number } : {}),
+        ...(r.target.kind === 'pr' ? { number: r.target.number } : { previousOnly: true }),
         ...(baseHeadSha !== undefined ? { baseHeadSha } : {}),
         cache: r.cache,
       });

@@ -214,9 +214,11 @@ export async function fetchBaseline(o: {
   number?: number;
   /** From fetchRequiredSources; fetched when undefined. */
   baseHeadSha?: string | null;
+  /** Branch targets: only the previous commits; no last-merged-PR or base-head fallback (PR checks). */
+  previousOnly?: boolean;
   cache?: JsonCache;
 }): Promise<Baseline | null> {
-  const key = `baseline:${o.base}:${o.headSha}`;
+  const key = `baseline:${o.previousOnly ? 'commit:' : ''}${o.base}:${o.headSha}`;
   const hit = o.cache?.get(key, CachedBaseline);
   if (hit !== undefined) return hit;
   const tried: BaselineCandidate[] = [];
@@ -230,7 +232,7 @@ export async function fetchBaseline(o: {
     found = await attempt('previous-head', sha);
     if (found) break;
   }
-  if (!found) {
+  if (!found && !o.previousOnly) {
     const merged = await fetchLastMergedPrHead({
       gh: o.gh,
       repo: o.repo,
@@ -239,7 +241,7 @@ export async function fetchBaseline(o: {
     });
     found = await attempt('last-merged-pr', merged);
   }
-  if (!found) {
+  if (!found && !o.previousOnly) {
     const baseHead =
       o.baseHeadSha !== undefined
         ? o.baseHeadSha
