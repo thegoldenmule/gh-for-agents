@@ -140,7 +140,9 @@ const STRUCTURE: readonly { name: string; re: RegExp }[] = [
   { name: 'an HTML comment', re: /<!--/ },
 ];
 
-const FOOTER_MARKERS: readonly string[] = ['🤖 Generated with', 'Generated with [Claude Code]', 'ghx:'];
+const FOOTER_MARKERS: readonly string[] = ['🤖 Generated with', 'Generated with [Claude Code]'];
+/** A hidden ghx block marker. Prose that merely mentions `ghx:` is fine. */
+const GHX_MARKER = /<!--\s*ghx:/;
 
 function descriptionRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDetail[] {
   const out: IssueDetail[] = [];
@@ -187,7 +189,7 @@ function descriptionRules(input: CreateRulesInput, ctx: CreateRuleContext): Issu
 
   const footer = ctx.config.render.footer?.trim();
   const markers = footer ? [footer, ...FOOTER_MARKERS] : FOOTER_MARKERS;
-  const marker = markers.find((f) => d.includes(f));
+  const marker = markers.find((f) => d.includes(f)) ?? GHX_MARKER.exec(d)?.[0];
   if (marker !== undefined) {
     out.push(
       issue('description', 'description.footer', `remove '${marker}'; ghx adds the footer and the metadata block`),
@@ -197,17 +199,36 @@ function descriptionRules(input: CreateRulesInput, ctx: CreateRuleContext): Issu
 }
 
 // ── testing ──────────────────────────────────────────────────────────────
-/** Absolute paths that are the same on every machine (`/usr/bin/env node t.js` is re-runnable). */
-const SYSTEM_DIRS: ReadonlySet<string> = new Set(['usr', 'bin', 'sbin', 'dev']);
+/**
+ * Top-level directories whose paths belong to one machine: homes, temp dirs, mounts and CI workspaces.
+ * Other absolutes are left alone: `/usr/bin/env` is the same everywhere, and `-t /parse/` is a pattern.
+ */
+const MACHINE_DIRS: ReadonlySet<string> = new Set([
+  'Users',
+  'home',
+  'root',
+  'tmp',
+  'private',
+  'var',
+  'Volumes',
+  'mnt',
+  'media',
+  'opt',
+  'srv',
+  'workspace',
+  'workspaces',
+  'runner',
+  '__w',
+]);
 
-/** Paths in a command that only exist on the author's machine: home, temp, drive-letter and other absolutes. */
+/** Paths in a command that only exist on the author's machine: home, temp, drive-letter and machine absolutes. */
 export function machinePaths(command: string): string[] {
   const out: string[] = [];
   for (const tok of command.split(/[\s='"(),]+/)) {
     if (tok === '' || tok === '/') continue;
     const home = tok.startsWith('~') || /^\$\{?HOME\b/.test(tok);
     const windows = /^[A-Za-z]:[\\/]/.test(tok) || tok.startsWith('\\\\');
-    const absolute = tok.startsWith('/') && !SYSTEM_DIRS.has(tok.slice(1).split('/')[0] ?? '');
+    const absolute = tok.startsWith('/') && MACHINE_DIRS.has(tok.slice(1).split('/')[0] ?? '');
     if (home || windows || absolute) out.push(tok);
   }
   return out;

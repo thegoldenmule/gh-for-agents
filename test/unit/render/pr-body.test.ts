@@ -128,6 +128,23 @@ describe('toPrBlock', () => {
   });
 });
 
+describe('strict block', () => {
+  test('an empty revertWith is dropped, so the strict PrBlock accepts the block', () => {
+    const input = { ...readInput('footer-null.input.json'), revertWith: [] };
+    const block = toPrBlock(input, META);
+    assert.ok(!('revertWith' in block));
+    assert.ok(renderPrBody(block, TRAILER).includes('<!-- ghx:v1 '));
+  });
+
+  test('a block the strict PrBlock rejects is a ghx bug (INTERNAL), not a body', () => {
+    const block = toPrBlock(readInput('footer-null.input.json'), META);
+    assert.throws(
+      () => renderPrBody({ ...block, testing: [] }, TRAILER),
+      (e: unknown) => isGhxError(e, 'INTERNAL'),
+    );
+  });
+});
+
 describe('trailer', () => {
   const block = (p: Partial<PrBlockData>) => ({ ...toPrBlock(readInput('footer-null.input.json'), META), ...p });
 
@@ -196,9 +213,9 @@ describe('size', () => {
   /** A block whose body is exactly `chars` long: the description appears twice, the footer once. */
   function bodyOf(chars: number): string {
     const base = toPrBlock(readInput('footer-null.input.json'), META);
-    const probe = renderPrBody({ ...base, description: '' }, { mode: 'trailer', footer: 'f' });
-    // An empty description is dropped as a paragraph, so add back its separator.
-    const fixed = probe.length + 2;
+    // The description appears twice (visible and in the block), so one char of it costs two.
+    const probe = renderPrBody({ ...base, description: 'a' }, { mode: 'trailer', footer: 'f' });
+    const fixed = probe.length - 2;
     const desc = Math.floor((chars - fixed) / 2);
     const footer = 'f'.repeat(1 + (chars - fixed - 2 * desc));
     return renderPrBody({ ...base, description: 'a'.repeat(desc) }, { mode: 'trailer', footer });

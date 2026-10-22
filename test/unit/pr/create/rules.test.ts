@@ -193,7 +193,8 @@ describe('description', () => {
   test('description.footer', () => {
     pass({ description: 'Mentions ghx as a tool.' });
     failOnly({ description: 'Done. 🤖 Generated with Claude Code' }, 'description.footer');
-    failOnly({ description: 'See ghx: v1 for details.' }, 'description.footer');
+    pass({ description: 'See ghx: v1 for details.' });
+    pass({ description: 'The ghx: prefix names the tool.' });
     const custom = ctxWith({ render: { footer: 'Made by the bot squad' } });
     failOnly({ description: 'Fixed. Made by the bot squad' }, 'description.footer', custom);
     pass({ description: 'Fixed. Made by the bot squad' }, ctxWith({ render: { footer: null } }));
@@ -242,6 +243,8 @@ describe('testing', () => {
       '/usr/bin/env node t.js',
       'curl http://localhost:3000/health',
       'find / -name x',
+      'pnpm test -t /parse/',
+      'grep -E /^a$/ f',
     ]) {
       pass({ testing: [unit({ command: c })] });
     }

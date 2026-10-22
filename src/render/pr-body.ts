@@ -2,11 +2,12 @@
 // `pr` block. No sections and no test logs: the user's standing correction is "2–3 sentences".
 //
 // Rendering reads the block, not the create input, so `pr edit` re-renders from the merged block (02 §3).
-// The block goes through the wave 1 codec (src/meta/codec.ts), which owns the wire format: keys sorted,
-// `<`, `>` and `&` escaped.
+// The block goes through the strict encodeBlock (src/meta/schemas.ts): a block the strict PrBlock rejects is
+// a ghx bug (INTERNAL), never a body. The codec owns the wire format: keys sorted, `<`, `>` and `&` escaped.
 import type { GhxConfig } from '../config/schema.ts';
 import { GhxError } from '../core/errors.ts';
-import { encode, MAX_BODY_CHARS } from '../meta/codec.ts';
+import { MAX_BODY_CHARS } from '../meta/codec.ts';
+import { encodeBlock } from '../meta/schemas.ts';
 import type { PrCreateInput } from '../pr/create/schema.ts';
 import type { TestingItem } from '../schemas/pr.ts';
 import { VERSION } from '../version.ts';
@@ -45,7 +46,8 @@ export function toPrBlock(input: BlockFields, meta: PrBlockMeta): PrBlockData {
   };
   if (input.riskNote !== undefined) block.riskNote = input.riskNote;
   if (input.revertNote !== undefined) block.revertNote = input.revertNote;
-  if (input.revertWith !== undefined) block.revertWith = input.revertWith;
+  // An empty list means "none" (a `pr edit` patch clears it with []); the strict block needs ≥1 or absent.
+  if (input.revertWith !== undefined && input.revertWith.length > 0) block.revertWith = input.revertWith;
   if (input.refs !== undefined) block.refs = input.refs;
   return block;
 }
@@ -97,7 +99,7 @@ export function renderPrBody(block: PrBlockData, opts: RenderOptions): string {
     renderTrailer(block),
     opts.mode === 'details' ? renderHowToTest(block.testing) : null,
     opts.footer,
-    encode(block),
+    encodeBlock(block),
   ]);
   if (body.length > MAX_BODY_CHARS) {
     throw new GhxError('META_TOO_LARGE', `The PR body is ${body.length} characters; GitHub allows ${MAX_BODY_CHARS}.`, {
