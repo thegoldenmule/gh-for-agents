@@ -1,0 +1,1 @@
+Post "https://api.github.com/graphql": read tcp 10.0.0.2:55555->140.82.112.6:443: read: connection reset by peer

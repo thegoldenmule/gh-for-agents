@@ -1,0 +1,1 @@
+Get "https://api.github.com/repos/cli/cli": dial tcp: lookup api.github.com: i/o timeout

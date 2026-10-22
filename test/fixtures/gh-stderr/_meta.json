@@ -1,0 +1,28 @@
+{
+  "meta": { "source": "corpus-shape", "note": "Verbatim gh error strings (research §3.1) and gh's standard HTTP error forms, for the classifier tests." },
+  "files": {
+    "run-view-in-progress.txt": { "source": "corpus-shape" },
+    "no-checks.txt": { "source": "corpus-shape" },
+    "not-a-git-repo.txt": { "source": "corpus-shape" },
+    "could-not-resolve-pr.txt": { "source": "corpus-shape" },
+    "already-merged.txt": { "source": "corpus-shape" },
+    "graphql-something-went-wrong.txt": { "source": "corpus-shape" },
+    "rerun-already-running.txt": { "source": "corpus-shape" },
+    "job-cannot-be-rerun.txt": { "source": "corpus-shape" },
+    "unknown-json-field.txt": { "source": "corpus-shape" },
+    "diff-406.txt": { "source": "corpus-shape" },
+    "logs-gone-410.txt": { "source": "live:public", "note": "spike 03 §3.3, cli/cli job 73871539329" },
+    "logs-blob-404.txt": { "source": "live:public", "note": "spike 03 §3.3; stdout carries <Code>BlobNotFound</Code>" },
+    "api-not-found.txt": { "source": "synthetic" },
+    "server-error-502.txt": { "source": "synthetic" },
+    "rate-limit-403.txt": { "source": "synthetic" },
+    "secondary-rate-limit-403.txt": { "source": "synthetic" },
+    "graphql-rate-limit.txt": { "source": "synthetic" },
+    "forbidden-403.txt": { "source": "synthetic" },
+    "bad-credentials-401.txt": { "source": "synthetic" },
+    "not-logged-in.txt": { "source": "synthetic" },
+    "connection-reset.txt": { "source": "synthetic" },
+    "io-timeout.txt": { "source": "synthetic" },
+    "eof.txt": { "source": "synthetic" }
+  }
+}
