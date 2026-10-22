@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "source": "synthetic",
+    "note": "Synthetic Claude Code session JSONL in the 2.1.280 record shapes (tool_use/tool_result, toolUseResult.backgroundTaskId, queue-operation, task-notification) for the acceptance scorer tests (03 \u00a78.2). No real transcript."
+  }
+}
