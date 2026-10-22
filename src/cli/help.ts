@@ -21,7 +21,7 @@ export function globalHelp(specs: readonly AnyCommandSpec[], version: string): R
     usage: 'ghx <group> <command> [positionals] [--flags] [--input file.json|-]',
     rules: [
       'One plain call per question: no pipes, --jq, head, sleep or timeout.',
-      'stdout is one JSON document (NDJSON only for streams); errors are {error:{code,message,hint,details}} with a non-zero exit.',
+      'stdout is one JSON document; errors are {error:{code,message,hint,details}}, exit non-zero.',
       'Large artifacts are written to files; the result carries their paths.',
     ],
     globalFlags: GLOBAL_FLAGS.map((g) => ({ ...g })),
@@ -35,7 +35,7 @@ export function globalHelp(specs: readonly AnyCommandSpec[], version: string): R
       })),
       ...BUILTINS,
     ],
-    next: 'ghx <command> --help for flags and examples; ghx <command> --schema for JSON Schema; ghx doctor to check setup',
+    next: 'ghx <command> --help | --schema; ghx doctor checks setup',
   };
 }
 

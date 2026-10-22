@@ -9,15 +9,15 @@ import { parseJsonWithPosition } from '../util/json.ts';
 
 /** Global flags (01 §3.2): reserved, never derived from input. */
 export const GLOBAL_FLAGS = [
-  { flag: '--repo', alias: '-R', type: 'string', description: 'owner/name or host/owner/name; overrides the cwd repo' },
-  { flag: '--input', type: 'string', description: 'JSON input file, or - for stdin (never read implicitly)' },
-  { flag: '--schema', type: 'boolean', description: 'Print the JSON Schema of input and output; makes no gh calls' },
-  { flag: '--help', alias: '-h', type: 'boolean', description: 'Print JSON help' },
-  { flag: '--timeout', type: 'string', description: 'Deadline, e.g. 90s, 10m (clamped to the command maximum)' },
-  { flag: '--dry-run', type: 'boolean', description: 'Write commands only: validate and show what would be sent' },
+  { flag: '--repo', alias: '-R', type: 'string', description: 'owner/name; overrides the cwd repo' },
+  { flag: '--input', type: 'string', description: 'JSON input file, or - for stdin' },
+  { flag: '--schema', type: 'boolean', description: 'JSON Schema of input and output' },
+  { flag: '--help', alias: '-h', type: 'boolean', description: 'JSON help' },
+  { flag: '--timeout', type: 'string', description: 'Deadline, e.g. 90s, 10m' },
+  { flag: '--dry-run', type: 'boolean', description: 'Writes: show what would be sent' },
   { flag: '--pretty', type: 'boolean', description: 'Indent JSON output' },
-  { flag: '--max-bytes', type: 'string', description: 'Output bound before spilling to a file (default 16384)' },
-  { flag: '--verbose', type: 'boolean', description: 'Diagnostics as NDJSON on stderr' },
+  { flag: '--max-bytes', type: 'string', description: 'Spill bound (default 16384)' },
+  { flag: '--verbose', type: 'boolean', description: 'NDJSON diagnostics on stderr' },
 ] as const;
 
 export const RESERVED_NAMES = new Set(GLOBAL_FLAGS.map((g) => g.flag.slice(2)));
