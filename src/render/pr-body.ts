@@ -6,8 +6,8 @@
 // a ghx bug (INTERNAL), never a body. The codec owns the wire format: keys sorted, `<`, `>` and `&` escaped.
 import type { GhxConfig } from '../config/schema.ts';
 import { GhxError } from '../core/errors.ts';
-import { MAX_BODY_CHARS } from '../meta/codec.ts';
-import { encodeBlock } from '../meta/schemas.ts';
+import { MAX_BODY_CHARS, strip } from '../meta/codec.ts';
+import { type BlockRead, encodeBlock, readBlocks } from '../meta/schemas.ts';
 import type { PrCreateInput } from '../pr/create/schema.ts';
 import type { TestingItem } from '../schemas/pr.ts';
 import { VERSION } from '../version.ts';
@@ -54,8 +54,19 @@ export function toPrBlock(input: BlockFields, meta: PrBlockMeta): PrBlockData {
 
 const NON_PASS = ['fail', 'skipped', 'not-run'] as const;
 
+/** What the trailer reads. A strict PrBlockData or a lenient PrBlockRead (src/meta/schemas.ts) both fit. */
+export interface TrailerSource {
+  risk: string;
+  components: readonly string[];
+  revertPolicy: string;
+  testing: readonly { kind: string; result: string }[];
+  refs?:
+    | { stackedOn?: string | undefined; splitFrom?: string | undefined; closes?: readonly string[] | undefined }
+    | undefined;
+}
+
 /** `3/3 pass (unit, integration, typecheck)` or `2/3 pass, 1 not-run (unit, e2e, manual)`. */
-export function testSummary(testing: readonly TestingItem[]): string {
+export function testSummary<T extends { kind: string; result: string }>(testing: readonly T[]): string {
   const count = (r: string) => testing.filter((t) => t.result === r).length;
   const others = NON_PASS.filter((r) => count(r) > 0).map((r) => `, ${count(r)} ${r}`);
   const kinds = [...new Set(testing.map((t) => t.kind))].join(', ');
@@ -66,7 +77,7 @@ export function testSummary(testing: readonly TestingItem[]): string {
  * The one visible metadata line. Stack and close refs are visible so GitHub links and auto-closes them;
  * GitHub needs the keyword before every issue, hence `Closes #1, closes #2`.
  */
-export function renderTrailer(block: PrBlockData): string {
+export function renderTrailer(block: TrailerSource): string {
   const refs = block.refs;
   const closes = refs?.closes ?? [];
   return joinTrailer([
@@ -108,4 +119,75 @@ export function renderPrBody(block: PrBlockData, opts: RenderOptions): string {
     });
   }
   return body;
+}
+
+// ── Parse (the inverse of renderPrBody) ───────────────────────────────────
+/** A PR body split into the parts renderPrBody writes (02 §4.1 `description.drift`, §3 DESCRIPTION_DRIFT). */
+export interface ParsedPrBody {
+  /** The visible prose before the trailer; all visible text (minus a known footer) when there is no trailer. */
+  description: string;
+  /** The trailer line (`Risk: … · Components: …`), or null. */
+  trailer: string | null;
+  /** The `details`-mode How to test block, or null. */
+  howToTest: string | null;
+  /** The visible text after the trailer and How to test (the footer, plus anything appended), or null. */
+  footer: string | null;
+  /** Every ghx block in the body, in order (readBlocks; readPrBlock picks the `pr` one). */
+  blocks: BlockRead[];
+}
+
+/** The trailer always starts with these two fields; it is found as a paragraph of its own. */
+const TRAILER_LINE = /(?:^|\n\n)(Risk: [^\n]* · Components: [^\n]*)(?=\n\n|$)/;
+const HOW_TO_TEST = /^<details><summary>How to test<\/summary>[\s\S]*?<\/details>/;
+
+/**
+ * Split a body into description, trailer, How to test, footer and blocks. CRLF (bodies saved from the GitHub
+ * UI) is normalised first. `footer`, when known (config `render.footer`), is peeled off the end even when the
+ * trailer is missing. Round-trips renderPrBody.
+ */
+export function parsePrBody(body: string, opts: { footer?: string | null | undefined } = {}): ParsedPrBody {
+  const text = body.replace(/\r\n?/g, '\n');
+  const blocks = readBlocks(text);
+  let visible = strip(text).trim();
+  const known = opts.footer?.replace(/\r\n?/g, '\n').trim();
+  let footer: string | null = null;
+  if (known && (visible === known || visible.endsWith(`\n\n${known}`))) {
+    footer = known;
+    visible = visible.slice(0, visible.length - known.length).trim();
+  }
+  const m = TRAILER_LINE.exec(visible);
+  if (!m || m[1] === undefined) return { description: visible, trailer: null, howToTest: null, footer, blocks };
+  const start = m.index + (m[0].length - m[1].length);
+  let rest = visible.slice(start + m[1].length).trim();
+  const how = HOW_TO_TEST.exec(rest);
+  if (how) rest = rest.slice(how[0].length).trim();
+  const after = [rest, footer].filter((x): x is string => x !== null && x !== '').join('\n\n');
+  return {
+    description: visible.slice(0, start).trim(),
+    trailer: m[1],
+    howToTest: how ? how[0] : null,
+    footer: after === '' ? null : after,
+    blocks,
+  };
+}
+
+export type PrBodyDrift = 'title' | 'description' | 'trailer';
+
+/**
+ * Where the visible PR differs from its block (`pr status` description.drift; `pr edit` DESCRIPTION_DRIFT):
+ * `description` when the prose was edited, `trailer` when the trailer no longer renders from the block, and
+ * `title` when `title` (the PR's current title) is given and differs. Empty when they agree.
+ */
+export function prBodyDrift(
+  body: string,
+  block: TrailerSource & { title: string; description: string },
+  opts: Pick<RenderOptions, 'footer'>,
+  title?: string,
+): PrBodyDrift[] {
+  const p = parsePrBody(body, { footer: opts.footer });
+  const out: PrBodyDrift[] = [];
+  if (title !== undefined && title !== block.title) out.push('title');
+  if (p.description !== block.description.replace(/\r\n?/g, '\n').trim()) out.push('description');
+  if (p.trailer !== renderTrailer(block)) out.push('trailer');
+  return out;
 }

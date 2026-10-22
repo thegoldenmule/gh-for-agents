@@ -9,10 +9,13 @@ import { ConfigSchema } from '../../../src/config/schema.ts';
 import { DEFAULT_FOOTER } from '../../../src/config/sections/render.ts';
 import { isGhxError } from '../../../src/core/errors.ts';
 import { decode, MAX_BODY_CHARS, strip } from '../../../src/meta/codec.ts';
+import { readPrBlock } from '../../../src/meta/schemas.ts';
 import { createRules } from '../../../src/pr/create/rules.ts';
 import { PrCreateInput } from '../../../src/pr/create/schema.ts';
 import {
   type PrBlockData,
+  parsePrBody,
+  prBodyDrift,
   type RenderOptions,
   renderHowToTest,
   renderPrBody,
@@ -242,4 +245,56 @@ test('the render config defaults to trailer mode with the Claude Code footer', (
   assert.ok(!ConfigSchema.safeParse({ version: 1, components: { x: {} }, render: { mode: 'sections' } }).success);
   assert.ok(!ConfigSchema.safeParse({ version: 1, components: { x: {} }, render: { footer: 'a <!-- b -->' } }).success);
   assert.equal(ConfigSchema.parse({ version: 1, components: { x: {} }, render: { footer: null } }).render.footer, null);
+});
+
+describe('parsePrBody', () => {
+  for (const c of CASES) {
+    test(`round-trips ${c.body}`, () => {
+      const block = toPrBlock(readInput(c.input), META);
+      const body = renderPrBody(block, c.render);
+      const p = parsePrBody(body, { footer: c.render.footer });
+      assert.equal(p.description, block.description);
+      assert.equal(p.trailer, renderTrailer(block));
+      assert.equal(p.howToTest, c.render.mode === 'details' ? renderHowToTest(block.testing) : null);
+      assert.equal(p.footer, c.render.footer);
+      assert.equal(p.blocks.length, 1);
+      assert.deepEqual(p.blocks[0]?.status === 'ok' ? p.blocks[0].block : null, block);
+      // Without the footer hint the trailer still anchors the split.
+      assert.deepEqual(parsePrBody(body), p);
+      assert.deepEqual(prBodyDrift(body, block, c.render), []);
+      assert.deepEqual(prBodyDrift(body, block, c.render, block.title), []);
+      // The lenient block a reader gets (readPrBlock) works too.
+      const read = readPrBlock(body);
+      assert.equal(read.status, 'ok');
+      if (read.status === 'ok') assert.deepEqual(prBodyDrift(body, read.block, c.render), []);
+    });
+  }
+
+  test('CRLF from a UI edit is normalised, so an unchanged body has no drift', () => {
+    const block = toPrBlock(readInput('tests-mixed.input.json'), META);
+    const body = renderPrBody(block, TRAILER).replace(/\n/g, '\r\n');
+    assert.equal(parsePrBody(body).description, block.description);
+    assert.deepEqual(prBodyDrift(body, block, TRAILER), []);
+  });
+
+  test('drift: an edited description, an edited trailer and a changed title', () => {
+    const block = toPrBlock(readInput('worked-example-3301.input.json'), META);
+    const body = renderPrBody(block, TRAILER);
+    const edited = body.replace(block.description, 'Rewritten in the GitHub UI.');
+    assert.equal(parsePrBody(edited).description, 'Rewritten in the GitHub UI.');
+    assert.deepEqual(prBodyDrift(edited, block, TRAILER), ['description']);
+    const trailer = body.replace('Risk: ', 'Risk:  ');
+    assert.deepEqual(prBodyDrift(trailer, block, TRAILER), ['trailer']);
+    assert.deepEqual(prBodyDrift(body, block, TRAILER, 'fix: other'), ['title']);
+  });
+
+  test('a body with no trailer: the visible text minus a known footer is the description', () => {
+    const p = parsePrBody(`Hand-written.\n\nSecond paragraph.\n\n${DEFAULT_FOOTER}`, { footer: DEFAULT_FOOTER });
+    assert.deepEqual(
+      { d: p.description, t: p.trailer, h: p.howToTest, f: p.footer, b: p.blocks },
+      { d: 'Hand-written.\n\nSecond paragraph.', t: null, h: null, f: DEFAULT_FOOTER, b: [] },
+    );
+    assert.equal(parsePrBody('').description, '');
+    assert.equal(parsePrBody('').footer, null);
+  });
 });
