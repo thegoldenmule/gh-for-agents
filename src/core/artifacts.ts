@@ -1,9 +1,13 @@
 // Artifact files (01 §8): deterministic paths under <root>/<host>/<owner>/<repo>/<kind>/<name>, so a
 // repeat call reuses the file. Files older than 7 days are pruned lazily on the first write.
+//
+// GHX_ARTIFACT_DIR may point anywhere, so pruning never walks the tree blindly: it visits only the
+// artifact layout (<host>/<owner>/<repo>/<kind> and _local/<kind>) and only kind directories that
+// carry ghx's marker file, which pathFor() writes when it creates them.
 import { createHash } from 'node:crypto';
-import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import type { RepoRef } from '../gh/types.ts';
 import type { Clock } from './clock.ts';
 
@@ -36,7 +40,22 @@ export function artifactRoot(env: Readonly<Record<string, string | undefined>>):
   return resolve(env.GHX_ARTIFACT_DIR || join(tmpdir(), 'ghx'));
 }
 
-function pruneTree(dir: string, cutoff: number): void {
+/** Marks a kind directory as ghx-created; only such directories are ever pruned. */
+export const ARTIFACT_MARKER = '.ghx-artifacts';
+
+function subdirs(dir: string): string[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !e.isSymbolicLink())
+      .map((e) => join(dir, e.name));
+  } catch {
+    return [];
+  }
+}
+
+/** Remove old regular files directly inside one marked kind directory. Never recurses. */
+function pruneKindDir(dir: string, cutoff: number): void {
+  if (!existsSync(join(dir, ARTIFACT_MARKER))) return;
   let entries: import('node:fs').Dirent[];
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -44,12 +63,27 @@ function pruneTree(dir: string, cutoff: number): void {
     return;
   }
   for (const e of entries) {
+    if (!e.isFile() || e.name === ARTIFACT_MARKER) continue;
     const p = join(dir, e.name);
     try {
-      if (e.isDirectory()) pruneTree(p, cutoff);
-      else if (statSync(p).mtimeMs < cutoff) rmSync(p, { force: true });
+      if (statSync(p).mtimeMs < cutoff) rmSync(p, { force: true });
     } catch {
       // best effort
+    }
+  }
+}
+
+/** Visit exactly the artifact layout under `root`: _local/<kind> and <host>/<owner>/<repo>/<kind>. */
+function pruneArtifacts(root: string, cutoff: number): void {
+  for (const top of subdirs(root)) {
+    if (basename(top) === '_local') {
+      for (const kind of subdirs(top)) pruneKindDir(kind, cutoff);
+      continue;
+    }
+    for (const owner of subdirs(top)) {
+      for (const repo of subdirs(owner)) {
+        for (const kind of subdirs(repo)) pruneKindDir(kind, cutoff);
+      }
     }
   }
 }
@@ -66,6 +100,8 @@ export function createArtifactStore(o: { root: string; clock: Clock }): Artifact
   const pathFor = async (kind: string, name: string, r?: RepoRef): Promise<string> => {
     const dir = dirFor(kind, r ?? repo);
     mkdirSync(dir, { recursive: true });
+    const marker = join(dir, ARTIFACT_MARKER);
+    if (!existsSync(marker)) writeFileSync(marker, 'ghx artifact directory: files older than 7 days are pruned.\n');
     return join(dir, SAFE.test(name) ? name : safeSegment(name));
   };
   return {
@@ -77,7 +113,7 @@ export function createArtifactStore(o: { root: string; clock: Clock }): Artifact
     async write(a) {
       if (!pruned) {
         pruned = true;
-        pruneTree(o.root, o.clock.now() - PRUNE_AFTER_MS);
+        pruneArtifacts(o.root, o.clock.now() - PRUNE_AFTER_MS);
       }
       const path = await pathFor(a.kind, a.name, a.repo);
       const buf = typeof a.content === 'string' ? Buffer.from(a.content, 'utf8') : Buffer.from(a.content);
