@@ -27,7 +27,12 @@ export type Decoded<T> =
       issues?: unknown;
     };
 
-const BLOCK = /<!--\s*ghx:v(\d+)\s+(\{[\s\S]*?\})\s*-->/g;
+// The JSON group cannot span `-->`: a broken block (`<!-- ghx:v1 {truncated -->`) must not match up to
+// the next block's `} -->` and take the human text between them with it. Encoded JSON never contains
+// `-->` (see the escaping note above), so valid blocks are unaffected.
+const BLOCK_SOURCE = String.raw`<!--\s*ghx:v(\d+)\s+(\{(?:(?!-->)[\s\S])*?\})\s*-->`;
+const BLOCK = new RegExp(BLOCK_SOURCE, 'g');
+const STRIP = new RegExp(String.raw`[ \t]*\r?\n?[ \t]*` + BLOCK_SOURCE + String.raw`[ \t]*`, 'g');
 
 export function escapeJson(json: string): string {
   return json.replaceAll('<', '\\u003c').replaceAll('>', '\\u003e').replaceAll('&', '\\u0026');
@@ -75,7 +80,7 @@ export function decode<T>(body: string, schemas: MetaSchemas, o: { pick?: 'last'
 /** The visible text: the body without ghx blocks, with the blank lines they leave trimmed. */
 export function strip(body: string): string {
   return body
-    .replace(/[ \t]*\r?\n?[ \t]*<!--\s*ghx:v\d+\s+\{[\s\S]*?\}\s*-->[ \t]*/g, '')
+    .replace(STRIP, '')
     .replace(/(\r?\n){3,}/g, '\n\n')
     .replace(/\s+$/, '');
 }

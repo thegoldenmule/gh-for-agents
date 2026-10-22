@@ -134,3 +134,18 @@ test('size guard: body plus block over 65,536 chars is META_TOO_LARGE', () => {
   );
   assert.ok(upsert('x'.repeat(MAX_BODY_CHARS - 40), { a: 1 }).length <= MAX_BODY_CHARS);
 });
+
+test('a malformed block never swallows the human text up to the next block', () => {
+  const human = 'This paragraph was written by a human and must survive.';
+  const valid = encode({ t: 'pr', rev: 3 });
+  const text = `Intro.\n\n<!-- ghx:v1 {"t":"pr","id":"p_k3m9qa", -->\n\n${human}\n\n${valid}\n`;
+  const all = decodeAll(text, SCHEMAS);
+  assert.equal(all.length, 1, 'the broken block is not a block');
+  assert.equal(all[0]?.status, 'ok');
+  assert.equal(all[0]?.raw, valid);
+  assert.ok(strip(text).includes(human), 'strip keeps the paragraph');
+  const updated = upsert(text, { t: 'pr', rev: 4 });
+  assert.ok(updated.includes(human), 'upsert keeps the paragraph');
+  assert.ok(updated.includes(encode({ t: 'pr', rev: 4 })));
+  assert.ok(updated.includes('<!-- ghx:v1 {"t":"pr","id":"p_k3m9qa", -->'), 'the broken text is left alone');
+});
