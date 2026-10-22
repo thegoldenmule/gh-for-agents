@@ -77,7 +77,7 @@ export default defineCommand({
   output: Output,
   needs: { repo: 'inferred', config: 'none' },
   timeout: { defaultMs: 180_000, maxMs: 600_000 },
-  replaces: ['gh pr close', 'gh pr reopen'],
+  replaces: ['gh pr close <n> && gh pr reopen <n>'],
   examples: [
     { argv: 'ghx ci retrigger powerhouse-inc/powerhouse#3301', note: 'Close and reopen to fire pull_request CI' },
     { argv: 'ghx ci retrigger 3301 --expect-head 9f2c4e1', note: 'Refuse if the head moved' },
