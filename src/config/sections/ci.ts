@@ -29,6 +29,8 @@ export const CiSection = z
     // M2.6 (02 §11.8): jobs or tests known to be flaky (`*` wildcards), and extra infra-error log patterns.
     knownFlaky: z.array(z.strictObject({ job: z.string().min(1), test: z.string().min(1).optional() })).optional(),
     infraPatterns: z.array(LogPattern).optional(),
+    // M3.2 (02 §12, §8.2 row 12): steps that must run in a green job; a skipped one is a misleading green.
+    keySteps: z.array(z.string().min(1)).optional(),
     // M4.1 (02 §11.3): checks ci wait expects even before they register. An entry with `paths` applies
     // only when a changed file matches one of the globs. Optional, no default.
     expected: z

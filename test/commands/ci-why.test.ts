@@ -5,7 +5,6 @@ import { test } from 'node:test';
 import { FailingJob } from '../../src/schemas/ci.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
-import { runInProcess } from '../helpers/harness.ts';
 import {
   httpReply,
   install,
@@ -214,12 +213,6 @@ test('a PR that does not exist is PR_NOT_FOUND, exit 5', async () => {
   const r = await why({ slug: 'o/missing', number: 404, headSha: sha('a'), jobs: [] }, [], { fake });
   assert.equal(r.exitCode, EXIT.NOT_FOUND);
   assert.equal(r.json.error.code, 'PR_NOT_FOUND');
-});
-
-test('a run URL as the PR selector is USAGE_BAD_SELECTOR', async () => {
-  const r = await runInProcess(['ci', 'why', 'https://github.com/o/r/actions/runs/123'], { gh: new FakeGh() });
-  assert.equal(r.exitCode, EXIT.USAGE);
-  assert.equal(r.json.error.code, 'USAGE_BAD_SELECTOR');
 });
 
 test('5 failing jobs with real runner logs at default caps stay under 16 KB (no spill)', async () => {

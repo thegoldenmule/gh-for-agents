@@ -299,11 +299,13 @@ export function recordedJob(runner: string, o: Partial<WJob> = {}): WJob {
 }
 
 /** Run `ghx ci why <slug>#<number> …args` against the world, with its own artifact dir. */
-export async function why(world: World, args: string[] = [], o: { fake?: FakeGh } = {}) {
+export async function why(world: World, args: string[] = [], o: { fake?: FakeGh; selector?: boolean } = {}) {
   /** A caller-supplied fake is already installed (so its overrides win). */
   const fake = o.fake ?? install(new FakeGh(), world);
   const artifacts = mkdtempSync(join(scratchDir(), 'why-'));
-  const r = await runInProcess(['ci', 'why', `${world.slug}#${world.number}`, ...args], {
+  /** selector: false leaves the PR selector out (for --run). */
+  const selector = o.selector === false ? [] : [`${world.slug}#${world.number}`];
+  const r = await runInProcess(['ci', 'why', ...selector, ...args], {
     gh: fake,
     env: { GHX_ARTIFACT_DIR: artifacts },
   });
