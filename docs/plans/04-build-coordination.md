@@ -122,3 +122,17 @@ Filled in by the wave 1 bootstrap agent (commits `f29f2eb`..`3cd7603`).
   - the directory-scanned registry;
   - `summarySchema`;
   - `MIN_GH_VERSION` 2.81.0.
+- **2026-10-22, unverified addressed findings (for M6.4 and M8).** Merge policy fails closed.
+  - `pr merge` and `merge.ready` verify **every** addressed event whose finding is at or above `merge.blockOnSeverity`, with no 10-commit cap. Merges are rare, so the extra compare calls are acceptable.
+  - A finding whose addressed commit is still `verified:null` after that counts as **open** for blocking purposes.
+  - `pr status` and `pr feedback` keep the 10-commit cap. Those findings show `verified:null` with `EVENT_COMMIT_UNVERIFIED`.
+- **2026-10-22, wave 2b feedback choices accepted.**
+  - An empty COMMENTED review is a container for its comments and is not listed.
+  - Order is inline, then review, then issue, then by time.
+  - GraphQL bot logins are normalised to `login[bot]`.
+  - New warnings: `EVENT_INVALID`, `EVENT_TARGET_UNKNOWN` and `EVENT_COMMIT_UNVERIFIED`.
+- **2026-10-22, wave 2b create choices accepted.**
+  - Block keys are sorted, because the codec owns the wire order.
+  - Each issue in the trailer gets its own `closes` keyword.
+  - `scopeRequired` defaults to false.
+  - Commands under `/usr`, `/bin`, `/sbin` and `/dev` are re-runnable.
