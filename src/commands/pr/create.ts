@@ -1,9 +1,11 @@
-// ghx pr create (02 §2, 03 M9.3): open a PR from a validated object. The flow is 02 §2.6: config →
-// zod + createRules → one GraphQL preflight → compare → local head check → render (--dry-run halts at
-// the POST) → POST /pulls via `gh api --input -` → exact read-back.
+// ghx pr create (02 §2, 03 M9.3, M9.4): open a PR from a validated object, or several with --batch.
+// The flow is 02 §2.6: config → zod + createRules → one GraphQL preflight → compare → local head check
+// → render (--dry-run halts at the POST) → POST /pulls via `gh api --input -` → exact read-back.
 import { z } from 'zod';
 import { defineCommand } from '../../core/command.ts';
+import type { IssueDetail } from '../../core/errors.ts';
 import { repoSlug } from '../../gh/types.ts';
+import { BATCH_MAX_ITEMS, BatchDefaults, BatchItem, runBatch } from '../../pr/create/batch.ts';
 import { PrCreateCommandOutput } from '../../pr/create/output.ts';
 import { isLocalTarget, offlineIssues, outputOf, planCreate, previewOf, renderPlan } from '../../pr/create/plan.ts';
 import { validationError } from '../../pr/create/rules.ts';
@@ -17,7 +19,21 @@ const jsonFields = Object.fromEntries(
   Object.entries(prShape).map(([k, s]) => [k, s.meta({ jsonOnly: true })]),
 ) as typeof prShape;
 
-const Input = z.strictObject(jsonFields).describe('A structured PR (02 §2.1); run ghx pr create --schema');
+const Input = z
+  .strictObject({
+    ...jsonFields,
+    batch: z.boolean().optional().describe('Create several PRs from {defaults, items} (02 §2.4)'),
+    defaults: BatchDefaults.optional(),
+    items: z
+      .array(BatchItem)
+      .min(1)
+      .max(BATCH_MAX_ITEMS)
+      .optional()
+      .describe('--batch: one partial PR per item, merged over defaults'),
+  })
+  .describe('A structured PR (02 §2.1), or {defaults, items} with --batch');
+
+const PR_FIELDS = Object.keys(prShape);
 
 const EXAMPLE = {
   title: 'feat(app): show a banner when a request is retried',
@@ -46,6 +62,7 @@ export default defineCommand({
   examples: [
     { argv: 'ghx pr create -R octo/demo --input -', note: 'or --input pr.json', input: EXAMPLE },
     { argv: 'ghx pr create --input pr.json --dry-run', note: 'validate, check and render without creating' },
+    { argv: 'ghx pr create --batch --input prs.json', note: 'several PRs: {defaults, items}; stacked items in order' },
   ],
   async run(raw, ctx) {
     const resolved = await ctx.repo();
@@ -57,7 +74,30 @@ export default defineCommand({
         message: `The cwd is ${repoSlug(resolved.cwdRepo)} but the target is ${slug}: config came from ${slug} and local git checks were skipped.`,
       });
     }
-    const offline = offlineIssues(raw, config);
+    const { batch, defaults, items, ...pr } = raw;
+    if (batch === true) {
+      const stray = PR_FIELDS.filter((k) => k in pr);
+      if (stray.length > 0 || items === undefined) {
+        const issues: IssueDetail[] = stray.map((k) => ({
+          path: k,
+          code: 'batch.top_level_field',
+          message: `with --batch, '${k}' goes in defaults or in each item`,
+        }));
+        if (items === undefined) issues.push({ path: 'items', code: 'invalid_type', message: '--batch needs items[]' });
+        throw validationError(issues);
+      }
+      return runBatch({ ...(defaults ? { defaults } : {}), items }, { ctx, repo: resolved, config });
+    }
+    if (defaults !== undefined || items !== undefined) {
+      throw validationError([
+        {
+          path: defaults !== undefined ? 'defaults' : 'items',
+          code: 'batch.flag_required',
+          message: 'defaults and items are --batch input; pass --batch to create several PRs',
+        },
+      ]);
+    }
+    const offline = offlineIssues(pr, config);
     if (offline.input === null || offline.issues.length > 0) throw validationError(offline.issues);
     const plan = await planCreate(offline.input, { ctx, repo: resolved, config });
     for (const w of plan.warnings) ctx.warn(w);
