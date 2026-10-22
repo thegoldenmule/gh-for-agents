@@ -245,7 +245,8 @@ export const TargetSummary = z.object({
   target: z.string(),
   outcome: Outcome,
   reason: z.string().nullable(),
-  headSha: Sha,
+  /** null only for a target that never bound a SHA (every poll failed before a self-return or signal). */
+  headSha: Sha.nullable(),
   restarts: Count,
   elapsedSec: z.number().min(0),
   ci: z.object({

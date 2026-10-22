@@ -333,6 +333,28 @@ export async function* runWait(
     };
   };
 
+  /** A target whose every poll failed so far (rate limited, transient errors): nothing is known yet. */
+  const unbound = (r: Run, outcome: Outcome, reason: string): TargetSummary => ({
+    target: r.label,
+    outcome,
+    reason,
+    headSha: r.target.kind === 'branch' ? r.target.sha : null,
+    restarts: r.restarts,
+    elapsedSec: Math.max(0, Math.round((clock.now() - r.waitStartedAt) / 1000)),
+    ci: {
+      state: 'pending',
+      phase: 'registering',
+      counts: { pass: 0, fail: 0, pending: 0, skipped: 0, cancelled: 0, neutral: 0, ignored: 0 },
+      failing: [],
+      expectedMissing: [],
+    },
+    diagnosis: null,
+    stalled: [],
+    rerunCandidates: [],
+    merge: null,
+    next: [identical],
+  });
+
   const finish = (
     r: Run,
     outcome: Outcome,
@@ -769,11 +791,14 @@ export async function* runWait(
 
   const result = async (interruptedBy?: string): Promise<WaitSummary> => {
     for (const r of runs) {
-      if (r.summary === null && r.st) {
-        const outcome: Outcome = interruptedBy ? 'interrupted' : 'pending';
-        const reason = interruptedBy ? `signal ${interruptedBy}` : 'unattended-self-return';
+      if (r.summary !== null) continue;
+      const outcome: Outcome = interruptedBy ? 'interrupted' : 'pending';
+      const reason = interruptedBy ? `signal ${interruptedBy}` : 'unattended-self-return';
+      if (r.st) {
         r.summary = summarise(r, outcome, reason, r.lastDecision);
         save(r);
+      } else {
+        r.summary = unbound(r, outcome, `${reason}; no SHA bound yet`);
       }
     }
     const results = runs.map((r) => r.summary as TargetSummary);
@@ -816,7 +841,8 @@ export async function* runWait(
     return await result();
   } catch (e) {
     if (e instanceof DryRunHalt) throw e;
-    if (!isAbort(e) || runs.some((r) => r.summary === null && r.st === null)) throw e;
+    // Interrupted before any target bound: the plain INTERRUPTED error (nothing to summarise).
+    if (!isAbort(e) || runs.every((r) => !r.bound)) throw e;
     const details = (e as GhxError).details as { signal?: string } | null | undefined;
     return await result(isGhxError(e, 'INTERRUPTED') ? (details?.signal ?? 'SIGTERM') : 'SIGTERM');
   }

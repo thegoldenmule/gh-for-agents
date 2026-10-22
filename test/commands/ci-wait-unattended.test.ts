@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeClock } from '../helpers/fake-clock.ts';
-import { GitHubSim, type SimJob, sha, startWait, wait } from './ci-wait-world.ts';
+import { endpoint, GitHubSim, type SimJob, sha, startWait, wait } from './ci-wait-world.ts';
 
 const H = sha('a');
 const MIN = 60_000;
@@ -86,4 +86,40 @@ test('pending, then the identical re-run resumes with no repeated baseline calls
   );
   const firstPoll = later.find((c) => c.argv.some((a) => a.startsWith('repos/o/r/pulls/7')));
   assert.equal(firstPoll?.status, 304, 'the first poll of the re-run uses the stored ETag');
+});
+
+test('self-return with a target that never bound (rate limited from the start): pending for both, exit 15', async () => {
+  const clock = new FakeClock();
+  const H1 = sha('1');
+  const sim = new GitHubSim(
+    clock,
+    {
+      pr: { state: 'open', head: H1 },
+      prs: { 2: { state: 'open', head: sha('2') } },
+      checks: { [H1]: [{ id: 11, runId: 110, name: 'test', status: 'in_progress', startedAt: 0 }] },
+    },
+    { number: 1 },
+  );
+  sim.override(
+    (argv) => endpoint(argv) === 'repos/o/r/pulls/2',
+    () => ({
+      status: 403,
+      exitCode: 1,
+      stdout: 'HTTP/2.0 403 Forbidden\r\nContent-Type: application/json\r\n\r\n{"message":"API rate limit exceeded"}',
+      stderr: 'gh: API rate limit exceeded for user (HTTP 403)\n',
+    }),
+  );
+  const r = await wait(sim, ['o/r#1', 'o/r#2'], {
+    env: { CLAUDE_CODE_SESSION_ATTENDED: undefined },
+    maxMs: 40 * 60_000,
+  });
+  assert.equal(r.exitCode, EXIT.CI_PENDING_RESUME, r.stdout.slice(0, 400));
+  assert.deepEqual(
+    r.json.results.map((t: { target: string; outcome: string }) => [t.target, t.outcome]),
+    [
+      ['o/r#1', 'pending'],
+      ['o/r#2', 'pending'],
+    ],
+  );
+  assert.equal(r.json.results[1].headSha, null, 'never bound: no head SHA');
 });
