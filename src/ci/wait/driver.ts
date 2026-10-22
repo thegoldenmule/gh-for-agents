@@ -14,6 +14,7 @@ import { isAbort } from '../../core/signals.ts';
 import { DryRunHalt, GhFailure } from '../../gh/index.ts';
 import { enrichNotFound, type ResolvedRepo } from '../../gh/repo.ts';
 import { type RepoRef, repoSlug } from '../../gh/types.ts';
+import { PR_CI_CACHE_NS } from '../../pr/ci-summary.ts';
 import type {
   Check,
   ExpectedCheck,
@@ -93,7 +94,16 @@ export type SettleHook = (o: {
   headSha: string;
   ciOutcome: Outcome;
   checks: readonly Check[];
-}) => Promise<{ outcome: Outcome; merge: NonNullable<TargetSummary['merge']>; next?: string[] } | null>;
+  /** Baseline checks this wait aged out (02 §11.3), for the gate's expected set. */
+  agedOut: readonly string[];
+  /** The wait's warning sink (deduplicated and capped in the summary). */
+  warn: (w: { code: string; message: string }) => void;
+}) => Promise<{
+  outcome: Outcome;
+  reason?: string;
+  merge: NonNullable<TargetSummary['merge']>;
+  next?: string[];
+} | null>;
 
 export type WaitEventOut = MachineEvent | WaitStartEvent | OtherEvent;
 type WaitStartEvent = {
@@ -190,6 +200,15 @@ export async function* runWait(
   };
 
   const parsed = o.targets.map(parseWaitTarget);
+  if (o.until === 'mergeable') {
+    const branch = o.targets.filter((_, i) => parsed[i]?.kind === 'branch');
+    if (branch.length > 0) {
+      throw new GhxError('VALIDATION', `--until mergeable waits on PRs; ${branch.join(', ')} is a branch target.`, {
+        hint: 'Pass the PR (owner/repo#N), or use --until settled for a branch.',
+        details: { issues: [{ path: 'targets', code: 'invalid', message: 'branch targets have no mergeable state' }] },
+      });
+    }
+  }
   const runs: Run[] = [];
   let flagRepo: string | undefined;
   try {
@@ -233,7 +252,8 @@ export async function* runWait(
         label,
         policy: headPolicy(target, o.onHeadChange),
         store,
-        cache: await repoCache({ artifacts: ctx.artifacts, repo, clock, ns: 'ci-wait' }),
+        // pr status's namespace: the merge gate (M6.6) then reuses this wait's baselines and ETA samples.
+        cache: await repoCache({ artifacts: ctx.artifacts, repo, clock, ns: PR_CI_CACHE_NS }),
         ci,
         poller: createPoller({
           gh: ctx.gh,
@@ -320,10 +340,17 @@ export async function* runWait(
     };
   };
 
-  const finish = (r: Run, outcome: Outcome, reason: string, d: Decision | null): void => {
+  const finish = (
+    r: Run,
+    outcome: Outcome,
+    reason: string,
+    d: Decision | null,
+    gate?: Pick<TargetSummary, 'merge'> & { next?: string[] | undefined },
+  ): void => {
     const st = r.st as WaitState;
     if ((outcome === 'red' || outcome === 'red-shared') && d) st.machine = markReported(st.machine, d.failing);
-    r.summary = summarise(r, outcome, reason, d);
+    const s = summarise(r, outcome, reason, d);
+    r.summary = gate ? { ...s, merge: gate.merge, next: gate.next ?? s.next } : s;
     st.terminal = { outcome, settled: d?.settled ?? false, summary: r.summary };
     save(r);
   };
@@ -661,12 +688,12 @@ export async function* runWait(
               headSha: st.boundSha,
               ciOutcome: d.outcome,
               checks,
+              agedOut: st.machine.agedOut,
+              warn,
             })
-          : { outcome: d.outcome, merge: null, next: undefined };
+          : { outcome: d.outcome, reason: d.reason, merge: null };
         if (gated) {
-          finish(r, gated.outcome, d.reason, d);
-          if (r.summary && gated.merge)
-            r.summary = { ...r.summary, merge: gated.merge, next: gated.next ?? r.summary.next };
+          finish(r, gated.outcome, gated.reason ?? d.reason, d, gated.merge ? gated : undefined);
           return;
         }
       } else {

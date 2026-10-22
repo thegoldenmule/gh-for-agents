@@ -43,6 +43,8 @@ export interface LoadPrStatusOptions {
   compareBudgetMs?: number;
   request?: MergeRequest;
   scope?: 'full' | 'ci-gate';
+  /** Baseline names ci wait has aged out itself (buildCiSummary's agedOut); default: the grace rule. */
+  agedOut?: readonly string[];
 }
 
 export interface PrStatusState {
@@ -79,6 +81,7 @@ export async function loadPrStatus(o: LoadPrStatusOptions): Promise<PrStatusStat
     config: o.config.ci,
     compareMain: o.compareMain !== false,
     ...(o.compareBudgetMs !== undefined ? { compareBudgetMs: o.compareBudgetMs } : {}),
+    ...(o.agedOut ? { agedOut: o.agedOut } : {}),
     warn: (w) => ciWarnings.push(w),
   });
   const evaluation = evaluateMerge({
