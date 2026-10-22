@@ -1250,3 +1250,8 @@ These are implementation calls, so they were settled without the user. Q2 needs 
   - `timeout-minutes` comes from a line scan of the workflow YAML. If the scan can't resolve it, the value falls back to 360.
   - GitHub cancels at the same limit, so precision here only moves an early exit.
   - This keeps zod as the only runtime dependency.
+- **Q2 (user, 2026-10-22).** The live suite is **deferred**. No sandbox repo is created for now, and there is no second GitHub account.
+  - Every live case stays fixture-backed: the moved-head merge race, the stall cases, and the untrusted-author and someone-else's-PR cases.
+  - Fixtures are recorded from public repos through the recording mode.
+  - `live.yml`, the sandbox workflows and the Q3 merge barrier move to a post-v1 milestone.
+  - The v1 definition of done drops its live-suite items. The agent acceptance check runs against fixtures and the CLI contract harness.
