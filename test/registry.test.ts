@@ -8,14 +8,21 @@ import { z } from 'zod';
 import { deriveInterface, RESERVED_NAMES } from '../src/cli/args.ts';
 import { fsRegistry, isCommandSegment, MAX_NAME_DEPTH, scanCommandFiles } from '../src/cli/registry.ts';
 import { commandSchema } from '../src/cli/schema.ts';
-import type { AnyCommandSpec } from '../src/core/command.ts';
+import { type AnyCommandSpec, defineCommand } from '../src/core/command.ts';
 import { isMutating } from '../src/gh/guard.ts';
 import { FakeGh } from './helpers/fake-gh.ts';
 import { FakeProc } from './helpers/fake-proc.ts';
 import { GH_FIXTURE_ROOT } from './helpers/fixture-match.ts';
-import { runInProcess, SRC_COMMANDS, TEST_COMMANDS } from './helpers/harness.ts';
+import { type HarnessResult, runInProcess, SRC_COMMANDS, TEST_COMMANDS } from './helpers/harness.ts';
 
 const RESERVED_EVENT_TYPES = new Set(['summary', 'error', 'heartbeat', 'warning']);
+
+/**
+ * Write commands that change only local files, never GitHub, so their --dry-run is their own document
+ * rather than the {dryRun: true} halt. They must make no gh call at all in the smoke run. Their own
+ * tests cover the dry run (init: test/commands/init.test.ts).
+ */
+const LOCAL_WRITES = new Set(['init']);
 
 function allFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
@@ -94,26 +101,79 @@ for (const { spec, smoke } of specs) {
 
   if (!smoke) continue;
   test(`${name}: examples[0] against a hostile gh never exits 1${spec.kind === 'read' ? ' or mutates' : ' and --dry-run halts before mutating'}`, async () => {
-    const example = spec.examples?.[0];
-    assert.ok(example, 'every command has at least one example');
-    const argv = example.argv.split(/\s+/).slice(1);
-    if (example.input !== undefined && !argv.includes('--input')) argv.push('--input', '-');
-    if (spec.kind === 'write') argv.push('--dry-run');
-    // A command may ship test/fixtures/gh/smoke/<name-with-dashes>/ for its smoke run; otherwise every
-    // gh (and git) call fails with a 404, which a command must survive without exiting 1.
-    const smokeDir = join(GH_FIXTURE_ROOT, 'smoke', spec.name.join('-'));
-    const hostile = new FakeProc().on(() => true, { exitCode: 1, stderr: 'gh: Not Found (HTTP 404)' });
-    const r = await runInProcess(argv, {
-      ...(existsSync(smokeDir)
-        ? { gh: FakeGh.fromScenario(smokeDir), proc: hostile.runner() }
-        : { proc: hostile.runner() }),
-      ...(example.input !== undefined ? { stdin: JSON.stringify(example.input) } : {}),
-    });
-    assert.notEqual(r.exitCode, 1, r.stdout);
-    const ghCalls = r.calls.filter((c) => c.cmd === 'gh' || c.cmd.endsWith('/gh'));
-    assert.deepEqual(
-      ghCalls.filter((c) => isMutating(c.args)).map((c) => c.args.join(' ')),
-      [],
-    );
+    assertSmoke(spec, await smokeRun(spec));
   });
 }
+
+/**
+ * Run a spec's examples[0] against a hostile gh. A command may ship test/fixtures/gh/smoke/<name-with-dashes>/
+ * for its smoke run; otherwise every gh (and git) call fails with a 404, which a command must survive
+ * without exiting 1. Writes run with --dry-run.
+ */
+async function smokeRun(spec: AnyCommandSpec, extra: AnyCommandSpec[] = []): Promise<HarnessResult> {
+  const example = spec.examples?.[0];
+  assert.ok(example, 'every command has at least one example');
+  const argv = example.argv.split(/\s+/).slice(1);
+  if (example.input !== undefined && !argv.includes('--input')) argv.push('--input', '-');
+  if (spec.kind === 'write') argv.push('--dry-run');
+  const smokeDir = join(GH_FIXTURE_ROOT, 'smoke', spec.name.join('-'));
+  const hostile = new FakeProc().on(() => true, { exitCode: 1, stderr: 'gh: Not Found (HTTP 404)' });
+  return runInProcess(argv, {
+    ...(existsSync(smokeDir)
+      ? { gh: FakeGh.fromScenario(smokeDir), proc: hostile.runner() }
+      : { proc: hostile.runner() }),
+    ...(example.input !== undefined ? { stdin: JSON.stringify(example.input) } : {}),
+    ...(extra.length > 0 ? { commands: extra } : {}),
+  });
+}
+
+/** Never exit 1, never spawn a mutating gh call; a write's --dry-run must reach the halt (dryRun: true). */
+function assertSmoke(spec: AnyCommandSpec, r: HarnessResult): void {
+  assert.notEqual(r.exitCode, 1, r.stdout);
+  const ghCalls = r.calls.filter((c) => c.cmd === 'gh' || c.cmd.endsWith('/gh'));
+  assert.deepEqual(
+    ghCalls.filter((c) => isMutating(c.args)).map((c) => c.args.join(' ')),
+    [],
+  );
+  if (spec.kind === 'write' && LOCAL_WRITES.has(spec.name.join(' '))) {
+    assert.deepEqual(ghCalls, [], 'a local-only write makes no gh call');
+  } else if (spec.kind === 'write') {
+    assert.equal(
+      r.json?.dryRun,
+      true,
+      `--dry-run must halt at the first mutating call with {dryRun: true}; ship test/fixtures/gh/smoke/${spec.name.join('-')}/ if the example needs real reads first. Got: ${r.stdout}`,
+    );
+    assert.equal(r.exitCode, 0);
+    assert.ok(Array.isArray(r.json.wouldRun) && r.json.wouldRun.length > 0, 'wouldRun lists the halted call');
+  }
+}
+
+function fakeWrite(name: string, mutate: boolean): AnyCommandSpec {
+  return defineCommand({
+    name: ['test', name],
+    summary: 'Test only: a write command for the smoke harness.',
+    kind: 'write',
+    needs: { repo: 'none', config: 'none' },
+    input: z.strictObject({}),
+    output: z.object({ done: z.boolean() }),
+    examples: [{ argv: `ghx test ${name}` }],
+    async run(_input, ctx) {
+      if (mutate) await ctx.gh.exec({ args: ['pr', 'merge', '1'], mutates: true });
+      return { done: true };
+    },
+  }) as AnyCommandSpec;
+}
+
+test('smoke harness: a write whose --dry-run halts passes, with dryRun: true and the halted argv', async () => {
+  const spec = fakeWrite('smoke-write-halts', true);
+  const r = await smokeRun(spec, [spec]);
+  assertSmoke(spec, r);
+  assert.deepEqual(r.json.wouldRun[0].argv, ['gh', 'pr', 'merge', '1']);
+});
+
+test('smoke harness: a write that never reaches the halt under --dry-run fails the smoke assertion', async () => {
+  const spec = fakeWrite('smoke-write-no-halt', false);
+  const r = await smokeRun(spec, [spec]);
+  assert.equal(r.exitCode, 0);
+  assert.throws(() => assertSmoke(spec, r), /--dry-run must halt/);
+});
