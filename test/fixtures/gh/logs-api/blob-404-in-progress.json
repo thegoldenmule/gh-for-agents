@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "repos/vercel/next.js/actions/jobs/119958724632/logs"
+  ],
+  "exitCode": 1,
+  "stdout": "HTTP/1.1 404 The specified blob does not exist.\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: x-ms-request-id,Server,x-ms-version,x-ms-error-code,Content-Length,Date,Transfer-Encoding\r\nContent-Length: 215\r\nContent-Type: application/xml\r\nDate: Thu, 22 Oct 2026 12:00:00 GMT\r\nServer: Windows-Azure-Blob/1.0 Microsoft-HTTPAPI/2.0\r\nX-Ms-Error-Code: BlobNotFound\r\nX-Ms-Request-Id: 00000000-0000-0000-0000-000000000000\r\nX-Ms-Version: 2025-11-05\r\n\r\n﻿<?xml version=\"1.0\" encoding=\"utf-8\"?><Error><Code>BlobNotFound</Code><Message>The specified blob does not exist.\nRequestId: 00000000-0000-0000-0000-000000000000\nTime:2026-10-22T16:49:26.9689811Z</Message></Error>",
+  "stderr": "gh: HTTP 404\n",
+  "meta": {
+    "source": "live:public",
+    "recordedAt": "2026-10-22T16:49:22.947Z",
+    "ghVersion": "2.86.0",
+    "note": "vercel/next.js job 119958724632, in progress at record time"
+  }
+}

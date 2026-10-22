@@ -1,0 +1,19 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "-H",
+    "If-None-Match: W/\"206fdf5b7fc4c1508e1324898133992e9e8ab105a673f84da04695447ed5270a\"",
+    "repos/cli/cli/commits/5056c0a8ef34512be1d5b4120d4e4b30412ada8b/check-runs?filter=latest&per_page=3"
+  ],
+  "exitCode": 1,
+  "stdout": "HTTP/2.0 304 Not Modified\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: ETag, Link, Location, Retry-After, X-GitHub-OTP, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Used, X-RateLimit-Resource, X-RateLimit-Reset, X-OAuth-Scopes, X-Accepted-OAuth-Scopes, X-Poll-Interval, X-GitHub-Media-Type, X-GitHub-SSO, X-GitHub-Request-Id, Deprecation, Sunset, Warning\r\nCache-Control: private, max-age=60, s-maxage=60\r\nContent-Security-Policy: default-src 'none'\r\nDate: Thu, 22 Oct 2026 12:00:00 GMT\r\nEtag: \"206fdf5b7fc4c1508e1324898133992e9e8ab105a673f84da04695447ed5270a\"\r\nReferrer-Policy: origin-when-cross-origin, strict-origin-when-cross-origin\r\nServer: github.com\r\nStrict-Transport-Security: max-age=31536000; includeSubdomains; preload\r\nVary: Accept, Authorization, Cookie, X-GitHub-OTP,Accept-Encoding, Accept, X-Requested-With\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: deny\r\nX-Github-Api-Version-Selected: 2022-11-28\r\nX-Github-Edge-Region: iad\r\nX-Github-Request-Id: 0000:0000:0000000:0000000:00000000\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4930\r\nX-Ratelimit-Reset: 1792690064\r\nX-Ratelimit-Resource: core\r\nX-Ratelimit-Used: 70\r\nX-Xss-Protection: 0\r\n\r\n",
+  "stderr": "gh: HTTP 304\n",
+  "meta": {
+    "source": "live:public",
+    "recordedAt": "2026-10-22T16:49:17.546Z",
+    "ghVersion": "2.86.0"
+  }
+}
