@@ -381,3 +381,53 @@ test('trust.bots: a human named like a trusted app cannot mark a finding address
   );
   assert.deepEqual(app.openFindings, []);
 });
+
+const reviewBlock = (findings: string[]) =>
+  encode({ t: 'review', id: 'r_aaaaaa', gen: 'ghx/0.1.0', verdict: 'comment', summary: 'S', commit: OLD, findings });
+const inlineThread = (body: string) => {
+  const id = seq++;
+  return {
+    isResolved: false,
+    isOutdated: false,
+    path: 'src/a.ts',
+    line: 1,
+    comments: {
+      nodes: [
+        {
+          databaseId: id,
+          author: user('viewer-user'),
+          authorAssociation: 'OWNER',
+          body,
+          createdAt: '2026-10-20T10:00:00Z',
+          url: `https://github.com/o/r/pull/1#discussion_r${id}`,
+          path: 'src/a.ts',
+          line: 1,
+        },
+      ],
+    },
+  };
+};
+
+test('an invalid finding block in a trusted review warns BLOCK_INVALID and stays open as unknown severity', () => {
+  const bad = encode(finding({ id: 'f_bbbbbb', path: undefined }));
+  const rv = review(`${reviewBlock(['f_aaaaaa', 'f_bbbbbb'])}\n${encode(finding())}\n${bad}`);
+  const r = foldFeedback(input({ reviews: [rv] }));
+  assert.ok(r.warnings.some((w) => w.code === 'BLOCK_INVALID' && w.message.includes(`rv:${rv.databaseId}`)));
+  assert.deepEqual(r.openFindings, ['f_aaaaaa', 'f_bbbbbb']);
+  const ph = r.feedback.findings.find((f) => f.id === 'f_bbbbbb');
+  assert.equal(ph?.severity, 'unknown');
+  assert.equal(effectiveSeverity(ph?.severity ?? ''), 'high');
+  assert.deepEqual([ph?.reviewId, ph?.path, ph?.inline, ph?.status], ['r_aaaaaa', null, false, 'open']);
+  assert.equal(r.feedback.counts.findingsOpen, 2);
+  Feedback.parse(r.feedback);
+  assertConservation(input({ reviews: [rv] }), r);
+});
+
+test('an invalid inline finding listed by its review becomes an open placeholder finding', () => {
+  const rv = review(reviewBlock(['f_cccccc']));
+  const th = inlineThread(encode(finding({ id: 'f_cccccc', review: 'r_aaaaaa', line: 'x' })));
+  const r = foldFeedback(input({ reviews: [rv], reviewThreads: [th] }));
+  assert.deepEqual(r.openFindings, ['f_cccccc']);
+  assert.ok(r.warnings.some((w) => w.code === 'BLOCK_INVALID'));
+  assert.match(r.feedback.comments[0]?.blockError ?? '', /^invalid finding block/);
+});

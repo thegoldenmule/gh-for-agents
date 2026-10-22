@@ -198,8 +198,12 @@ function classifyAll(input: FeedbackInput, items: Item[], warnings: Warning[]): 
       continue;
     }
     for (const b of blocks) {
-      if (b.status === 'invalid' && b.code === 'SCHEMA_NEWER') {
+      if (b.status !== 'invalid') continue;
+      if (b.code === 'SCHEMA_NEWER') {
         warnings.push({ code: 'SCHEMA_NEWER', message: `${item.key} has a ${b.error} block; upgrade ghx to read it.` });
+      } else {
+        // A trusted author's broken block must not vanish: policy would fail open (02 §9.3).
+        warnings.push({ code: 'BLOCK_INVALID', message: `${item.key} has an unreadable ghx block (${b.error}).` });
       }
     }
     const pick = pickBlock(item, blocks);
@@ -337,6 +341,21 @@ export function foldFeedback(input: FeedbackInput, facts: FoldFacts = {}): FoldR
     }
   }
 
+  // A finding a structured review lists but no valid block carries (invalid, untrusted or deleted) stays
+  // visible as an open placeholder of unknown severity, which policy ranks as high (fails closed).
+  const haveFinding = new Set(findings.map((f) => f.finding.id));
+  for (const { item, review } of reviews) {
+    for (const fid of review.findingIds) {
+      if (haveFinding.has(fid)) continue;
+      haveFinding.add(fid);
+      warnings.push({
+        code: 'BLOCK_INVALID',
+        message: `Review ${review.id} lists finding ${fid}, but no valid finding block has that id; it counts as open with unknown severity.`,
+      });
+      findings.push({ item, finding: placeholderFinding(fid, review) });
+    }
+  }
+
   sortItems(reviews);
   sortItems(comments);
   sortItems(bots);
@@ -452,6 +471,25 @@ function findingOf(
     commit: f.commit,
     outdated,
     url,
+  };
+}
+
+function placeholderFinding(id: string, review: Review): Omit<Finding, 'status' | 'statusEvent'> {
+  return {
+    id,
+    reviewId: review.id,
+    severity: 'unknown',
+    path: null,
+    line: null,
+    endLine: null,
+    alsoAt: [],
+    title: `Finding ${id} could not be read`,
+    body: `Review ${review.id} lists this finding, but its block is missing or invalid. It counts as open, with unknown severity, until resolved.`,
+    truncated: false,
+    inline: false,
+    commit: review.commit,
+    outdated: review.outdated,
+    url: review.url,
   };
 }
 
