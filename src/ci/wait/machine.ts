@@ -5,17 +5,9 @@
 // `until: 'mergeable'` (M6.6) is not decided here: on settle, decide() returns `gate: true` and the
 // driver hands the CI outcome to its settle hook.
 import { SHARED_VERDICTS } from '../../policy/shared-red.ts';
-import type {
-  Bucket,
-  Check,
-  CiCounts,
-  Eta,
-  ExpectedCheck,
-  FailingJob,
-  Outcome,
-  StalledCheck,
-} from '../../schemas/ci.ts';
+import type { Bucket, Check, CiCounts, ExpectedCheck, FailingJob, Outcome, StalledCheck } from '../../schemas/ci.ts';
 import { countChecks, isRed } from '../summary.ts';
+import type { Eta } from './eta.ts';
 import { type CiPhase, type ExpectedDef, expectedPhase, expectedState } from './expected.ts';
 
 export const WAIT_DEFAULTS = {
