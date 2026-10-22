@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/octo/demo/pulls/7/files?per_page=100"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n[{\"filename\":\"src/banner.ts\",\"status\":\"modified\",\"additions\":10,\"deletions\":2,\"changes\":12,\"patch\":\"@@ -5,10 +5,18 @@ export function banner() {\\n context\"}]",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "pulls/7/files (02 §7.2): one file whose hunk covers line 12 on RIGHT"
+  }
+}

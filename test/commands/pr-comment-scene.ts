@@ -75,7 +75,28 @@ export interface WriteSceneOptions {
   viewer?: string;
   /** owner/repo#N → state; refs not listed don't exist. */
   refs?: Record<string, { state: string; mergedAt?: string | null }>;
+  /** pulls/N/files rows (default: the worked example's two files, hunks around the finding lines). */
+  files?: { filename: string; status: string; patch?: string }[];
+  /** Reply to POST pulls/N/reviews (default 200 with id REVIEW_DB_ID). */
+  reviewPost?: GhReply;
+  /** Reply to GET reviews/{id}/comments (default: one comment per posted inline comment). */
+  reviewComments?: GhReply;
 }
+
+export const REVIEW_DB_ID = 2398765432;
+export const FILES = [
+  {
+    filename: 'packages/reactor/src/client/reactor-client.ts',
+    status: 'modified',
+    patch: '@@ -1060,20 +1060,22 @@ class ReactorClient {\n context\n@@ -1100,20 +1102,20 @@\n context',
+  },
+  {
+    filename: 'packages/shared/document-model/crypto.ts',
+    status: 'modified',
+    patch: '@@ -170,12 +170,14 @@\n context',
+  },
+  { filename: 'assets/logo.png', status: 'modified' },
+];
 
 export interface WriteScene {
   gh: FakeGh;
@@ -129,6 +150,22 @@ export function writeScene(o: WriteSceneOptions = {}): WriteScene {
   dynamic(gh, 'close', ({ stdin }) => {
     record('close', stdin);
     return reply(200, { number: 3301, state: 'closed' });
+  });
+  dynamic(gh, 'files', () => reply(200, o.files ?? FILES));
+  dynamic(gh, 'post-review', ({ stdin }) => {
+    record('post-review', stdin);
+    return (
+      o.reviewPost ??
+      reply(200, { id: REVIEW_DB_ID, html_url: `${PR_URL}#pullrequestreview-${REVIEW_DB_ID}`, state: 'COMMENTED' })
+    );
+  });
+  dynamic(gh, 'review-comments', () => {
+    if (o.reviewComments) return o.reviewComments;
+    const posted = (sent['post-review']?.at(-1)?.comments ?? []) as { body: string }[];
+    return reply(
+      200,
+      posted.map((c, i) => ({ id: 1834567890 + i, body: c.body, html_url: `${PR_URL}#discussion_r${1834567890 + i}` })),
+    );
   });
   return { gh, sent };
 }
