@@ -349,6 +349,17 @@ test('MERGE_CONFLICT and BEHIND_BASE carry the exact fetch-and-merge commands', 
   assert.equal(c.exitClass, 'state');
 });
 
+test('MERGEABLE_UNKNOWN: a known mergeable with an UNKNOWN mergeStateStatus still blocks', () => {
+  const e = evaluate({
+    snapshot: { merge: merge({ mergeable: 'MERGEABLE', mergeStateStatus: 'UNKNOWN', settled: false }) },
+  });
+  assert.deepEqual(
+    e.plan.blockers.map((b) => b.code),
+    ['MERGEABLE_UNKNOWN'],
+  );
+  assert.match(e.plan.blockers[0]?.message ?? '', /mergeStateStatus UNKNOWN/);
+});
+
 test('a closed PR skips the mergeability checks instead of piling up noise', () => {
   const e = evaluate({ snapshot: { state: 'MERGED', merge: merge({ mergeable: 'UNKNOWN', settled: false }) } });
   assert.deepEqual(

@@ -71,6 +71,24 @@ test('R03: still UNKNOWN after 20 s gives settled:false and a MERGEABLE_UNKNOWN 
   );
 });
 
+test('R03: MERGEABLE with mergeStateStatus UNKNOWN is not settled; it is retried and then warned', async () => {
+  const env = setup(
+    [mergeableReply('MERGEABLE', { mergeState: 'UNKNOWN' })],
+    [q1Reply(q1Pr({ mergeable: 'MERGEABLE', mergeStateStatus: 'UNKNOWN' }))],
+  );
+  const s = await settle(
+    env,
+    fetchPrSnapshot({ gh: env.gh, clock: env.clock, repo: REPO, number: 3301, config: snapshotConfig() }),
+  );
+  assert.deepEqual([s.merge.mergeable, s.merge.mergeStateStatus, s.merge.settled], ['MERGEABLE', 'UNKNOWN', false]);
+  assert.match(s.warnings[0]?.message ?? '', /mergeStateStatus UNKNOWN/);
+  const e = evaluateMerge({ snapshot: s, ci: snapshotSummary(s.ci), feedback: s.feedback, config: config(), now: NOW });
+  assert.deepEqual(
+    e.plan.blockers.map((b) => b.code),
+    ['MERGEABLE_UNKNOWN'],
+  );
+});
+
 test('R03: the merge budget keeps asking until 30 s; --no-wait-mergeable never retries', async () => {
   const env = setup([mergeableReply('UNKNOWN')]);
   const s = await settle(

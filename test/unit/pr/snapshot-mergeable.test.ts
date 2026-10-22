@@ -59,3 +59,18 @@ test('CONFLICTING settles the retry with the new mergeStateStatus', async () => 
   const { r } = await run([mergeableReply('UNKNOWN'), mergeableReply('CONFLICTING', { mergeState: 'DIRTY' })]);
   assert.deepEqual(r.kind === 'settled' && [r.mergeable, r.mergeStateStatus, r.queries], ['CONFLICTING', 'DIRTY', 2]);
 });
+
+test('a known mergeable with an UNKNOWN mergeStateStatus keeps retrying until the state is known', async () => {
+  const { r } = await run([
+    mergeableReply('MERGEABLE', { mergeState: 'UNKNOWN' }),
+    mergeableReply('MERGEABLE', { mergeState: 'BEHIND' }),
+  ]);
+  assert.deepEqual(r.kind === 'settled' && [r.mergeable, r.mergeStateStatus, r.queries], ['MERGEABLE', 'BEHIND', 2]);
+});
+
+test('a mergeStateStatus that stays UNKNOWN ends `unknown`, carrying the known mergeable', async () => {
+  const { r } = await run([mergeableReply('MERGEABLE', { mergeState: 'UNKNOWN' })]);
+  assert.equal(r.kind, 'unknown');
+  assert.equal(r.kind === 'unknown' && r.mergeable, 'MERGEABLE');
+  assert.equal(r.queries, 6);
+});

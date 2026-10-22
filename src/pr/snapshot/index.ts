@@ -59,7 +59,10 @@ export interface PrSnapshot {
   changes: { files: number; additions: number; deletions: number; commits: number };
   merge: {
     mergeable: Mergeable;
-    /** False when mergeable stayed UNKNOWN (or was not retried); MERGEABLE_UNKNOWN then blocks a merge. */
+    /**
+     * False when mergeable or mergeStateStatus stayed UNKNOWN (or was not retried); MERGEABLE_UNKNOWN then
+     * blocks a merge.
+     */
     settled: boolean;
     mergeStateStatus: MergeStateStatus;
     reviewDecision: ReviewDecision | null;
@@ -186,7 +189,7 @@ export async function fetchPrSnapshot(o: FetchPrSnapshotOptions): Promise<PrSnap
     queries += q1.queries;
     mergeable = toMergeable(q1.pr.mergeable);
     mergeStateStatus = toMergeState(q1.pr.mergeStateStatus);
-    settled = mergeable !== 'UNKNOWN';
+    settled = mergeable !== 'UNKNOWN' && mergeStateStatus !== 'UNKNOWN';
     if (settled || q1.pr.state !== 'OPEN' || o.waitMergeable === false) break;
     const budgetMs = o.mergeableBudgetMs ?? MERGEABLE_BUDGET_MS;
     const r = await retryMergeable({
@@ -207,9 +210,11 @@ export async function fetchPrSnapshot(o: FetchPrSnapshotOptions): Promise<PrSnap
       settled = true;
     } else if (r.kind === 'unknown') {
       mergeStateStatus = r.mergeStateStatus;
+      mergeable = r.mergeable ?? mergeable;
+      const what = mergeable === 'UNKNOWN' ? 'mergeable' : 'mergeStateStatus';
       warn({
         code: 'MERGEABLE_UNKNOWN',
-        message: `GitHub still reports mergeable UNKNOWN after ${budgetMs / 1000} s; re-run to check again.`,
+        message: `GitHub still reports ${what} UNKNOWN after ${budgetMs / 1000} s; re-run to check again.`,
       });
     } else if (r.kind === 'head-changed') {
       warn({

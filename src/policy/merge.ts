@@ -162,8 +162,13 @@ function methodNotAllowed(i: MergePolicyInput): Result {
 }
 
 function mergeableUnknown(s: PolicySnapshot): Result {
-  if (s.merge.mergeable !== 'UNKNOWN') return pass(s.merge.mergeable);
-  return fail('GitHub still reports mergeable UNKNOWN.', {
+  const unknown = [
+    ...(s.merge.mergeable === 'UNKNOWN' ? ['mergeable'] : []),
+    // An UNKNOWN merge state would pass BEHIND_BASE, BLOCKED_BY_PROTECTION and the DIRTY conflict check.
+    ...(s.merge.mergeStateStatus === 'UNKNOWN' ? ['mergeStateStatus'] : []),
+  ];
+  if (unknown.length === 0) return pass(`${s.merge.mergeable}, ${s.merge.mergeStateStatus}`);
+  return fail(`GitHub still reports ${unknown.join(' and ')} UNKNOWN.`, {
     hint: `Re-run in a minute: ghx pr status ${s.ref}.`,
   });
 }

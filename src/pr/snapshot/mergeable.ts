@@ -71,7 +71,14 @@ export type MergeableRetry =
       queries: number;
       waitedMs: number;
     }
-  | { kind: 'unknown'; mergeStateStatus: MergeStateStatus; queries: number; waitedMs: number }
+  | {
+      kind: 'unknown';
+      mergeStateStatus: MergeStateStatus;
+      /** The last mergeable read: known when only mergeStateStatus stayed UNKNOWN. */
+      mergeable?: Mergeable;
+      queries: number;
+      waitedMs: number;
+    }
   | { kind: 'head-changed'; headSha: string; queries: number; waitedMs: number }
   | { kind: 'not-open'; queries: number; waitedMs: number };
 
@@ -86,11 +93,15 @@ export interface MergeableRetryOptions {
   budgetMs?: number;
 }
 
-/** Re-query until mergeable is known, the budget is spent, the head moves or the PR stops being open. */
+/**
+ * Re-query until both mergeable and mergeStateStatus are known (an UNKNOWN merge state would otherwise
+ * pass the BEHIND/BLOCKED/DIRTY checks), the budget is spent, the head moves or the PR stops being open.
+ */
 export async function retryMergeable(o: MergeableRetryOptions): Promise<MergeableRetry> {
   let queries = 0;
   let waitedMs = 0;
   let lastState: MergeStateStatus = 'UNKNOWN';
+  let lastMergeable: Mergeable = 'UNKNOWN';
   for (const delay of backoffDelays(o.budgetMs ?? MERGEABLE_BUDGET_MS)) {
     await o.clock.sleep(delay, o.signal);
     waitedMs += delay;
@@ -106,8 +117,11 @@ export async function retryMergeable(o: MergeableRetryOptions): Promise<Mergeabl
     if (pr.headRefOid !== o.headSha) return { kind: 'head-changed', headSha: pr.headRefOid, queries, waitedMs };
     if (pr.state !== 'OPEN') return { kind: 'not-open', queries, waitedMs };
     const mergeable = toMergeable(pr.mergeable);
+    lastMergeable = mergeable;
     lastState = toMergeState(pr.mergeStateStatus);
-    if (mergeable !== 'UNKNOWN') return { kind: 'settled', mergeable, mergeStateStatus: lastState, queries, waitedMs };
+    if (mergeable !== 'UNKNOWN' && lastState !== 'UNKNOWN') {
+      return { kind: 'settled', mergeable, mergeStateStatus: lastState, queries, waitedMs };
+    }
   }
-  return { kind: 'unknown', mergeStateStatus: lastState, queries, waitedMs };
+  return { kind: 'unknown', mergeStateStatus: lastState, mergeable: lastMergeable, queries, waitedMs };
 }
