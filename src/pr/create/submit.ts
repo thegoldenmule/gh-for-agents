@@ -131,12 +131,57 @@ async function post(ctx: Context, repo: RepoRef, payload: PullPayload, blockId: 
   }
 }
 
-async function readPull(ctx: Context, repo: RepoRef, number: number): Promise<PullData> {
+/** GET the PR by number (PR_NOT_FOUND on 404). Shared with `pr edit`. */
+export async function readPull(ctx: Context, repo: RepoRef, number: number): Promise<PullData> {
   const r = await ctx.gh.api({ path: `repos/{owner}/{repo}/pulls/${number}`, repo }, PullData, {
     notFound: 'PR_NOT_FOUND',
   });
   if (r.notModified) throw new GhxError('INTERNAL', 'GET pulls returned 304 without a conditional request.');
   return r.data;
+}
+
+/** The fields a write sent, to compare with what GitHub stored. Absent keys are not checked. */
+export interface ReadbackWant {
+  title?: string;
+  body?: string;
+  base?: string;
+  draft?: boolean;
+}
+export type ReadbackField = keyof ReadbackWant;
+
+export interface ReadbackOptions {
+  /** The verb in the message: "<ref> was <verb>, but GitHub stored a different <field>." Default `created`. */
+  verb?: string;
+  /** The error hint for a mismatched field. Default: the `pr create` hint (edit it; do not re-run create). */
+  hint?: (field: ReadbackField, ref: string) => string;
+}
+
+/** What GitHub stored, in the same shape as ReadbackWant (a null body is ''; a missing draft is false). */
+export function storedFields(stored: PullData): Required<ReadbackWant> {
+  return { title: stored.title, body: stored.body ?? '', base: stored.base.ref, draft: stored.draft ?? false };
+}
+
+/**
+ * Throw READBACK_MISMATCH on the first field (title, body, base, draft order) where `stored` differs
+ * byte for byte from `want`. Only the keys present in `want` are compared.
+ */
+export function assertReadback(repo: RepoRef, stored: PullData, want: ReadbackWant, opts: ReadbackOptions = {}): void {
+  const ref = prRef(repo, stored.number);
+  const got = storedFields(stored);
+  for (const field of ['title', 'body', 'base', 'draft'] as const) {
+    const sent = want[field];
+    if (sent === undefined || got[field] === sent) continue;
+    throw new GhxError(
+      'READBACK_MISMATCH',
+      `${ref} was ${opts.verb ?? 'created'}, but GitHub stored a different ${field}.`,
+      {
+        hint:
+          opts.hint?.(field, ref) ??
+          `Fix it with: ghx pr edit ${ref} --input patch.json (the PR exists; do not re-run pr create).`,
+        details: { ref, url: stored.html_url, field, sent, stored: got[field] },
+      },
+    );
+  }
 }
 
 /** POST, then read back and assert the exact title and body. */
@@ -148,16 +193,6 @@ export async function submitPull(
 ): Promise<Submitted> {
   const sent = await post(ctx, repo, payload, blockId);
   const stored = sent.recoveredFromTransient ? sent.pull : await readPull(ctx, repo, sent.pull.number);
-  const ref = prRef(repo, stored.number);
-  for (const field of ['title', 'body'] as const) {
-    const want = payload[field];
-    const got = stored[field] ?? '';
-    if (got !== want) {
-      throw new GhxError('READBACK_MISMATCH', `${ref} was created, but GitHub stored a different ${field}.`, {
-        hint: `Fix it with: ghx pr edit ${ref} --input patch.json (the PR exists; do not re-run pr create).`,
-        details: { ref, url: stored.html_url, field, sent: want, stored: got },
-      });
-    }
-  }
+  assertReadback(repo, stored, { title: payload.title, body: payload.body });
   return { pull: stored, recoveredFromTransient: sent.recoveredFromTransient };
 }
