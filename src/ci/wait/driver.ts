@@ -172,10 +172,11 @@ export async function* runWait(
   const offset = ctx.env.GHX_TEST_HOOKS === '1' ? Number(ctx.env.GHX_TEST_CLOCK_OFFSET_MS ?? 0) || 0 : 0;
   const startedMono = clock.monotonic();
   const returnAt = attended ? Number.POSITIVE_INFINITY : startedMono + UNATTENDED_RETURN_MS - offset;
-  const cfg: MachineConfig = { until: o.until, ...WAIT_DEFAULTS };
+
   const globs = o.check ?? [];
   const consider = (c: { name: string }) =>
     globs.length === 0 || globs.some((g) => c.name === g || matchesGlob(c.name, g));
+  const cfg: MachineConfig = { until: o.until, ...WAIT_DEFAULTS, ...(globs.length > 0 ? { consider } : {}) };
 
   // Warnings: every one goes to diagnosisPath; the summary gets the first of each code, capped.
   const allWarnings: { code: string; message: string }[] = [];
@@ -459,7 +460,6 @@ export async function* runWait(
       config: configExpected(entries, changed),
       baseline,
       ignore: r.ci.ignore,
-      consider,
     });
   }
 

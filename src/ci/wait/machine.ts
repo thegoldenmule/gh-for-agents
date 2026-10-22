@@ -23,6 +23,8 @@ export type UntilMode = 'first-failure' | 'settled' | 'mergeable';
 
 export interface MachineConfig {
   until: UntilMode;
+  /** --check: the stored expected set is unfiltered (04); only the entries this predicate keeps count. */
+  consider?: (c: { name: string; workflow: string | null }) => boolean;
   graceMs: number;
   expectGraceMs: number;
   progressEveryMs: number;
@@ -108,9 +110,19 @@ export const checkKey = (c: Pick<Check, 'kind' | 'workflow' | 'name'>): string =
 export const failureKey = (c: Pick<Check, 'kind' | 'workflow' | 'name' | 'jobId' | 'completedAt'>): string =>
   c.jobId !== null ? `job:${c.jobId}` : `check:${checkKey(c)}@${c.completedAt ?? ''}`;
 
+/** The stored (unfiltered) expected set narrowed to the considered checks. */
+export function consideredDefs(state: Pick<MachineState, 'expected'>, cfg?: Pick<MachineConfig, 'consider'>) {
+  const keep = cfg?.consider;
+  return keep ? state.expected.filter((e) => keep(e)) : state.expected;
+}
+
 /** The expected set with this state's aged-out baseline checks. */
-export function currentExpected(state: MachineState, checks: readonly Check[]): ExpectedCheck[] {
-  return expectedState(state.expected, checks, state.agedOut);
+export function currentExpected(
+  state: MachineState,
+  checks: readonly Check[],
+  cfg?: Pick<MachineConfig, 'consider'>,
+): ExpectedCheck[] {
+  return expectedState(consideredDefs(state, cfg), checks, state.agedOut);
 }
 
 export interface ObserveResult {
@@ -153,7 +165,8 @@ export function observe(prev: MachineState, obs: Observation, cfg: MachineConfig
   // Baseline aging (02 §11.3): once everything else has settled, a missing baseline check gets
   // --expect-grace to register, then counts as `absent`.
   let agedOut = prev.agedOut;
-  const before = expectedState(prev.expected, checks, agedOut);
+  const defs = consideredDefs(prev, cfg);
+  const before = expectedState(defs, checks, agedOut);
   const othersSettled =
     checks.length > 0 &&
     !checks.some((c) => c.bucket === 'pending') &&
@@ -166,7 +179,7 @@ export function observe(prev: MachineState, obs: Observation, cfg: MachineConfig
       for (const name of aging) events.push({ type: 'expected-absent', ...t, name, source: 'baseline' });
     }
   }
-  const expected = expectedState(prev.expected, checks, agedOut);
+  const expected = expectedState(defs, checks, agedOut);
   const phase = expectedPhase([...checks], expected);
   if (prev.phase !== null && prev.phase !== phase) {
     events.push({ type: 'phase', ...t, headSha, from: prev.phase, to: phase });
@@ -249,7 +262,7 @@ export function decide(
       : null;
   }
   const red = checks.filter(isRed);
-  const phase = expectedPhase([...checks], currentExpected(state, checks));
+  const phase = expectedPhase([...checks], currentExpected(state, checks, o.cfg));
   const settled = phase === 'settled';
   if (o.cfg.until === 'first-failure' && !settled) {
     const reported = new Set(state.reported);

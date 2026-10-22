@@ -261,3 +261,14 @@ test('--on-head-change stop: a head that moved between runs is bound fresh, neve
     assert.equal(r.json.results[0].headSha, H2);
   }
 });
+
+test('a --check run stores the unfiltered expected set: an unfiltered re-run still waits for required e2e', async () => {
+  const clock = new FakeClock();
+  const unit: SimJob = { id: 31, runId: 600, name: 'unit', status: 'completed', conclusion: 'success', completedAt: 0 };
+  const sim = new GitHubSim(clock, { pr: { state: 'open', head: H }, checks: { [H]: [unit] } }, { required: ['e2e'] });
+  const first = await wait(sim, ['o/r#7', '--check', 'unit']);
+  assert.equal(first.exitCode, EXIT.OK, first.stdout);
+  const second = await wait(sim, ['o/r#7'], { artifacts: first.artifacts });
+  assert.notEqual(second.exitCode, EXIT.OK, second.stdout);
+  assert.deepEqual(second.json.results[0].ci.expectedMissing, ['e2e']);
+});
