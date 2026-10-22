@@ -1,0 +1,11 @@
+{
+  "$schema": "https://example.invalid/ghx-config.schema.json",
+  "version": 1,
+  "components": {
+    "reactor": { "description": "Document reactor", "paths": ["packages/reactor/**"] },
+    "codegen": { "paths": ["packages/codegen/**", "packages/codegen-*/**"] },
+    "docs": { "paths": ["docs/**", "*.md"] }
+  },
+  "merge": { "method": "merge", "allowedMethods": ["merge", "squash"] },
+  "ci": { "ignore": ["notify-discord", { "name": "ci-duration-watch", "reason": "bot noise" }] }
+}

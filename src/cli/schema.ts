@@ -2,6 +2,7 @@
 //
 // Extension point: a non-command schema target is ONE entry appended to SCHEMA_TARGETS.
 import { z } from 'zod';
+import { ConfigSchema } from '../config/schema.ts';
 import type { AnyCommandSpec } from '../core/command.ts';
 import { commandName, Warning } from '../core/command.ts';
 import { ENVELOPES } from '../core/envelopes.ts';
@@ -13,6 +14,7 @@ export const SCHEMA_TARGETS: Record<string, { description: string; build: () => 
     description: 'error, spilled, dryRun and streamLine envelopes shared by every command',
     build: () => Object.fromEntries(Object.entries(ENVELOPES).map(([k, s]) => [k, toJson(s, 'output')])),
   },
+  config: { description: '.github/ghx.json, the per-repo config', build: () => toJson(ConfigSchema, 'input') },
 };
 
 export function commandSchema(spec: AnyCommandSpec): Record<string, unknown> {

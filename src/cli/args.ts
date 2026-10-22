@@ -320,7 +320,7 @@ export function validateInput<I extends z.ZodObject>(schema: I, raw: Record<stri
   const r = schema.safeParse(raw);
   if (r.success) return r.data;
   const issues = mapZodIssues(r.error, { schema, input: raw, suggest: (w, c) => suggest(w, c) });
-  const first = issues[0];
+  const first = issues.find((i) => i.suggestion !== undefined) ?? issues[0];
   const hint = first
     ? `${first.path || 'input'}: ${first.message}${first.suggestion ? ` (did you mean '${first.suggestion}'?)` : ''}`
     : undefined;

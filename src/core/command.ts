@@ -1,6 +1,7 @@
 // Command specs (01 §3.1). A command is one file under src/commands/ whose default export is a
 // defineCommand(...) or defineStreamCommand(...) result; its path is its name (src/cli/registry.ts).
 import { z } from 'zod';
+import type { LoadedConfig } from '../config/load.ts';
 import type { Gh } from '../gh/index.ts';
 import type { RepoNeed, ResolvedRepo } from '../gh/repo.ts';
 import type { RepoRef } from '../gh/types.ts';
@@ -125,6 +126,8 @@ export interface Context {
   repo(o?: { ref?: RepoRef | undefined }): Promise<ResolvedRepo>;
   /** Like repo(), but undefined when nothing resolves and needs.repo is 'optional'. */
   tryRepo(o?: { ref?: RepoRef | undefined }): Promise<ResolvedRepo | undefined>;
+  /** .github/ghx.json of the TARGET repo (memoized; honors needs.config). */
+  config(o?: { ref?: RepoRef | undefined }): Promise<LoadedConfig>;
   warn(w: Warning): void;
   /** Attached to the dry-run result. */
   preview(value: unknown): void;

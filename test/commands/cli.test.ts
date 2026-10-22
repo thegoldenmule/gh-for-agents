@@ -303,3 +303,10 @@ test('pretty output with --pretty or a TTY', async () => {
   assert.match((await runInProcess(['version', '--pretty'])).stdout, /\n {2}"name"/);
   assert.match((await runInProcess(['version'], { stdoutIsTTY: true })).stdout, /\n {2}"name"/);
 });
+
+test('ghx schema config prints the config JSON Schema', async () => {
+  const r = await runInProcess(['schema', 'config']);
+  assert.equal(r.exitCode, 0);
+  assert.deepEqual(r.json.required, ['version', 'components']);
+  assert.ok((await runInProcess(['schema'])).json.targets.includes('config'));
+});

@@ -1,4 +1,5 @@
 // Builds the Context a handler receives (01 §3.1): lazy repo, mode-guarded gh, artifacts, warnings.
+import { type LoadedConfig, loadConfig } from '../config/load.ts';
 import { createGh, type Gh } from '../gh/index.ts';
 import { type ResolvedRepo, resolveRepo } from '../gh/repo.ts';
 import { type RepoRef, repoArg } from '../gh/types.ts';
@@ -7,7 +8,7 @@ import type { ProcessRunner } from '../proc/runner.ts';
 import type { ArtifactStore } from './artifacts.ts';
 import type { Clock } from './clock.ts';
 import type { AnyCommandSpec, Context, Warning } from './command.ts';
-import { GhxError } from './errors.ts';
+import { GhxError, isGhxError } from './errors.ts';
 import type { Logger } from './log.ts';
 import type { Random } from './random.ts';
 
@@ -76,6 +77,33 @@ export function createContext(d: ContextDeps): BuiltContext {
     }
     return p;
   };
+  const configNeed = d.spec.needs?.config ?? 'none';
+  const configs = new Map<string, Promise<LoadedConfig>>();
+  const config = (ref: RepoRef | undefined): Promise<LoadedConfig> => {
+    if (configNeed === 'none') {
+      return Promise.reject(
+        new GhxError('INTERNAL', `ghx ${d.spec.name.join(' ')} declares needs.config 'none' but asked for config.`),
+      );
+    }
+    const key = ref ? repoArg(ref) : '';
+    let p = configs.get(key);
+    if (!p) {
+      p = (async () => {
+        let target: ResolvedRepo | undefined;
+        if (need !== 'none') {
+          try {
+            target = await resolve(ref);
+          } catch (e) {
+            if (configNeed === 'required' || !(isGhxError(e, 'REPO_NOT_FOUND') || isGhxError(e, 'REPO_AMBIGUOUS')))
+              throw e;
+          }
+        }
+        return loadConfig({ target, git, gh, need: configNeed });
+      })();
+      configs.set(key, p);
+    }
+    return p;
+  };
   const ctx: Context = {
     cwd: d.cwd,
     env: d.env,
@@ -94,6 +122,7 @@ export function createContext(d: ContextDeps): BuiltContext {
       return r;
     },
     tryRepo: (o = {}) => resolve(o.ref),
+    config: (o = {}) => config(o.ref),
     warn(w) {
       warnings.push(w);
     },
