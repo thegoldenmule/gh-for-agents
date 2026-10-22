@@ -76,6 +76,10 @@ const ms = (iso: string | null | undefined): number => (iso ? Date.parse(iso) : 
 const jobStarted = (j: ActionsJob): boolean =>
   (j.runner_id ?? 0) > 0 || j.status === 'in_progress' || (j.status === 'completed' && j.conclusion !== 'skipped');
 
+/** The same rule from a check alone (no job row): running, or completed without being skipped (04). */
+const checkStarted = (c: Check): boolean =>
+  c.status === 'in_progress' || (c.status === 'completed' && c.bucket !== 'skipped' && c.conclusion !== 'skipped');
+
 type Activity = { kind: 'running' | 'queued'; since: number; runIdle: boolean } | null;
 
 /** Whether a pending check is running or queued, since when, and (if queued) whether its run is idle. */
@@ -94,7 +98,9 @@ function activity(c: Check, i: StallInput): Activity {
   if (c.status === 'in_progress') return { kind: 'running', since: ms(c.startedAt), runIdle: false };
   if (c.status === 'queued') {
     const siblings = c.runId === null ? [] : i.checks.filter((s) => s !== c && s.runId === c.runId);
-    return { kind: 'queued', since: ms(c.startedAt), runIdle: !siblings.some((s) => s.status !== 'queued') };
+    // The rollup has no created_at; a queued check run's startedAt is its creation time (spike §3.5:
+    // started_at == created_at while queued), so this measures from created_at as the jobs rule does.
+    return { kind: 'queued', since: ms(c.startedAt), runIdle: !siblings.some(checkStarted) };
   }
   return null;
 }

@@ -217,6 +217,18 @@ test('without job rows, checks alone drive the rules (siblings by runId)', async
   assert.equal(detectStalls(await input(360 * MIN + SEC, { checks: run }))[0]?.basis, 'default-360');
 });
 
+test('without job rows, a skipped sibling does not count as started; the clock runs from the queued check', async () => {
+  const skipped = check('b', { runId: 5, status: 'completed', bucket: 'skipped', conclusion: 'skipped' });
+  const waiting = check('a', { runId: 5, status: 'queued', startedAt: at(0) });
+  assert.deepEqual(
+    detectStalls(await input(31 * MIN, { checks: [waiting, skipped] })).map((x) => [x.name, x.state, x.forSec]),
+    [['a', 'queued', 31 * 60]],
+  );
+  assert.deepEqual(detectStalls(await input(30 * MIN, { checks: [waiting, skipped] })), []);
+  const done = check('b', { runId: 5, status: 'completed', bucket: 'pass', conclusion: 'success' });
+  assert.deepEqual(detectStalls(await input(31 * MIN, { checks: [waiting, done] })), []);
+});
+
 test('first run at 360 min: cancelled (red) and stalled race; each snapshot decides deterministically', async () => {
   const edge = 360 * MIN + SEC;
   const pending = running();
