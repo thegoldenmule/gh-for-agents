@@ -46,7 +46,7 @@ export interface GhCall {
   allowExit?: readonly number[];
   /** Per attempt; default min(30 s, time left before the command deadline). */
   timeoutMs?: number;
-  /** Default: transient retry for reads, 'none' for mutating calls. */
+  /** Default: transient retry for reads, 'none' for mutating calls. A mutating call may pass a policy only with `idempotent: true` (else INTERNAL). */
   retry?: RetryPolicy | 'none';
   stdoutFile?: string;
   /** Memoize identical read calls within one invocation. */
@@ -267,6 +267,13 @@ export function createGh(deps: GhDeps): Gh {
         {
           details: { argv: ['gh', ...argv] },
         },
+      );
+    }
+    if (mutating && call.retry !== undefined && call.retry !== 'none' && call.retry.idempotent !== true) {
+      throw new GhxError(
+        'INTERNAL',
+        'A mutating gh call was given a retry policy without idempotent: true; repeating a write is only safe when it is idempotent.',
+        { details: { argv: ['gh', ...argv] } },
       );
     }
     if (mutating && deps.dryRun) throw new DryRunHalt(['gh', ...argv], call.stdin);

@@ -163,3 +163,18 @@ test('GH_HOST in the env never redirects a github.com target: --hostname is alwa
     assert.equal(call.env.GH_HOST, 'ghe.corp.example');
   }
 });
+
+test('a mutating call with a retry policy must declare idempotent: true, or it is INTERNAL', async () => {
+  const { fake, gh } = setup('write');
+  fake.on({ cmd: 'gh' }, { stdout: '{}' });
+  const policy = { attempts: 3, baseMs: 10, maxMs: 100, jitter: 0 };
+  await assert.rejects(
+    gh.exec({ args: ['pr', 'merge', '1'], repo, retry: policy }),
+    (e) => isGhxError(e, 'INTERNAL') && /idempotent/.test(e.message),
+  );
+  assert.equal(fake.calls.length, 0, 'refused before spawning');
+  await gh.exec({ args: ['pr', 'merge', '1'], repo, retry: { ...policy, idempotent: true } });
+  await gh.exec({ args: ['pr', 'merge', '1'], repo, retry: 'none' });
+  await gh.exec({ args: ['pr', 'view', '1'], repo, retry: policy });
+  assert.equal(fake.calls.length, 3);
+});
