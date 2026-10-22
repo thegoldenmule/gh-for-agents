@@ -229,3 +229,32 @@ test('branch targets are refused with VALIDATION: a branch has no mergeable stat
   assert.equal(r.json.error.code, 'VALIDATION');
   assert.equal(sim.calls.length, 0, 'refused before any gh call');
 });
+
+test('a re-run on an unchanged PR returns the stored mergeable answer without re-reading the gate', async () => {
+  const t = running(81, 'test');
+  const sim = world([t]);
+  change(sim, 2 * MIN, done(t, 2 * MIN));
+  mirrorPr(sim, () => ['MERGEABLE', 'CLEAN']);
+  const first = await wait(sim, ['o/r#7', '--until', 'mergeable']);
+  assert.equal(first.exitCode, EXIT.OK, first.stdout);
+  const gates = sim.calls.filter((c) => isQ1(c.argv)).length;
+  const second = await wait(sim, ['o/r#7', '--until', 'mergeable'], { artifacts: first.artifacts });
+  assert.equal(second.exitCode, EXIT.OK, second.stdout);
+  assert.equal(second.json.resumed, true);
+  assert.deepEqual(second.json.results[0].merge, first.json.results[0].merge);
+  assert.equal(sim.calls.filter((c) => isQ1(c.argv)).length, gates, 'no gate read');
+});
+
+test('a stored merge-blocked red is re-gated on a re-run (an approval can clear it with no new commit)', async () => {
+  const t = running(91, 'test');
+  const sim = world([t]);
+  change(sim, 2 * MIN, done(t, 2 * MIN));
+  let blocked = true;
+  mirrorPr(sim, () => (blocked ? ['MERGEABLE', 'BLOCKED'] : ['MERGEABLE', 'CLEAN']));
+  const first = await wait(sim, ['o/r#7', '--until', 'mergeable']);
+  assert.equal(first.exitCode, EXIT.CI_RED, first.stdout);
+  assert.deepEqual(first.json.results[0].merge.blockers, ['BLOCKED_BY_PROTECTION']);
+  blocked = false;
+  const second = await wait(sim, ['o/r#7', '--until', 'mergeable'], { artifacts: first.artifacts });
+  assert.equal(second.exitCode, EXIT.OK, second.stdout);
+});

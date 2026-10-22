@@ -83,7 +83,16 @@ export const WaitStateSchema = z.object({
   diagnoses: z.record(z.string(), FailingJob),
   diagnosis: z.object({ spentMs: z.number(), partial: z.boolean() }),
   /** The last outcome returned for this SHA. */
-  terminal: z.object({ outcome: Outcome, settled: z.boolean(), summary: TargetSummary }).nullable(),
+  terminal: z
+    .object({
+      outcome: Outcome,
+      settled: z.boolean(),
+      summary: TargetSummary,
+      /** The --until and sorted --check of the run that stored it (a resume honours only the same question). */
+      until: z.string().optional(),
+      check: z.array(z.string()).optional(),
+    })
+    .nullable(),
 });
 
 export type WaitState = Omit<z.infer<typeof WaitStateSchema>, 'machine' | 'poller' | 'baselines' | 'timeouts'> & {

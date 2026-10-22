@@ -147,6 +147,8 @@ interface Run {
   resumed: boolean;
   /** Whether this process has emitted `start` for the current binding. */
   started: boolean;
+  /** Whether this process has bound any SHA yet (a resumed binding keeps its elapsed time and restarts). */
+  bound: boolean;
   diagnoser: Diagnoser | null;
   runs: Record<string, WorkflowRunInfo>;
   last: Observed | null;
@@ -234,16 +236,11 @@ export async function* runWait(
             message: `${label}: broke a stale wait lock${pid === null ? '' : ` (pid ${pid} is gone)`}.`,
           }),
       });
-      // Resume: the latest binding's state, whose ETags make the first poll a 304 when nothing changed.
+      // The latest binding's ETags make the first poll a 304 when nothing changed. Its state is not
+      // resumed here: the first tick reads the current head, and bind() loads the state for that SHA.
       const latest = store.latest(key);
       const prior = latest ? store.load(key, latest) : ({ kind: 'miss' } as const);
-      if (prior.kind === 'discarded') {
-        warn({
-          code: 'WAIT_STATE_DISCARDED',
-          message: `${label}: the saved wait state was unreadable (${prior.reason}); starting fresh.`,
-        });
-      }
-      const st = prior.kind === 'hit' ? prior.state : null;
+      const seed = prior.kind === 'hit' ? prior.state.poller : undefined;
       runs.push({
         target,
         resolved,
@@ -261,12 +258,13 @@ export async function* runWait(
           target:
             target.kind === 'pr' ? { kind: 'pr', number: target.number } : { kind: 'branch', branch: target.branch },
           now: () => clock.now(),
-          ...(st ? { initial: st.poller } : {}),
+          ...(seed ? { initial: seed } : {}),
         }),
         release,
-        st,
-        resumed: st !== null,
+        st: null,
+        resumed: false,
         started: false,
+        bound: false,
         diagnoser: null,
         runs: {},
         last: null,
@@ -276,8 +274,8 @@ export async function* runWait(
         advanced: new Set(),
         rateLimited: false,
         failures: 0,
-        waitStartedAt: st?.waitStartedAt ?? clock.now(),
-        restarts: st?.restarts ?? 0,
+        waitStartedAt: clock.now(),
+        restarts: 0,
         jobs: new Map(),
       });
     }
@@ -351,15 +349,27 @@ export async function* runWait(
     if ((outcome === 'red' || outcome === 'red-shared') && d) st.machine = markReported(st.machine, d.failing);
     const s = summarise(r, outcome, reason, d);
     r.summary = gate ? { ...s, merge: gate.merge, next: gate.next ?? s.next } : s;
-    st.terminal = { outcome, settled: d?.settled ?? false, summary: r.summary };
+    st.terminal = {
+      outcome,
+      settled: d?.settled ?? false,
+      summary: r.summary,
+      until: o.until,
+      check: [...globs].sort(),
+    };
     save(r);
   };
 
   /** A fresh binding: the expected set (required, config, baseline), read once and stored. */
   async function bind(r: Run, sha: string, t: TickResult): Promise<WaitState> {
     const loaded = r.store.load(r.key, sha);
+    const first = !r.bound;
+    r.bound = true;
     if (loaded.kind === 'hit') {
       r.resumed = true;
+      if (first) {
+        r.waitStartedAt = loaded.state.waitStartedAt;
+        r.restarts = loaded.state.restarts;
+      }
       return loaded.state;
     }
     if (loaded.kind === 'discarded') {
@@ -603,14 +613,13 @@ export async function* runWait(
     const head = res.headSha;
     if (r.st === null) {
       r.st = await bind(r, res.sha, res);
-    } else if (r.target.kind === 'pr' && head !== null && head !== r.st.boundSha) {
-      // Resuming a binding for a head that has since moved: a new process binds the new head silently.
-      if (!r.started && r.policy === 'restart') {
-        save(r);
-        r.st = null;
-        r.nextAt = clock.monotonic();
+      res = { ...res, nodes: markRequired(res.nodes, requiredSet(r)) };
+      if (r.resumed && res.notModified && r.st.terminal && honoured(r.st.terminal)) {
+        // Nothing changed since the stored answer (every read a 304): return it as it was.
+        r.summary = r.st.terminal.summary;
         return;
       }
+    } else if (r.target.kind === 'pr' && head !== null && head !== r.st.boundSha) {
       if (r.policy === 'restart') {
         yield { type: 'head-changed', target: r.label, from: r.st.boundSha, to: head, action: 'restart' };
         save(r);
@@ -723,6 +732,17 @@ export async function* runWait(
     r.rateLimited = iv.rateLimited;
   }
 
+  /**
+   * A stored terminal answers the identical question only when CI had settled (an early red continues to
+   * the next failure), --until and --check match, and, for mergeable, the PR was ready: a merge-blocked
+   * red can clear without a new commit (an approval), so it is re-gated.
+   */
+  function honoured(t: NonNullable<WaitState['terminal']>): boolean {
+    if (!t.settled || (t.check ?? []).join('\n') !== [...globs].sort().join('\n')) return false;
+    if (o.until !== 'mergeable') return t.until !== 'mergeable';
+    return t.until === 'mergeable' && t.summary.merge?.ready === true;
+  }
+
   /** Required names for REST check runs (which carry no isRequired). */
   function requiredSet(r: Run): Set<string> {
     return new Set((r.st?.machine.expected ?? []).filter((e) => e.source === 'required').map((e) => e.name));
@@ -805,6 +825,14 @@ export async function* runWait(
   } finally {
     for (const r of runs) r.release();
   }
+}
+
+/** REST check runs carry no isRequired: mark the expected set's required names (after a fresh bind). */
+function markRequired(nodes: TickResult['nodes'], required: ReadonlySet<string>): TickResult['nodes'] {
+  if (required.size === 0) return nodes;
+  return nodes.map((n) =>
+    n.__typename === 'CheckRun' && !n.isRequired && required.has(n.name) ? { ...n, isRequired: true } : n,
+  );
 }
 
 const RepoInfoSchema = z.object({ default_branch: z.string() });

@@ -214,3 +214,52 @@ test('an interrupt during the ETA read leaves the workflow to be sampled again o
   await clock.runUntil(run2.isDone, { stepMs: 5_000, maxMs: 10 * MIN });
   assert.equal((await run2.p).exitCode, EXIT.OK);
 });
+
+test('branch:main moved since run 1: run 2 binds the new head fresh, not the stored SHA', async () => {
+  const clock = new FakeClock();
+  const ok = (id: number, at: number): SimJob => ({
+    id,
+    runId: id,
+    name: 'build',
+    status: 'completed',
+    conclusion: 'success',
+    completedAt: at,
+  });
+  const sim = new GitHubSim(clock, {
+    pr: { state: 'open', head: H },
+    branches: { main: H },
+    checks: { [H]: [ok(61, 0)] },
+  });
+  const first = await wait(sim, ['branch:main', '-R', 'o/r']);
+  assert.equal(first.exitCode, EXIT.OK, first.stdout);
+  assert.equal(first.json.results[0].headSha, H);
+  const t = clock.monotonic() + 1;
+  sim.at(t, (s) => ({ ...s, branches: { main: H2 }, checks: { ...s.checks, [H2]: [ok(62, t)] } }));
+  await clock.advance(1);
+  const second = await wait(sim, ['branch:main', '-R', 'o/r'], { artifacts: first.artifacts });
+  assert.equal(second.exitCode, EXIT.OK, second.stdout);
+  assert.equal(second.json.results[0].headSha, H2);
+  assert.equal(second.json.resumed, false);
+});
+
+test('--on-head-change stop: a head that moved between runs is bound fresh, never a superseded loop', async () => {
+  const { clock, sim, a, b } = world();
+  set(sim, 0, [{ ...a, status: 'completed', conclusion: 'failure', completedAt: 0 }, b]);
+  const first = await wait(sim, ['o/r#7', '--on-head-change', 'stop']);
+  assert.equal(first.exitCode, EXIT.CI_RED);
+  const t = clock.monotonic() + 1;
+  sim.at(t, (s) => ({
+    ...s,
+    pr: { ...s.pr, head: H2 },
+    checks: {
+      ...s.checks,
+      [H2]: [{ id: 51, runId: 700, name: 'unit', status: 'completed', conclusion: 'success', completedAt: t }],
+    },
+  }));
+  await clock.advance(1);
+  for (let i = 0; i < 2; i++) {
+    const r = await wait(sim, ['o/r#7', '--on-head-change', 'stop'], { artifacts: first.artifacts });
+    assert.equal(r.exitCode, EXIT.OK, r.stdout);
+    assert.equal(r.json.results[0].headSha, H2);
+  }
+});
