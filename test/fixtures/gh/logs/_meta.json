@@ -1,0 +1,10 @@
+{
+  "meta": {
+    "source": "corpus-shape",
+    "note": "Hand-written raw job logs (BOM, timestamps, ANSI) in the line format seen in the transcript corpus (03 §6.2). Maintained by hand; fixtures:verify skips corpus-shape."
+  },
+  "files": {
+    "cancelled.log": { "source": "corpus-shape" },
+    "pnpm-err.log": { "source": "corpus-shape" }
+  }
+}
