@@ -77,6 +77,13 @@ export function decode<T>(body: string, schemas: MetaSchemas, o: { pick?: 'last'
   return all[all.length - 1] as Decoded<T>;
 }
 
+function lastBlock(body: string): { status: 'absent' } | { status: 'found'; range: [number, number] } {
+  const matches = [...body.matchAll(BLOCK)];
+  const last = matches[matches.length - 1];
+  if (!last || last.index === undefined) return { status: 'absent' };
+  return { status: 'found', range: [last.index, last.index + last[0].length] };
+}
+
 /** The visible text: the body without ghx blocks, with the blank lines they leave trimmed. */
 export function strip(body: string): string {
   return body
@@ -85,17 +92,22 @@ export function strip(body: string): string {
     .replace(/\s+$/, '');
 }
 
+/** Which block a read (decode) or write (upsert) targets; `first-valid` needs the payload schemas. */
+export type PickOptions = { pick?: 'last' } | { pick: 'first-valid'; schemas: MetaSchemas };
+
 /**
- * Replace the last ghx block in place, else append one on its own line after a blank line.
+ * Replace the block that `decode` with the same `pick` would read, in place; else append one on its
+ * own line after a blank line. Default: the last block (01 §6). For `pr` blocks pass
+ * `{pick: 'first-valid', schemas}` so the write lands on the block reads use (02 §9.2).
  * Idempotent: upserting the same data twice equals once. Over 65,536 chars is META_TOO_LARGE.
  */
-export function upsert(body: string, data: unknown, version: number = META_VERSION): string {
+export function upsert(body: string, data: unknown, version: number = META_VERSION, o: PickOptions = {}): string {
   const block = encode(data, version);
-  const matches = [...body.matchAll(BLOCK)];
-  const last = matches[matches.length - 1];
+  const target = o.pick === 'first-valid' ? decode(body, o.schemas, { pick: 'first-valid' }) : lastBlock(body);
   let out: string;
-  if (last && last.index !== undefined) {
-    out = body.slice(0, last.index) + block + body.slice(last.index + last[0].length);
+  if (target.status !== 'absent') {
+    const [start, end] = target.range;
+    out = body.slice(0, start) + block + body.slice(end);
   } else {
     const visible = body.replace(/\s+$/, '');
     out = visible === '' ? block : `${visible}\n\n${block}`;

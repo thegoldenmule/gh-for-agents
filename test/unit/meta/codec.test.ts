@@ -149,3 +149,21 @@ test('a malformed block never swallows the human text up to the next block', () 
   assert.ok(updated.includes(encode({ t: 'pr', rev: 4 })));
   assert.ok(updated.includes('<!-- ghx:v1 {"t":"pr","id":"p_k3m9qa", -->'), 'the broken text is left alone');
 });
+
+test('upsert with pick first-valid replaces the block that decode first-valid reads (02 §9.2)', () => {
+  const two = body('two-pr-blocks.md');
+  const read = decode<{ title: string }>(two, SCHEMAS, { pick: 'first-valid' });
+  assert.equal(read.status === 'ok' && read.data.title, 'first');
+  const out = upsert(two, { t: 'pr', title: 'third' }, undefined, { pick: 'first-valid', schemas: SCHEMAS });
+  assert.deepEqual(
+    decodeAll(out, SCHEMAS).map((d) => d.status === 'ok' && (d.data as { title: string }).title),
+    ['third', 'second'],
+  );
+  const reread = decode<{ title: string }>(out, SCHEMAS, { pick: 'first-valid' });
+  assert.equal(reread.status === 'ok' && reread.data.title, 'third', 'a read after the write sees the write');
+  // An invalid first block is skipped by reads, so the write skips it too.
+  const PrOnly = { 1: z.object({ t: z.literal('pr'), title: z.string() }) };
+  const mixed = `${encode({ t: 'pr' })}\n\n${encode({ t: 'pr', title: 'valid' })}`;
+  const fixed = upsert(mixed, { t: 'pr', title: 'new' }, undefined, { pick: 'first-valid', schemas: PrOnly });
+  assert.equal(fixed, `${encode({ t: 'pr' })}\n\n${encode({ t: 'pr', title: 'new' })}`);
+});
