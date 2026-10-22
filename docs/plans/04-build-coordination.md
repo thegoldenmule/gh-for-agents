@@ -111,6 +111,7 @@ Filled in by the wave 1 bootstrap agent (commits `f29f2eb`..`3cd7603`).
   - GraphQL goes through `graphql()` and `graphqlPartial()`. Reads send the query as `-f query=…`; mutations send a JSON body.
 - The harness builds its environment from scratch. Without `git` or `proc`, it uses an in-memory "not a checkout" git.
 - `pnpm check` runs typecheck, lint and tests. Contract tests spawn `bin/ghx.js`.
+- **Rethrow control flow from every catch-all.** `DryRunHalt`, `INTERRUPTED`, `TIMEOUT` and `AbortError` are ordinary throws that the runner turns into the dry-run result, the interrupted summary or the timeout error. A handler's `catch (e)` that turns failures into warnings or partial results must let them through first: `try { … } catch (e) { rethrowControlFlow(e); /* handle the rest */ }`. Use `isControlFlow(e)` when you need a boolean. Both live in `src/core/control-flow.ts`. Stream handlers that build a graceful `interrupted` summary still use `isAbort()` from `src/core/signals.ts`, and must rethrow `DryRunHalt`.
 
 ## Coordinator decisions during the build
 
