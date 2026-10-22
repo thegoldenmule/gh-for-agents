@@ -62,6 +62,7 @@ export function spawnGhx(args: string[], o: SpawnOptions = {}): Promise<SpawnRes
     const err: Buffer[] = [];
     child.stdout?.on('data', (c: Buffer) => out.push(c));
     child.stderr?.on('data', (c: Buffer) => err.push(c));
+    child.stdin?.on('error', () => {});
     if (o.stdin !== undefined) child.stdin?.end(o.stdin);
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
