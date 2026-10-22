@@ -120,3 +120,23 @@ The user confirmed these after the scaffolding plan's Pushback section:
   - The error object always has all four keys, with `null` for empty ones.
   - There is no user-level config.
   - Read commands get a gh client that is mechanically read-only.
+
+## Decisions on the 02-api pushback (2026-10-22)
+
+The user decided these after reading the 02-api plan's pushback items:
+
+- **`pr edit` is in v1.**
+- **`ci wait` flags flaky jobs but does not rerun them.**
+  - It marks rerun candidates in its output.
+  - There is no `--rerun-flaky` flag. To rerun, the agent calls `ci rerun` itself.
+  - Read commands stay strictly read-only. This supersedes 02-api Pushback item 2 and §11's auto-rerun.
+- **Passthrough** follows 02-api §10:
+  - allowlisted reads run in a bounded JSON envelope;
+  - wrapped commands are refused, with the exact replacement in the hint;
+  - all other writes, and any unknown command, are refused.
+- **Other 02-api pushback items are accepted as written:**
+  - item 1: NDJSON output for `ci wait`;
+  - item 4: verdicts on the user's own PRs are posted as `COMMENT`;
+  - item 5: `riskNote`, `revertNote` and `revertWith`, plus the 500-char cap on the description;
+  - item 6: the extended exit codes;
+  - item 7: the passthrough envelope.
