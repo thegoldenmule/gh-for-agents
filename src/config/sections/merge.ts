@@ -13,6 +13,8 @@ export const MergeSection = z
     blockOnSeverity: z.enum(['high', 'medium', 'low']).prefault('high'),
     /** Refuse to merge someone else's PR (AUTHOR_NOT_VIEWER, overridable). */
     requireOwnPr: z.boolean().prefault(true),
+    /** pr merge deletes the same-repo head branch after merging, as --delete-branch does (02 §8.1 step 9). */
+    deleteBranch: z.boolean().prefault(false),
   })
   .superRefine((m, ctx) => {
     if (!m.allowedMethods.includes(m.method)) {

@@ -4,6 +4,7 @@
 import { z } from 'zod';
 import { MergeMethod } from '../../config/sections/_shared.ts';
 import { defineCommand } from '../../core/command.ts';
+import { afterMerge } from '../../pr/merge/branch.ts';
 import { planMerge } from '../../pr/merge/plan.ts';
 import { putMerge } from '../../pr/merge/put.ts';
 import { PrMergeOutput } from '../../pr/merge/schema.ts';
@@ -18,6 +19,10 @@ const Input = z.strictObject({
     .optional()
     .describe('Overridable blocker codes the user accepted (CODE or CODE,CODE); needs --reason'),
   reason: z.string().optional().describe('Why the override is allowed (who asked); one line, ≤200 chars'),
+  deleteBranch: z
+    .boolean()
+    .optional()
+    .describe('Delete the same-repo head branch after merging (default: merge.deleteBranch); remote ref only'),
 });
 
 export default defineCommand({
@@ -42,12 +47,18 @@ export default defineCommand({
       argv: 'ghx pr merge 12 --override AUTHOR_NOT_VIEWER --reason "user asked in chat"',
       note: "Merge someone else's PR because the user asked",
     },
+    {
+      argv: 'ghx pr merge 12 --expect-head 9f2c4e1 --delete-branch',
+      note: 'Merge, then delete the remote head branch',
+    },
   ],
   async run(input, ctx) {
     const d = await planMerge(ctx, input);
     const { plan, snapshot } = d;
-    const children = snapshot.stack.children.map((c) => ({ ref: c.ref, base: snapshot.head.ref }));
+    const deleteBranch = input.deleteBranch ?? d.config.merge.deleteBranch;
+    const after = () => afterMerge({ ctx, repo: d.repo, snapshot, head: d.head, deleteBranch });
     if (d.kind === 'already-merged') {
+      const { deletedBranch, children } = await after();
       return {
         ref: snapshot.ref,
         merged: true as const,
@@ -57,14 +68,14 @@ export default defineCommand({
         headSha: d.head,
         mergeCommit: d.mergeCommit,
         mergedAt: d.mergedAt,
-        deletedBranch: false,
+        deletedBranch,
         children,
         plan,
         next: [`ghx ci wait branch:${snapshot.defaultBranch}@${d.mergeCommit}`],
         warnings: [],
       };
     }
-    ctx.preview({ wouldMerge: true, plan });
+    ctx.preview({ wouldMerge: true, deleteBranch, plan });
     const outcome = await putMerge({
       ctx,
       repo: d.repo,
@@ -74,6 +85,7 @@ export default defineCommand({
       plan,
     });
     const { mergeCommit } = outcome;
+    const { deletedBranch, children } = await after();
     return {
       ref: snapshot.ref,
       merged: true as const,
@@ -83,7 +95,7 @@ export default defineCommand({
       headSha: d.head,
       mergeCommit,
       mergedAt: outcome.mergedAt,
-      deletedBranch: false,
+      deletedBranch,
       children,
       plan,
       next: [`ghx ci wait branch:${snapshot.defaultBranch}@${mergeCommit}`],
