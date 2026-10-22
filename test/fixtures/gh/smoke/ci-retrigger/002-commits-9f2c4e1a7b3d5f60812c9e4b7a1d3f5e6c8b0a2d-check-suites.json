@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/powerhouse-inc/powerhouse/commits/9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d/check-suites?per_page=100"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"total_count\":1,\"check_suites\":[{\"id\":30000000001,\"app\":{\"slug\":\"github-actions\"},\"status\":\"completed\",\"conclusion\":\"failure\",\"created_at\":\"2026-10-22T11:00:00Z\"}]}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "ci retrigger smoke scenario: #3301 is open, authored by the viewer, head and base exist; one check suite on the head"
+  }
+}

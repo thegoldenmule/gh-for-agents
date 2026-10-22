@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "api",
+    "graphql",
+    "--include",
+    "--hostname",
+    "github.com",
+    "-f",
+    "query=query($owner:String!,$name:String!,$number:Int!){viewer{login} repository(owner:$owner,name:$name){pullRequest(number:$number){number state headRefOid headRefName baseRefName author{__typename login} headRef{name} baseRef{name}}}}",
+    "-f",
+    "name=powerhouse",
+    "-F",
+    "number=3301",
+    "-f",
+    "owner=powerhouse-inc"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"data\":{\"viewer\":{\"login\":\"thegoldenmule\"},\"repository\":{\"pullRequest\":{\"number\":3301,\"state\":\"OPEN\",\"headRefOid\":\"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d\",\"headRefName\":\"fix/reactor-bind-document-id\",\"baseRefName\":\"main\",\"author\":{\"__typename\":\"User\",\"login\":\"thegoldenmule\"},\"headRef\":{\"name\":\"fix/reactor-bind-document-id\"},\"baseRef\":{\"name\":\"main\"}}}}}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "ci retrigger smoke scenario: #3301 is open, authored by the viewer, head and base exist; one check suite on the head"
+  }
+}
