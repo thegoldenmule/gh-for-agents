@@ -340,8 +340,13 @@ export class GitHubSim {
         })),
       });
     }
-    m = new RegExp(`^${repo}/commits/([0-9a-f]{40})$`).exec(path);
-    if (m) return this.#ok({ sha: m[1], parents: [{ sha: sha('c') }] });
+    m = new RegExp(`^${repo}/commits/([0-9a-f]{7,40})$`).exec(path);
+    if (m) {
+      const prefix = m[1] as string;
+      const known = [...Object.keys(st.checks), ...Object.values(st.branches ?? {}), st.pr.head];
+      const full = prefix.length === 40 ? prefix : known.find((k) => k.startsWith(prefix));
+      return full ? this.#ok({ sha: full, parents: [{ sha: sha('c') }] }) : this.#notFound();
+    }
     if (path === `${repo}/contents/.github/ghx.json`) {
       if (!this.o.config) return this.#notFound();
       return this.#ok({
