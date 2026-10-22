@@ -86,11 +86,24 @@ test('state expires 24 h after its SHA settled, not before', async () => {
   assert.equal(s.load('pr-7', A).kind, 'miss', 'the expired file is removed');
 });
 
-test('a pending SHA never expires', async () => {
+test('expiry counts from the later of settle and save: old CI saved today is fresh', async () => {
+  const { clock, s } = await store();
+  await clock.advance(3 * STATE_TTL_AFTER_SETTLE_MS);
+  s.save('pr-7', state(clock, A, { settledAt: clock.now() - 2 * STATE_TTL_AFTER_SETTLE_MS }));
+  assert.equal(s.load('pr-7', A).kind, 'hit');
+  await clock.advance(STATE_TTL_AFTER_SETTLE_MS);
+  assert.equal(s.load('pr-7', A).kind, 'hit');
+  await clock.advance(1);
+  assert.equal(s.load('pr-7', A).kind, 'expired');
+});
+
+test('a pending SHA expires 24 h after its last save', async () => {
   const { clock, s } = await store();
   s.save('pr-7', state(clock));
-  await clock.advance(3 * STATE_TTL_AFTER_SETTLE_MS);
+  await clock.advance(STATE_TTL_AFTER_SETTLE_MS);
   assert.equal(s.load('pr-7', A).kind, 'hit');
+  await clock.advance(1);
+  assert.equal(s.load('pr-7', A).kind, 'expired');
 });
 
 const lockPath = (s: { dir: string }) => join(s.dir, `${safeKey('pr-7')}.lock`);

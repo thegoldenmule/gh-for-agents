@@ -200,6 +200,20 @@ test('state older than 24 h past the last completion is ignored', async () => {
   assert.equal(second.json.resumed, false);
 });
 
+test('state saved for a PR that settled days ago resumes: expiry counts from the later of settle and save', async () => {
+  const { sim, a, b } = world();
+  const longAgo = -3 * 24 * 60 * MIN;
+  set(sim, 0, [
+    { ...a, status: 'completed', conclusion: 'success', startedAt: longAgo, completedAt: longAgo },
+    { ...b, status: 'completed', conclusion: 'success', startedAt: longAgo, completedAt: longAgo },
+  ]);
+  const first = await wait(sim, ['o/r#7']);
+  assert.equal(first.exitCode, EXIT.OK, first.stdout);
+  const second = await wait(sim, ['o/r#7'], { artifacts: first.artifacts });
+  assert.equal(second.exitCode, EXIT.OK, second.stdout);
+  assert.equal(second.json.resumed, true);
+});
+
 test('concurrent runs of one target each poll on their own and both finish (04: the lock covers one load or save)', async () => {
   const { clock, sim, a, b } = world();
   set(sim, 5 * MIN, [

@@ -2,7 +2,7 @@
 // under <artifacts>/<host>/<owner>/<repo>/ci-wait/, written atomically (temp file + rename), plus a
 // per-target index naming the latest bound SHA, so a re-run can send its first poll with the stored
 // ETags before it knows the head. A corrupt file is a miss (WAIT_STATE_DISCARDED); state expires 24 h
-// after every check of its SHA completed. A per-target lock covers only one load or save (04, wave 4
+// after the later of its last save and the completion of every check of its SHA. A per-target lock covers only one load or save (04, wave 4
 // review): concurrent waits poll on their own, and only one key is ever held, so there is no lock order.
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -282,7 +282,9 @@ export async function createWaitStore(o: {
       return { kind: 'discarded', reason: `${issue?.path.join('.') || '(root)'}: ${issue?.message ?? 'invalid'}` };
     }
     if (p.data.boundSha !== boundSha) return { kind: 'discarded', reason: 'bound SHA mismatch' };
-    if (p.data.settledAt !== null && o.clock.now() - p.data.settledAt > STATE_TTL_AFTER_SETTLE_MS) {
+    // From the later of CI completion and the last save (04, final review): state saved today for a PR
+    // that settled last week is fresh. Unsettled state expires 24 h after its last save.
+    if (o.clock.now() - Math.max(p.data.settledAt ?? 0, p.data.savedAt) > STATE_TTL_AFTER_SETTLE_MS) {
       rmSync(path, { force: true });
       return { kind: 'expired' };
     }
