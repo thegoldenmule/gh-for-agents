@@ -161,7 +161,11 @@ export interface MainComparerOptions {
 }
 
 export interface MainComparer {
-  compare(job: FailingJobFacts): Promise<SameOnMain>;
+  /**
+   * `signal` stops the comparison between steps (it starts no further gh call once aborted). It never
+   * kills a memoized call in flight, which other callers may share; those are capped at 20–30 s.
+   */
+  compare(job: FailingJobFacts, o?: { signal?: AbortSignal }): Promise<SameOnMain>;
   /** The latest completed push run of a workflow on the default branch (cached). */
   mainRun(workflowId: number): Promise<MainSide['run']>;
   /** The jobs of a main run (memoized per invocation). */
@@ -283,10 +287,17 @@ export function createMainComparer(o: MainComparerOptions): MainComparer {
     mainRun,
     mainJobs,
     jobTests,
-    async compare(j) {
-      const run = await mainRun(await workflowId(j));
+    async compare(j, co = {}) {
+      const step = <T>(p: Promise<T>): Promise<T> =>
+        p.then((v) => {
+          co.signal?.throwIfAborted();
+          return v;
+        });
+      co.signal?.throwIfAborted();
+      const wf = await step(workflowId(j));
+      const run = await step(mainRun(wf));
       if (!run) return compareVerdict(j, { run: null, job: null }, o.defaultBranch);
-      const same = (await mainJobs(run.id)).find((x) => x.name === j.name) ?? null;
+      const same = (await step(mainJobs(run.id))).find((x) => x.name === j.name) ?? null;
       if (same?.conclusion !== 'failure') {
         return compareVerdict(
           j,
@@ -294,7 +305,7 @@ export function createMainComparer(o: MainComparerOptions): MainComparer {
           o.defaultBranch,
         );
       }
-      const parsed = await jobTests(same);
+      const parsed = await step(jobTests(same));
       return compareVerdict(j, { run, job: { conclusion: 'failure', ...parsed } }, o.defaultBranch);
     },
   };

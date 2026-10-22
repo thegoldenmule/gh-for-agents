@@ -150,6 +150,12 @@ export interface Gh {
   /** GET rate_limit (does not count against the limit). */
   refreshRateBudget(): Promise<Partial<Record<RateResource, RateBudget>>>;
   version(): Promise<GhVersion>;
+  /**
+   * A view of this client whose gh children are also killed when `signal` aborts (its calls then reject
+   * with the abort reason). It shares the concurrency limit and rate budgets but not the call memo.
+   * Optional so hand-written doubles stay valid: use `gh.withSignal?.(s) ?? gh`.
+   */
+  withSignal?(signal: AbortSignal): Gh;
 }
 
 export interface ApiCallOptions {
@@ -191,14 +197,24 @@ function semaphore(max: number): <T>(fn: () => Promise<T>) => Promise<T> {
   };
 }
 
+/** State every view of one client shares: the concurrency limit, the rate budgets and the gh version. */
+interface GhShared {
+  limit: <T>(fn: () => Promise<T>) => Promise<T>;
+  rates: RateTracker;
+  version: { p?: Promise<GhVersion> };
+}
+
 export function createGh(deps: GhDeps): Gh {
+  return buildGh(deps, { limit: semaphore(deps.maxConcurrency ?? 4), rates: new RateTracker(), version: {} });
+}
+
+function buildGh(deps: GhDeps, shared: GhShared): Gh {
   const cmd = deps.ghPath ?? 'gh';
   const env = buildGhEnv(deps.env ?? {}, { verbose: deps.verbose === true });
   const log = deps.log ?? nullLogger;
-  const limit = semaphore(deps.maxConcurrency ?? 4);
+  const { limit, rates } = shared;
+  // Per view: a scoped view's aborted call must never be the memoized promise a parent caller awaits.
   const cache = new Map<string, Promise<GhResult>>();
-  const rates = new RateTracker();
-  let versionP: Promise<GhVersion> | undefined;
 
   const fullArgs = (call: GhCall): string[] => (call.repo ? [...call.args, '-R', repoArg(call.repo)] : [...call.args]);
 
@@ -209,8 +225,10 @@ export function createGh(deps: GhDeps): Gh {
   };
 
   async function runOnce(call: GhCall, argv: string[]): Promise<{ res: ProcResult; argv: string[] }> {
-    const res = await limit(() =>
-      deps.proc({
+    const res = await limit(() => {
+      // Never spawn for an aborted signal (a scoped view's budget may expire while a call is queued).
+      deps.signal.throwIfAborted();
+      return deps.proc({
         cmd,
         args: argv,
         env,
@@ -218,8 +236,8 @@ export function createGh(deps: GhDeps): Gh {
         timeoutMs: attemptTimeout(call),
         ...(call.stdin !== undefined ? { stdin: call.stdin } : {}),
         ...(call.stdoutFile !== undefined ? { stdoutFile: call.stdoutFile } : {}),
-      }),
-    );
+      });
+    });
     log.debug('gh', { argv, exitCode: res.exitCode, ms: Math.round(res.durationMs) });
     if (res.aborted && deps.signal.aborted) throw deps.signal.reason;
     return { res, argv };
@@ -594,7 +612,7 @@ export function createGh(deps: GhDeps): Gh {
   }
 
   function version(): Promise<GhVersion> {
-    versionP ??= exec({ args: ['--version'], retry: 'none', timeoutMs: 10_000 }).then((r) => {
+    shared.version.p ??= exec({ args: ['--version'], retry: 'none', timeoutMs: 10_000 }).then((r) => {
       const v = parseGhVersion(r.stdout);
       if (!v) {
         throw new GhxError('GH_OUTPUT_UNEXPECTED', 'Could not parse `gh --version`.', {
@@ -603,7 +621,7 @@ export function createGh(deps: GhDeps): Gh {
       }
       return v;
     });
-    return versionP;
+    return shared.version.p;
   }
 
   return {
@@ -618,5 +636,6 @@ export function createGh(deps: GhDeps): Gh {
     rateBudget: (resource = 'core') => rates.get(resource),
     refreshRateBudget,
     version,
+    withSignal: (signal) => buildGh({ ...deps, signal: AbortSignal.any([deps.signal, signal]) }, shared),
   };
 }

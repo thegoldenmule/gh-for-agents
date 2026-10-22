@@ -13,6 +13,8 @@ import {
   isDiagnosable,
   skeletonJob,
 } from '../../../src/ci/diagnose.ts';
+import { createGh } from '../../../src/gh/index.ts';
+import type { ProcessRunner } from '../../../src/proc/runner.ts';
 import { type Check, CI_CAPS, CompactDiagnosis, DiagnosisJob, type FailingJob } from '../../../src/schemas/ci.ts';
 import { install, logReply, sha, vitestLog, type WJob, type World } from '../../commands/ci-why-world.ts';
 import { ciEnv, repoOf } from './_helpers.ts';
@@ -165,6 +167,86 @@ test('job(): one job with no budget, for ci wait', async () => {
   const f = await diagnoser.job(check(j));
   assert.deepEqual(f.tests, ['src/a.test.ts > a']);
   await assert.rejects(diagnoser.job(check(j, { bucket: 'pass' })));
+});
+
+/** A diagnoser whose gh records which `logs` downloads saw their process signal abort. */
+function setupWatched(jobs: WJob[]) {
+  const env = ciEnv();
+  install(env.fake, { slug: 'o/r', number: 1, headSha: HEAD, jobs });
+  const killed: string[] = [];
+  const inner = env.fake.runner();
+  const proc: ProcessRunner = (req) => {
+    const path = req.args.find((a) => a.includes('/logs')) ?? '';
+    if (path) req.signal.addEventListener('abort', () => killed.push(path), { once: true });
+    return inner(req);
+  };
+  const gh = createGh({ proc, clock: env.clock, signal: new AbortController().signal, mode: 'read' });
+  const diagnoser = createDiagnoser({
+    gh,
+    artifacts: env.artifacts,
+    clock: env.clock,
+    repo: repoOf('o/r'),
+    headSha: HEAD,
+    defaultBranch: 'main',
+    warn: env.warn,
+  });
+  return { env, diagnoser, killed };
+}
+
+test('diagnose: a budget overrun kills the slow log download instead of leaving the gh child running', async () => {
+  const slow = job(2, ['src/slow.test.ts > b']);
+  const { env, diagnoser, killed } = setupWatched([slow]);
+  env.fake.on((a) => a.includes('repos/o/r/actions/jobs/2/logs'), { exitCode: 0, stdout: '', stderr: '', hang: true });
+  const p = diagnoser.diagnose([check(slow)], { budgetMs: 1_000 });
+  await quiesce(() => env.fake.calls.length);
+  await env.clock.advance(1_500);
+  const d = await p;
+  assert.equal(d.partial, true);
+  assert.deepEqual(killed, ['repos/o/r/actions/jobs/2/logs']);
+});
+
+test('job(): a budget gives DIAGNOSIS_PARTIAL and the skeleton, and kills the in-flight download', async () => {
+  const slow = job(2, ['src/slow.test.ts > b']);
+  const { env, diagnoser, killed } = setupWatched([slow]);
+  env.fake.on((a) => a.includes('repos/o/r/actions/jobs/2/logs'), { exitCode: 0, stdout: '', stderr: '', hang: true });
+  const p = diagnoser.job(check(slow), { budgetMs: 5_000 });
+  await quiesce(() => env.fake.calls.length);
+  await env.clock.advance(6_000);
+  const f = await p;
+  assert.deepEqual(f.tests, []);
+  assert.equal(f.logPath, null);
+  assert.equal(killed.length, 1);
+  assert.ok(env.warnings.some((w) => w.code === 'DIAGNOSIS_PARTIAL'));
+});
+
+test('job(): a caller abort kills the stages and rejects with its reason', async () => {
+  const slow = job(2, ['src/slow.test.ts > b']);
+  const { env, diagnoser, killed } = setupWatched([slow]);
+  env.fake.on((a) => a.includes('repos/o/r/actions/jobs/2/logs'), { exitCode: 0, stdout: '', stderr: '', hang: true });
+  const c = new AbortController();
+  const p = diagnoser.job(check(slow), { signal: c.signal });
+  await quiesce(() => env.fake.calls.length);
+  const reason = new DOMException('stop', 'AbortError');
+  c.abort(reason);
+  await assert.rejects(p, (e) => e === reason);
+  await quiesce(() => killed.length);
+  assert.equal(killed.length, 1);
+});
+
+test('compare(): an aborted signal starts no main-side gh call', async () => {
+  const j = job(1, ['src/a.test.ts > a']);
+  const { env, diagnoser } = setup([j]);
+  const c = new AbortController();
+  c.abort(new DOMException('stop', 'AbortError'));
+  const before = env.fake.calls.length;
+  await assert.rejects(
+    diagnoser.comparer.compare(
+      { tests: [], step: null, workflowId: null, name: j.name, runId: j.runId },
+      { signal: c.signal },
+    ),
+    (e) => e instanceof Error && e.name === 'AbortError',
+  );
+  assert.equal(env.fake.calls.length, before);
 });
 
 const big: FailingJob = {

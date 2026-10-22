@@ -67,6 +67,15 @@ export interface DiagnoserOptions {
 export interface DiagnoseOptions {
   maxJobs?: number;
   budgetMs?: number;
+  /** Aborting it kills the stages' gh children and rejects with its reason. */
+  signal?: AbortSignal;
+}
+
+export interface JobOptions {
+  /** Default: no budget (the caller bounds it). On expiry: DIAGNOSIS_PARTIAL, and what landed in time. */
+  budgetMs?: number;
+  /** Aborting it kills the stages' gh children and rejects with its reason. */
+  signal?: AbortSignal;
 }
 
 export interface Diagnosis {
@@ -81,8 +90,12 @@ export interface Diagnosis {
 export interface Diagnoser {
   /** Diagnose up to maxJobs of `checks` within the budget. */
   diagnose(checks: readonly Check[], o?: DiagnoseOptions): Promise<Diagnosis>;
-  /** One job with no budget (the caller bounds it), for ci wait's immediate diagnosis. */
-  job(check: Check): Promise<FailingJob>;
+  /**
+   * One job, for ci wait's immediate diagnosis. With no budget the caller bounds it. When `budgetMs`
+   * expires, the stages' gh children are killed, DIAGNOSIS_PARTIAL is warned, and the job carries what
+   * landed in time. A shared `comparer` is never aborted: its in-flight call (capped at 20 s) finishes.
+   */
+  job(check: Check, o?: JobOptions): Promise<FailingJob>;
   readonly comparer: MainComparer;
 }
 
@@ -153,12 +166,21 @@ export function createDiagnoser(o: DiagnoserOptions): Diagnoser {
   const incomplete = (job: string, stage: string, e: unknown): void =>
     warn({ code: 'DIAGNOSIS_INCOMPLETE', message: capLine(`${job}: ${stage} failed: ${messageOf(e)}`) });
 
-  /** Runs the stages, writing into `out` as each one lands. Never rejects except for control flow. */
-  async function stages(c: Check & { jobId: number; runId: number }, out: FailingJob): Promise<void> {
+  /**
+   * Runs the stages, writing into `out` as each one lands. Never rejects except for control flow. The
+   * stages' own gh calls run under `signal`, so aborting it kills their children (finding: leftover gh
+   * children kept the process alive after a budget overrun); comparer calls stop at the next step.
+   */
+  async function stages(
+    c: Check & { jobId: number; runId: number },
+    out: FailingJob,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const gh = o.gh.withSignal?.(signal) ?? o.gh;
     let analysis: Awaited<ReturnType<typeof analyzeJob>>;
     try {
       analysis = await analyzeJob({
-        gh: o.gh,
+        gh,
         artifacts: o.artifacts,
         repo: o.repo,
         jobId: c.jobId,
@@ -190,19 +212,20 @@ export function createDiagnoser(o: DiagnoserOptions): Diagnoser {
     // second call must hit the comparer's disk cache rather than race the first on the same log file.
     if (compare) {
       try {
-        out.sameOnMain = await comparer.compare({
-          ...comparisonFacts(analysis, workflowId),
-          name: c.name,
-          runId: c.runId,
-        });
+        out.sameOnMain = await comparer.compare(
+          { ...comparisonFacts(analysis, workflowId), name: c.name, runId: c.runId },
+          { signal },
+        );
       } catch (e) {
         rethrowControlFlow(e);
         incomplete(c.name, `${o.defaultBranch} comparison`, e);
       }
     }
     try {
+      signal.throwIfAborted();
       out.flake = await assessFlake({
-        gh: o.gh,
+        gh,
+        signal,
         repo: o.repo,
         job: { name: c.name, jobId: c.jobId, runId: c.runId, attempt, headSha: o.headSha, workflowId },
         tests: analysis.tests,
@@ -217,42 +240,69 @@ export function createDiagnoser(o: DiagnoserOptions): Diagnoser {
     }
   }
 
+  /**
+   * Run the stages for `picked` under one controller, racing the budget. On expiry the controller is
+   * aborted (killing the stages' gh children) and `partial` is true. A caller abort rejects.
+   */
+  async function bounded(
+    picked: readonly (Check & { jobId: number; runId: number })[],
+    budgetMs: number | undefined,
+    caller: AbortSignal | undefined,
+  ): Promise<{ outs: FailingJob[]; partial: boolean }> {
+    caller?.throwIfAborted();
+    const ctrl = new AbortController();
+    let forward = (): void => {};
+    const callerAbort = new Promise<never>((_, reject) => {
+      forward = () => {
+        ctrl.abort(caller?.reason);
+        reject(caller?.reason);
+      };
+    });
+    callerAbort.catch(() => {});
+    caller?.addEventListener('abort', forward, { once: true });
+    const outs = picked.map((c) => skeletonJob(c, o.defaultBranch));
+    const work = Promise.all(picked.map((c, i) => stages(c, outs[i] as FailingJob, ctrl.signal)));
+    const timer = new AbortController();
+    const budget =
+      budgetMs === undefined
+        ? new Promise<never>(() => {})
+        : o.clock.sleep(Math.max(0, budgetMs), timer.signal).then(
+            () => 'expired' as const,
+            () => 'cancelled' as const,
+          );
+    let partial = false;
+    try {
+      const first = await Promise.race([work.then(() => 'done' as const), budget, callerAbort]);
+      if (first === 'expired') {
+        partial = true;
+        // Kill what is still running; its rejection is the abort we just caused, so it is dropped.
+        work.catch(() => {});
+        ctrl.abort(new DOMException('The diagnosis budget ran out.', 'AbortError'));
+        warn({
+          code: 'DIAGNOSIS_PARTIAL',
+          message: `The diagnosis budget (${Math.round((budgetMs ?? 0) / 1000)} s) ran out; unfinished jobs carry only what was read in time.`,
+        });
+      }
+    } finally {
+      timer.abort();
+      caller?.removeEventListener('abort', forward);
+    }
+    // Copies, so stages finishing after an overrun cannot change what the caller already returned.
+    return { outs: outs.map((j) => structuredClone(j)), partial };
+  }
+
   return {
     comparer,
-    async job(c) {
+    async job(c, jo = {}) {
       if (!isDiagnosable(c)) throw new Error(`diagnose: ${c.name} is not a red Actions check with a job id`);
-      const out = skeletonJob(c, o.defaultBranch);
-      await stages(c, out);
-      return out;
+      const { outs } = await bounded([c], jo.budgetMs, jo.signal);
+      return outs[0] as FailingJob;
     },
     async diagnose(checks, d = {}) {
       const all = diagnosisOrder(checks.filter(isDiagnosable));
       const picked = all.slice(0, d.maxJobs ?? DIAGNOSIS_MAX_JOBS);
-      const outs = picked.map((c) => skeletonJob(c, o.defaultBranch));
-      const work = Promise.all(picked.map((c, i) => stages(c, outs[i] as FailingJob)));
-      const timer = new AbortController();
-      const budget = o.clock.sleep(Math.max(0, d.budgetMs ?? DIAGNOSIS_BUDGET_MS), timer.signal).then(
-        () => 'expired' as const,
-        () => 'cancelled' as const,
-      );
-      let partial = false;
-      try {
-        const first = await Promise.race([work.then(() => 'done' as const), budget]);
-        if (first === 'expired') {
-          partial = true;
-          // Stages still in flight finish in the background; their results are discarded. A control-flow
-          // rejection from one of them is surfaced by the runner's own signal, not here.
-          work.catch(() => {});
-          warn({
-            code: 'DIAGNOSIS_PARTIAL',
-            message: `The diagnosis budget (${Math.round((d.budgetMs ?? DIAGNOSIS_BUDGET_MS) / 1000)} s) ran out; unfinished jobs carry only what was read in time.`,
-          });
-        }
-      } finally {
-        timer.abort();
-      }
-      // Copies, so stages finishing after an overrun cannot change what the caller already returned.
-      return { jobs: outs.map((j) => structuredClone(j)), omitted: all.length - picked.length, partial };
+      const { outs, partial } = await bounded(picked, d.budgetMs ?? DIAGNOSIS_BUDGET_MS, d.signal);
+      return { jobs: outs, omitted: all.length - picked.length, partial };
     },
   };
 }

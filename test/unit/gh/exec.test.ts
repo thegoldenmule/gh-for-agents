@@ -147,6 +147,22 @@ test('an aborted command signal surfaces as its reason', async () => {
   await assert.rejects(p, (e) => isGhxError(e, 'INTERRUPTED'));
 });
 
+test('withSignal: a scoped view kills its own children on abort; the parent client is unaffected', async () => {
+  const clock = new FakeClock(0);
+  const fake = new FakeProc({ clock });
+  const gh = createGh({ proc: fake.runner(), clock, signal: new AbortController().signal, mode: 'read' });
+  fake.on({ cmd: 'gh', args: ['run', 'view'] }, { hang: true });
+  fake.on({ cmd: 'gh', args: ['pr', 'view'] }, { stdout: '{}' });
+  const scope = new AbortController();
+  const view = gh.withSignal?.(scope.signal);
+  assert.ok(view);
+  const p = view.exec({ args: ['run', 'view', '1'] });
+  scope.abort(new DOMException('budget', 'AbortError'));
+  await assert.rejects(p, (e) => e instanceof Error && e.name === 'AbortError');
+  assert.equal((await gh.exec({ args: ['pr', 'view', '1'] })).stdout, '{}');
+  await assert.rejects(view.exec({ args: ['pr', 'view', '1'] }), (e) => e instanceof Error && e.name === 'AbortError');
+});
+
 test('GH_HOST in the env never redirects a github.com target: --hostname is always explicit', async () => {
   const { fake, gh } = setup('read', { env: { PATH: '/bin', GH_HOST: 'ghe.corp.example' } });
   const restOk = 'HTTP/2.0 200 OK\nContent-Type: application/json\n\n{"number":1}';

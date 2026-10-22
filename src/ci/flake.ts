@@ -156,6 +156,8 @@ export async function mainHistory(o: {
   workflowId: number;
   jobName: string;
   prHeadSha: string;
+  /** Checked before each comparer call (the comparer's gh is shared and is not scoped to it). */
+  signal?: AbortSignal;
 }): Promise<MainOutcome[]> {
   const runs: ActionsRun[] = (
     await listWorkflowRuns({
@@ -176,6 +178,7 @@ export async function mainHistory(o: {
       out.push({ runId: r.id, outcome: 'unknown', tests: [] });
       continue;
     }
+    o.signal?.throwIfAborted();
     const j = (await o.comparer.mainJobs(r.id)).find((x) => x.name === o.jobName);
     if (!j || (j.conclusion !== 'failure' && j.conclusion !== 'success')) {
       out.push({ runId: r.id, outcome: 'unknown', tests: [] });
@@ -183,6 +186,7 @@ export async function mainHistory(o: {
       out.push({ runId: r.id, outcome: 'pass', tests: [] });
     } else {
       parsed++;
+      o.signal?.throwIfAborted();
       out.push({ runId: r.id, outcome: 'fail', tests: (await o.comparer.jobTests(j)).tests });
     }
   }
@@ -200,6 +204,8 @@ export interface AssessFlakeOptions {
   infraPatterns?: readonly string[];
   /** For main-intermittent; omitted means that signal is not computed. */
   main?: { comparer: MainComparer; defaultBranch: string };
+  /** Stops main-history comparer calls once aborted (scope `gh` with gh.withSignal for the rest). */
+  signal?: AbortSignal;
 }
 
 export async function assessFlake(o: AssessFlakeOptions): Promise<Flake> {
@@ -220,6 +226,7 @@ export async function assessFlake(o: AssessFlakeOptions): Promise<Flake> {
       workflowId: o.job.workflowId,
       jobName: o.job.name,
       prHeadSha: o.job.headSha,
+      ...(o.signal ? { signal: o.signal } : {}),
     });
     add(detectIntermittent(o.tests, history));
   }
