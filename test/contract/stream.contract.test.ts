@@ -58,7 +58,9 @@ test('no deadline: still running with empty stdout; SIGTERM then gives the inter
   let early = '';
   child?.stdout?.on('data', (c: Buffer) => (early += c.toString()));
   await waitForFile(ready);
-  await sleep(1_000);
+  // 03 §4.3: still running after 5 real seconds with nothing on stdout. (5 s cannot observe the 60 s
+  // default deadline; test/commands/stream.test.ts covers that on the FakeClock.)
+  await sleep(5_000);
   assert.equal(child?.exitCode, null, 'still running');
   assert.equal(early, '');
   child?.kill('SIGTERM');
