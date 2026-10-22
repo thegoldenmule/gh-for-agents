@@ -51,3 +51,63 @@ export function failingStep(steps: readonly ActionsStep[]): { number: number; na
   const s = steps.find((x) => x.conclusion === 'failure') ?? steps.find((x) => RED_STEP.includes(x.conclusion ?? ''));
   return s ? { number: s.number, name: s.name } : null;
 }
+
+export const ActionsRun = z.object({
+  id: z.number().int(),
+  head_sha: z.string(),
+  head_branch: z.string().nullish(),
+  event: z.string(),
+  status: z.string().nullable(),
+  conclusion: z.string().nullable(),
+  workflow_id: z.number().int(),
+  path: z.string().nullish(),
+  run_attempt: z.number().int().nullish(),
+  created_at: z.string(),
+  run_started_at: z.string().nullish(),
+});
+export type ActionsRun = z.infer<typeof ActionsRun>;
+
+const RunsPage = z.object({ total_count: z.number().int(), workflow_runs: z.array(ActionsRun) });
+const JobsPage = z.object({ total_count: z.number().int(), jobs: z.array(ActionsJob) });
+
+/** GET repos/{o}/{r}/actions/runs/{id}. */
+export async function fetchRun(o: { gh: Gh; repo: RepoRef; runId: number }): Promise<ActionsRun> {
+  const r = await o.gh.api({ path: `repos/{owner}/{repo}/actions/runs/${o.runId}`, repo: o.repo }, ActionsRun, {
+    notFound: 'RUN_NOT_FOUND',
+  });
+  if (r.notModified) throw new Error('unreachable: unconditional request returned 304');
+  return r.data;
+}
+
+/** GET repos/{o}/{r}/actions/workflows/{id}/runs with filters (one page, newest first). */
+export async function listWorkflowRuns(o: {
+  gh: Gh;
+  repo: RepoRef;
+  workflowId: number;
+  fields: Record<string, string | number>;
+}): Promise<ActionsRun[]> {
+  const r = await o.gh.api(
+    { path: `repos/{owner}/{repo}/actions/workflows/${o.workflowId}/runs`, repo: o.repo, fields: o.fields },
+    RunsPage,
+  );
+  if (r.notModified) throw new Error('unreachable: unconditional request returned 304');
+  return r.data.workflow_runs;
+}
+
+/** The jobs of a run (latest attempt), or of one attempt with `attempt`. Bounded to 3 pages. */
+export async function listRunJobs(o: {
+  gh: Gh;
+  repo: RepoRef;
+  runId: number;
+  attempt?: number;
+}): Promise<ActionsJob[]> {
+  const path =
+    o.attempt === undefined
+      ? `repos/{owner}/{repo}/actions/runs/${o.runId}/jobs`
+      : `repos/{owner}/{repo}/actions/runs/${o.runId}/attempts/${o.attempt}/jobs`;
+  const r = await o.gh.api({ path, repo: o.repo, paginate: { maxPages: 3, itemsKey: 'jobs' } }, JobsPage, {
+    notFound: 'RUN_NOT_FOUND',
+  });
+  if (r.notModified) throw new Error('unreachable: unconditional request returned 304');
+  return r.data.jobs;
+}
