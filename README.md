@@ -21,7 +21,7 @@ around it.
 
 ## What it does
 
-None of these commands work yet. They are the v1 plan from [02-api](docs/plans/02-api.md).
+These are the v1 commands, specified in [02-api](docs/plans/02-api.md).
 
 | | What it does |
 | --- | --- |
@@ -86,11 +86,14 @@ outcome.
 
 ## Status
 
-v1 is under construction. The groundwork is in place (the `gh` wrapper, config,
-output contract and test double), and these commands work: `version`, `doctor`,
-`init` (which writes a starter `.github/ghx.json`), `help` and `schema`. None of
-the `pr` or `ci` commands exist yet. The build order is in
-[04-build-coordination](docs/plans/04-build-coordination.md).
+Every v1 command exists, along with passthrough for read-only `gh` commands.
+Agent acceptance hasn't run yet: it means scoring the Claude Code sessions of
+three real PRs worked on with `ghx` (`scripts/acceptance/score.ts`). The build
+order is in [04-build-coordination](docs/plans/04-build-coordination.md).
+
+To steer Claude Code toward `ghx`, see [docs/agents](docs/agents/). It has a
+CLAUDE.md snippet, a skill, the command reference, and an opt-in settings block
+(deny rules for raw `gh` writes, plus a PreToolUse hook).
 
 To run it from source, you need Node 24, pnpm and `gh` 2.81.0 or later, logged
 in. There is no build step and no published package.
