@@ -106,8 +106,8 @@ test('10 targets, each with 5 diagnosed failing jobs: compacted under 16 384 byt
   const s = WaitSummary.parse(r.json);
   assert.equal(s.results.length, 10);
   const full = JSON.parse(readFileSync(s.diagnosisPath as string, 'utf8'));
-  // Fake time moves while the diagnoses run, so the 60 s per-SHA budget may cut the last job or two.
-  assert.ok(full.diagnoses.length >= 40, `${full.diagnoses.length} diagnoses on disk`);
+  // drive() holds fake time while logs are read, so no per-SHA budget cuts a diagnosis short.
+  assert.equal(full.diagnoses.length, 50, `${full.diagnoses.length} diagnoses on disk`);
   assert.equal(full.results[0].diagnosis.jobs.length, 5, 'the full form keeps all five');
   assert.ok(
     s.results.every((t) => (t.diagnosis?.jobs.length ?? 0) < 5),

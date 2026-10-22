@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { FALLBACK_PR_QUERY, SUITES_QUERY } from '../../src/ci/wait/poller.ts';
 import { isMutating } from '../../src/gh/guard.ts';
 import type { ProcessRunner, ProcRequest, ProcResult } from '../../src/proc/runner.ts';
-import type { FakeClock } from '../helpers/fake-clock.ts';
+import { type FakeClock, flush } from '../helpers/fake-clock.ts';
 import { fakeGit } from '../helpers/fake-git.ts';
 import { type HarnessOptions, runInProcess, scratchDir } from '../helpers/harness.ts';
 import { httpReply, vitestLog } from './ci-why-world.ts';
@@ -603,6 +603,45 @@ export async function wait(
   o: Parameters<typeof startWait>[2] & { stepMs?: number; maxMs?: number } = {},
 ) {
   const run = startWait(sim, argv, o);
-  await sim.clock.runUntil(run.isDone, { stepMs: o.stepMs ?? 5_000, maxMs: o.maxMs ?? 8 * 3_600_000 });
+  await drive(sim, run.isDone, { stepMs: o.stepMs ?? 5_000, maxMs: o.maxMs ?? 8 * 3_600_000 });
   return { ...(await run.p), artifacts: run.artifacts };
+}
+
+/** Calls after which real fs work runs under a fake-time budget: job logs (diagnosis, main comparison). */
+const IO_HEAVY = /\/actions\/jobs\/\d+(\/logs)?$/;
+
+/** Real-time wait until `count()` stops changing (in-flight fs work settles), as in diagnose.test.ts. */
+export async function quiesce(count: () => number, o: { stableRounds?: number; maxRounds?: number } = {}) {
+  let last = -1;
+  let stable = 0;
+  for (let i = 0; i < (o.maxRounds ?? 500) && stable < (o.stableRounds ?? 5); i++) {
+    await new Promise((r) => setTimeout(r, 10));
+    const n = count();
+    stable = n === last ? stable + 1 : 0;
+    last = n;
+  }
+}
+
+/**
+ * Like FakeClock.runUntil, but fake time does not run ahead of real fs work: log downloads and their
+ * analysis are real I/O, and the diagnosis budget (60 s) and per-log cap (20 s) are fake-clock timers,
+ * so under load a plain runUntil could expire them before a log was read (DIAGNOSIS_PARTIAL). After a
+ * step that fetched a job or its log, wait in real time until the sim stops seeing calls.
+ */
+export async function drive(sim: GitHubSim, pred: () => boolean, o: { stepMs?: number; maxMs?: number } = {}) {
+  const step = o.stepMs ?? 1_000;
+  const limit = sim.clock.monotonic() + (o.maxMs ?? 3_600_000);
+  let seen = sim.calls.length;
+  await flush();
+  for (;;) {
+    const fresh = sim.calls.slice(seen);
+    seen = sim.calls.length;
+    if (fresh.some((c) => IO_HEAVY.test(endpoint(c.argv) ?? ''))) {
+      await quiesce(() => sim.calls.length);
+      seen = sim.calls.length;
+    }
+    if (pred()) return;
+    if (sim.clock.monotonic() >= limit) throw new Error(`drive: condition not met within ${o.maxMs ?? 3_600_000} ms`);
+    await sim.clock.advance(step);
+  }
 }
