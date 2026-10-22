@@ -662,12 +662,15 @@ Appends status events (§9.4) and implements §9.6. `--note` is the one prose fl
 | `addressed` needs a `--commit` reachable from the head and not from the base | `resolve.commit_not_in_pr` |
 | wontfix, deferred, met and withdrawn need `--note` | `resolve.note_required` |
 | Setting the status the item already has | Warning `ALREADY_IN_STATUS`, exit 0 |
+| The viewer's own events would pass the trust gate (§9.4), judged from their newest item on the PR | `WRITER_UNTRUSTED` (6); a warning instead when only the posted comment shows it |
 
 Writes:
 - **Inline findings:** a thread reply via `POST pulls/N/comments/{id}/replies`, then a best-effort GraphQL `resolveReviewThread` or `unresolveReviewThread`. If that fails, warn `THREAD_RESOLVE_FAILED`.
 - **Everything else:** one issue comment.
 
 Output: `{ref, events: [{id, from, to, commentId, url, threadResolved}], warnings}`.
+
+GitHub lists only the first 250 commits of a PR, so an `addressed --commit` beyond them cannot be verified and fails closed with `resolve.commit_not_in_pr`; this is accepted for v1.
 
 ---
 

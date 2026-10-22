@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import resolveSpec from '../../src/commands/pr/resolve.ts';
 import { foldFeedback } from '../../src/feedback/fold.ts';
 import { buildGraphqlArgs } from '../../src/gh/graphql.ts';
 import { Q1_QUERY } from '../../src/pr/snapshot/query.ts';
@@ -349,4 +350,8 @@ test('smoke/pr-resolve: the example halts in dry-run, and the fixture query matc
     { repo: { host: 'github.com', owner: 'octo', name: 'demo' } },
   );
   assert.equal(argvKey(fixture.argv), argvKey(built.args));
+});
+
+test('--help says a --commit beyond the first 250 PR commits GitHub lists fails closed', () => {
+  assert.match(resolveSpec.description ?? '', /250/);
 });

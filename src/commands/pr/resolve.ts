@@ -78,7 +78,8 @@ export default defineCommand({
   summary: 'Set the status of findings or preconditions (append-only event; resolves the review thread)',
   description:
     'addressed needs --commit (in the PR); wontfix, deferred, met and withdrawn need --note. Ids come from ' +
-    'ghx pr feedback. An inline finding gets a thread reply and its thread resolved; others get one issue comment.',
+    'ghx pr feedback. An inline finding gets a thread reply and its thread resolved; others get one issue comment. ' +
+    'GitHub lists only the first 250 commits of a PR, so a --commit beyond them cannot be verified and is refused.',
   kind: 'write',
   input: Input,
   output: Output,
