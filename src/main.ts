@@ -65,6 +65,10 @@ async function main(): Promise<void> {
       clock: realClock,
     });
   }
+  // A handler stuck on a promise with no live handle would let the loop drain (exit 13, empty stdout).
+  // Keep the process alive until runCli settles, so the deadline or a signal ends it with a document.
+  const keepAlive = new AbortController();
+  realClock.sleep(2_147_483_647, keepAlive.signal).catch(() => {});
   const outcome = await runCli(process.argv.slice(2), {
     registry: fsRegistry(commandRoots(env, import.meta.dirname)),
     version: VERSION,
@@ -80,6 +84,7 @@ async function main(): Promise<void> {
     readFile: (p) => readFile(p, 'utf8'),
     readStdin,
   });
+  keepAlive.abort();
   process.exitCode = outcome.exitCode;
   if (outcome.forced) forceExit(outcome.exitCode);
   uninstall();

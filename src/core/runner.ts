@@ -206,15 +206,8 @@ export async function runCommandWith(
     return { exitCode: await emitError(deps.stdout, e, fallback, deps.clock), forced: false };
   }
   if (spec.mode === 'stream') {
-    return {
-      exitCode: await emitError(
-        deps.stdout,
-        new GhxError('INTERNAL', 'stream commands are not supported yet.'),
-        out,
-        deps.clock,
-      ),
-      forced: false,
-    };
+    const { runStream } = await import('./stream.ts');
+    return runStream(spec, globals, deps, rawInput, out);
   }
   let deadline: ReturnType<typeof createDeadline> | undefined;
   let warnings: Warning[] = [];
