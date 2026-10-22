@@ -1,0 +1,19 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/powerhouse-inc/powerhouse/actions/jobs/111970000001/logs"
+  ],
+  "exitCode": 0,
+  "stdout": "",
+  "stderr": "",
+  "stdoutFile": "008-actions-jobs-111970000001-logs.log",
+  "meta": {
+    "source": "synthetic",
+    "note": "ci why smoke/contract scenario: #3301 red, the failing vitest test also fails on main (same-tests)"
+  }
+}

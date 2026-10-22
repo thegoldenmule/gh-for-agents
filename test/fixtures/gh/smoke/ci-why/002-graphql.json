@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "api",
+    "graphql",
+    "--include",
+    "--hostname",
+    "github.com",
+    "-f",
+    "query=query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){defaultBranchRef{name} pullRequest(number:$number){number state headRefOid headRefName baseRefName commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{__typename ... on CheckRun{databaseId name status conclusion startedAt completedAt detailsUrl isRequired(pullRequestNumber:$number) checkSuite{app{slug} workflowRun{databaseId event file{path} workflow{databaseId name}}}} ... on StatusContext{context state targetUrl createdAt isRequired(pullRequestNumber:$number)}}}}}}}}}}",
+    "-f",
+    "name=powerhouse",
+    "-F",
+    "number=3301",
+    "-f",
+    "owner=powerhouse-inc"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"data\":{\"repository\":{\"defaultBranchRef\":{\"name\":\"main\"},\"pullRequest\":{\"number\":3301,\"state\":\"OPEN\",\"headRefOid\":\"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d\",\"headRefName\":\"feat/x\",\"baseRefName\":\"main\",\"commits\":{\"nodes\":[{\"commit\":{\"oid\":\"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d\",\"statusCheckRollup\":{\"contexts\":{\"pageInfo\":{\"hasNextPage\":false,\"endCursor\":null},\"nodes\":[{\"__typename\":\"CheckRun\",\"databaseId\":111978835495,\"name\":\"Test Reactor (shard 1/3)\",\"status\":\"COMPLETED\",\"conclusion\":\"FAILURE\",\"startedAt\":\"2026-10-22T10:59:30Z\",\"completedAt\":\"2026-10-22T11:00:30Z\",\"detailsUrl\":\"https://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835495\",\"isRequired\":true,\"checkSuite\":{\"app\":{\"slug\":\"github-actions\"},\"workflowRun\":{\"databaseId\":37948190914,\"event\":\"pull_request\",\"file\":{\"path\":\".github/workflows/w5.yml\"},\"workflow\":{\"databaseId\":5,\"name\":\"CI\"}}}},{\"__typename\":\"CheckRun\",\"databaseId\":111978835496,\"name\":\"Test Reactor (shard 2/3)\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\",\"startedAt\":\"2026-10-22T10:59:30Z\",\"completedAt\":\"2026-10-22T11:00:30Z\",\"detailsUrl\":\"https://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835496\",\"isRequired\":false,\"checkSuite\":{\"app\":{\"slug\":\"github-actions\"},\"workflowRun\":{\"databaseId\":37948190914,\"event\":\"pull_request\",\"file\":{\"path\":\".github/workflows/w5.yml\"},\"workflow\":{\"databaseId\":5,\"name\":\"CI\"}}}},{\"__typename\":\"CheckRun\",\"databaseId\":111978835497,\"name\":\"Lint\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\",\"startedAt\":\"2026-10-22T10:59:30Z\",\"completedAt\":\"2026-10-22T11:00:30Z\",\"detailsUrl\":\"https://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835497\",\"isRequired\":false,\"checkSuite\":{\"app\":{\"slug\":\"github-actions\"},\"workflowRun\":{\"databaseId\":37948190914,\"event\":\"pull_request\",\"file\":{\"path\":\".github/workflows/w5.yml\"},\"workflow\":{\"databaseId\":5,\"name\":\"CI\"}}}}]}}}}]}}}}}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "ci why smoke/contract scenario: #3301 red, the failing vitest test also fails on main (same-tests)"
+  }
+}

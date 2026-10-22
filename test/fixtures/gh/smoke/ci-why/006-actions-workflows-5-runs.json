@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/powerhouse-inc/powerhouse/actions/workflows/5/runs?branch=main&event=push&status=completed&per_page=10"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"total_count\":1,\"workflow_runs\":[{\"id\":37940000001,\"head_sha\":\"4b1e7d20c9a35f8e61d24b07c3a9e5f1d8b62c47\",\"head_branch\":\"main\",\"event\":\"push\",\"status\":\"completed\",\"conclusion\":\"failure\",\"workflow_id\":5,\"path\":\".github/workflows/w5.yml\",\"run_attempt\":1,\"created_at\":\"2026-10-22T09:00:00Z\",\"run_started_at\":\"2026-10-22T09:00:05Z\"}]}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "ci why smoke/contract scenario: #3301 red, the failing vitest test also fails on main (same-tests)"
+  }
+}
