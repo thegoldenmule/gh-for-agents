@@ -99,3 +99,24 @@ writes, and answers each common question in one plain invocation on reads.
 - A cwd repo that doesn't match the PR's repo causes failures, as with
   sektar #3258 (§4.1).
 - Merges must pin `--match-head-commit`. Only 8 of 52 did (§4.3).
+
+## Decisions confirmed by the user (2026-10-22)
+
+The user confirmed these after the scaffolding plan's Pushback section:
+
+- **Runtime:** TypeScript on Node 24.
+- **Binary name:** `ghx`.
+- **Config location:** `.github/ghx.json`. This supersedes `.ghx.json` in item 6.
+- **Agent steering:**
+  - Writes: `permissions.deny` rules block raw `gh pr merge/create/edit/review/comment`.
+  - Reads: an optional PreToolUse hook suggests `ghx`. It runs in ask mode and fails open.
+  - Both ship as an opt-in late commit.
+- **Accepted from the 01-scaffolding pushback:**
+  - JSON input arrives only through `--input <file>` or an explicit `--input -`.
+  - stdout takes one of three shapes:
+    - a single bounded JSON document
+    - NDJSON ending in a `summary` or `error` line
+    - a spill result `{spilled, path, bytes}`
+  - The error object always has all four keys, with `null` for empty ones.
+  - There is no user-level config.
+  - Read commands get a gh client that is mechanically read-only.
