@@ -33,6 +33,7 @@ export function label(call: Pick<FakeGhCall, 'argv' | 'stdin'>): string {
   const write = isMutating(a);
   if (write && /\/issues\/\d+\/comments$/.test(path)) return 'post-comment';
   if (write && /\/pulls\/\d+$/.test(path)) return 'close';
+  if (/\/pulls\/\d+$/.test(path)) return 'pull';
   if (write && /\/pulls\/\d+\/reviews$/.test(path)) return 'post-review';
   if (write && /\/comments\/\d+\/replies$/.test(path)) return 'reply';
   if (path.includes('/contents/.github/ghx.json')) return 'config';
@@ -74,6 +75,8 @@ export interface WriteSceneOptions {
   /** Overrides on the Q1 pull request (state, author, comments, reviews, reviewThreads, …). */
   pr?: Record<string, unknown>;
   viewer?: string;
+  /** The head GET pulls/N reports (pr review's re-check after reading the files). Default HEAD. */
+  pullHead?: string;
   /** owner/repo#N → state; refs not listed don't exist. */
   refs?: Record<string, { state: string; mergedAt?: string | null }>;
   /** pulls/N/files rows (default: the worked example's two files, hunks around the finding lines). */
@@ -157,6 +160,16 @@ export function writeScene(o: WriteSceneOptions = {}): WriteScene {
     return reply(200, { number: 3301, state: 'closed' });
   });
   dynamic(gh, 'files', () => reply(200, o.files ?? FILES));
+  dynamic(gh, 'pull', () =>
+    reply(200, {
+      number: 3301,
+      html_url: PR_URL,
+      title: 'pr',
+      body: null,
+      head: { ref: 'feat/x', sha: o.pullHead ?? HEAD },
+      base: { ref: 'main' },
+    }),
+  );
   dynamic(gh, 'post-review', ({ stdin }) => {
     record('post-review', stdin);
     return (

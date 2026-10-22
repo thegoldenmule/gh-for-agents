@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/octo/demo/pulls/7"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"number\":7,\"html_url\":\"https://github.com/octo/demo/pull/7\",\"title\":\"feat(app): show a banner when a request is retried\",\"body\":null,\"draft\":false,\"head\":{\"ref\":\"feat/retry-banner\",\"sha\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"base\":{\"ref\":\"main\"}}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "GET pulls/7 (02 §7.2): pr review re-checks the head after reading the files; unchanged"
+  }
+}

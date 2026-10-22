@@ -11,6 +11,7 @@ import { GhxError, type IssueDetail, mapZodIssues } from '../../core/errors.ts';
 import { GhFailure } from '../../gh/index.ts';
 import type { FindingBlock, ReviewBlock } from '../../meta/schemas.ts';
 import { validationError } from '../../pr/create/rules.ts';
+import { readPull } from '../../pr/create/submit.ts';
 import { inHunk, parseHunks } from '../../pr/feedback-writes/hunks.ts';
 import { assertBodySize, githubMessage } from '../../pr/feedback-writes/post.ts';
 import { assertOpen, idAllocator, readPrForWrite, resolveTarget } from '../../pr/feedback-writes/read.ts';
@@ -213,6 +214,19 @@ export default defineCommand({
           : { path: f.path, body: text, line: f.line, side: f.side };
       });
     const request = { commit_id: head, body, event, comments };
+    // The head was read before pulls/N/files, and the placements above come from those files. A push in
+    // between would pin the review to a commit whose diff the files no longer describe: re-check it.
+    const now = (await readPull(ctx, t.repo, t.number)).head.sha;
+    if (now !== head) {
+      throw new GhxError(
+        'HEAD_MOVED',
+        `Head moved from ${head.slice(0, 7)} to ${now.slice(0, 7)} while the diff was read.`,
+        {
+          hint: `Re-check the new head: ghx pr status ${t.ref}, then re-run the review against it.`,
+          details: { expected: head, actual: now },
+        },
+      );
+    }
     ctx.preview({ ref: t.ref, id: reviewId, postedAs: event, verdictDowngraded, request });
 
     let posted: z.infer<typeof PostedReview>;

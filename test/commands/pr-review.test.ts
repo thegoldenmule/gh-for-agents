@@ -53,7 +53,7 @@ test('self-review (02 §14.3): posted as COMMENT with verdictDowngraded, pinned 
   const s = writeScene();
   const r = await run(s.gh);
   assert.equal(r.exitCode, EXIT.OK, r.stdout);
-  assert.deepEqual(sequence(s.gh), ['q1', 'files', 'post-review', 'review-comments']);
+  assert.deepEqual(sequence(s.gh), ['q1', 'files', 'pull', 'post-review', 'review-comments']);
   const posted = s.sent['post-review']?.[0] as Posted;
   assert.equal(posted.event, 'COMMENT');
   assert.equal(posted.commit_id, HEAD);
@@ -180,6 +180,16 @@ test('a stale --expect-head is HEAD_MOVED (9) with expected/actual; nothing is p
   assert.equal((ok.sent['post-review']?.[0] as Posted | undefined)?.commit_id, HEAD);
 });
 
+test('a head that moves while the files are read is HEAD_MOVED (9); nothing is posted', async () => {
+  const s = writeScene({ pullHead: 'c'.repeat(40) });
+  const r = await run(s.gh, REVIEW);
+  assert.equal(r.exitCode, EXIT.STATE, r.stdout);
+  assert.equal(r.json.error.code, 'HEAD_MOVED');
+  assert.deepEqual(r.json.error.details, { expected: HEAD, actual: 'c'.repeat(40) });
+  assert.deepEqual(sequence(s.gh), ['q1', 'files', 'pull']);
+  assert.equal(s.sent['post-review'], undefined);
+});
+
 test('a 422 is REVIEW_REJECTED (7), with no silent retry', async () => {
   const s = writeScene({
     reviewPost: reply(
@@ -192,7 +202,7 @@ test('a 422 is REVIEW_REJECTED (7), with no silent retry', async () => {
   assert.equal(r.exitCode, EXIT.GH_FAILED, r.stdout);
   assert.equal(r.json.error.code, 'REVIEW_REJECTED');
   assert.match(r.json.error.message, /Line could not be resolved/);
-  assert.deepEqual(sequence(s.gh), ['q1', 'files', 'post-review']);
+  assert.deepEqual(sequence(s.gh), ['q1', 'files', 'pull', 'post-review']);
 });
 
 test('a failed comment read-back after the POST only warns; commentId is null', async () => {
@@ -221,7 +231,7 @@ test('--dry-run reads and renders, halts at the POST: no mutation', async () => 
   assert.equal(r.json.preview.postedAs, 'COMMENT');
   assert.equal(r.json.preview.request.commit_id, HEAD);
   assert.equal(r.json.preview.request.comments.length, 2);
-  assert.deepEqual(sequence(s.gh), ['q1', 'files']);
+  assert.deepEqual(sequence(s.gh), ['q1', 'files', 'pull']);
   assert.equal(s.sent['post-review'], undefined);
 });
 
