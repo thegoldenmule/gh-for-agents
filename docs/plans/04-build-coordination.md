@@ -156,3 +156,14 @@ Filled in by the wave 1 bootstrap agent (commits `f29f2eb`..`3cd7603`).
   - **`pr status` size.** The 16 KB bound is hard. Once body blanking isn't enough, whole old or resolved comment entries are dropped, and `omitted` counts them with a `pr feedback` hint.
   - **`pr status` quiet branch.** It reads the cached `required:<base>` set so required checks that never registered stay visible, and warns on a cache miss.
   - **02 §11.2 table.** The default until-mode is `first-failure`; the table's "settled (default)" is a spec typo.
+- **2026-10-22, final review decisions.**
+  - **Wait-state expiry** uses `max(settledAt, savedAt) + 24h`. This corrects 02 §11.1's literal "24 h after CI completed", which deleted fresh state for old PRs. Any resumed tick that isn't a 304 clears the saved terminal.
+  - **Baseline grace and stall timing** are both measured from CI time, never from first observation. Baseline names are filtered through the rollup, per the one-check-set decision.
+  - **`--until mergeable`** evaluates the full required set and ignores `--check` filtering, so required checks always gate merge readiness. A persistent `UNKNOWN` keeps polling, by design.
+  - **Raw gh writes with a leading `-R`/`--repo`.** `permissions.deny` prefix rules can't match them. The hook therefore always returns `deny` for wrapped *writes* wherever the repo flag sits, independent of `GHX_HOOK_MODE`; that mode keeps governing read suggestions (default ask). `hooks.md` documents why both the hook and the deny list are needed.
+  - **`ci rerun --flaky` never widens** to `rerun-failed-jobs` unless every red job in the run is a candidate.
+  - **`ci retrigger`.** Once a close may have landed, the reopen runs on a gh client detached from the runner's abort signal, inside the shutdown grace window. If it still fails, the result is `REOPEN_FAILED` with `closedAt`.
+  - **`pr comment --close`** gets an overridable `AUTHOR_NOT_VIEWER` guard, matching `ci retrigger`.
+  - **`openFindings`** in `pr status` and `pr feedback` means "blocks merge". That includes unverified addressed findings at blocking severity, so it matches the policy engine.
+  - **Acceptance scorer.** "≤5 GitHub calls end to end" is informational. A metric with nothing to measure reports `null`, not pass. Raw gh CI polling fails the CI-wait metric.
+  - **`--schema` output** is exempt from spill, because it's documentation.
