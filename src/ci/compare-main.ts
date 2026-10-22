@@ -7,7 +7,8 @@
 //   either the PR's failing tests are non-empty and a subset of main's (`same-tests`), or neither side
 //   yields test names and the failing step names are equal (`same-step`). A job-name match alone never
 //   counts (§4.3, §7 #3246).
-// - A PR test list the cap cut (`testsTruncated`) is never a subset proof. `same-step` needs a parsed log on
+// - A PR test list the cap or the 8 MB log cap cut (`testsTruncated`), or a main log the 8 MB cap cut
+//   (`logTruncated`), is never a subset proof. `same-step` needs a parsed log on
 //   both sides (`logParsed`): with a missing or not-ready log, "no test names" is not evidence.
 // - A main run without a same-named job, or whose job did not fail or pass, is `different`.
 import { z } from 'zod';
@@ -22,6 +23,8 @@ import { analyzeJob, type JobAnalysis } from './logs/analyze.ts';
 
 /** How long a "latest main run for this workflow" lookup is reused. */
 export const MAIN_RUN_TTL_MS = 5 * 60_000;
+/** The per-fetch cap on a main job's log download (02 §11.4: 20 s per log, under the 60 s budget). */
+export const MAIN_LOG_FETCH_TIMEOUT_MS = 20_000;
 
 export interface FailingJobFacts {
   /** The job name, as both the rollup and the jobs API show it. */
@@ -41,18 +44,27 @@ export interface FailingJobFacts {
   logParsed?: boolean;
 }
 
-/** FailingJobFacts from a JobAnalysis, with both evidence flags set right. Prefer it to building one by hand. */
+const logCut = (warnings: readonly { code: string }[] | undefined): boolean =>
+  warnings?.some((w) => w.code === 'LOG_TRUNCATED') ?? false;
+
+/**
+ * FailingJobFacts from a JobAnalysis, with both evidence flags set right: a list cut by the test cap or by the
+ * 8 MB log cap (LOG_TRUNCATED in `warnings`) is `testsTruncated`. Prefer it to building one by hand.
+ */
 export function failingJobFacts(
-  a: Pick<JobAnalysis, 'job' | 'tests' | 'step' | 'logPath' | 'testsTruncated'>,
+  a: Pick<JobAnalysis, 'job' | 'tests' | 'step' | 'logPath' | 'testsTruncated'> & {
+    warnings?: JobAnalysis['warnings'] | undefined;
+  },
   workflowId?: number | null,
 ): FailingJobFacts {
+  const cut = logCut(a.warnings) || a.testsTruncated === true;
   return {
     name: a.job.name,
     runId: a.job.run_id,
     workflowId: workflowId ?? null,
     tests: a.tests,
     step: a.step,
-    ...(a.testsTruncated !== undefined ? { testsTruncated: a.testsTruncated } : {}),
+    ...(cut || a.testsTruncated !== undefined ? { testsTruncated: cut } : {}),
     logParsed: a.logPath !== null,
   };
 }
@@ -66,6 +78,8 @@ export interface MainSide {
     step: { number: number; name: string } | null;
     /** The job log was fetched and parsed. Omitted counts as false, so `same-step` cannot match. */
     logParsed?: boolean;
+    /** The 8 MB cap cut the log (LOG_TRUNCATED): then it is never `same-tests`. */
+    logTruncated?: boolean;
   } | null;
 }
 
@@ -107,7 +121,9 @@ export function compareVerdict(
   if (main.job.conclusion === 'success') return { ...out, verdict: 'main-green' };
   if (main.job.conclusion !== 'failure') return { ...out, verdict: 'different' };
   const prTruncated = pr.testsTruncated ?? pr.tests.length === CI_CAPS.tests;
-  if (pr.tests.length > 0 && newTests.length === 0 && !prTruncated) return { ...out, verdict: 'same-tests' };
+  if (pr.tests.length > 0 && newTests.length === 0 && !prTruncated && main.job.logTruncated !== true) {
+    return { ...out, verdict: 'same-tests' };
+  }
   if (
     pr.logParsed === true &&
     main.job.logParsed === true &&
@@ -129,6 +145,7 @@ const CachedTests = z.object({
   tests: z.array(z.string()),
   step: z.object({ number: z.number(), name: z.string() }).nullable(),
   testsTruncated: z.boolean().optional(),
+  logTruncated: z.boolean().optional(),
 });
 
 export interface MainComparerOptions {
@@ -151,13 +168,15 @@ export interface MainComparer {
   mainJobs(runId: number): Promise<ActionsJob[]>;
   /**
    * Parsed failing tests and step of a job (disk-cached by job id; logs are immutable). `logParsed` is false
-   * when the log was missing or not ready; `testsTruncated` when the cap cut the list.
+   * when the log was missing or not ready; `testsTruncated` when the test cap cut the list; `logTruncated`
+   * when the 8 MB log cap did. Concurrent calls for one job share a single fetch.
    */
   jobTests(job: ActionsJob): Promise<{
     tests: string[];
     step: { number: number; name: string } | null;
     logParsed?: boolean;
     testsTruncated?: boolean;
+    logTruncated?: boolean;
   }>;
 }
 
@@ -216,25 +235,48 @@ export function createMainComparer(o: MainComparerOptions): MainComparer {
     return p;
   };
 
-  const jobTests = async (job: ActionsJob) => {
+  type JobTests = Awaited<ReturnType<MainComparer['jobTests']>>;
+  const parseJob = async (job: ActionsJob): Promise<JobTests> => {
     const c = await cache();
     const key = `tests:job-${job.id}`;
     const hit = c.get(key, CachedTests);
     // Only a parsed log is cached, so a hit is parsed evidence.
-    if (hit) return { tests: hit.tests, step: hit.step, logParsed: true, testsTruncated: hit.testsTruncated ?? false };
+    if (hit) {
+      return {
+        tests: hit.tests,
+        step: hit.step,
+        logParsed: true,
+        testsTruncated: hit.testsTruncated ?? false,
+        logTruncated: hit.logTruncated ?? false,
+      };
+    }
     const a = await analyzeJob({
       gh: o.gh,
       artifacts: o.artifacts,
       repo: o.repo,
       jobId: job.id,
       job,
+      timeoutMs: MAIN_LOG_FETCH_TIMEOUT_MS,
       ...(o.logPatterns ? { logPatterns: o.logPatterns } : {}),
     });
     for (const w of a.warnings) o.warn?.({ code: w.code, message: `${o.defaultBranch} comparison: ${w.message}` });
     const testsTruncated = a.testsTruncated ?? false;
+    const logTruncated = logCut(a.warnings);
     // Only a parsed log is immutable; a not-ready or expired log is not cached.
-    if (a.logPath !== null) c.set(key, { tests: a.tests, step: a.step, testsTruncated }, null);
-    return { tests: a.tests, step: a.step, logParsed: a.logPath !== null, testsTruncated };
+    if (a.logPath !== null) c.set(key, { tests: a.tests, step: a.step, testsTruncated, logTruncated }, null);
+    return { tests: a.tests, step: a.step, logParsed: a.logPath !== null, testsTruncated, logTruncated };
+  };
+  // One fetch per job even under concurrent callers (compare and flake): they would race on one .raw file.
+  const parsing = new Map<number, Promise<JobTests>>();
+  const jobTests = (job: ActionsJob): Promise<JobTests> => {
+    let p = parsing.get(job.id);
+    if (!p) {
+      p = parseJob(job);
+      parsing.set(job.id, p);
+      // A failed parse may be retried by a later call.
+      p.catch(() => parsing.delete(job.id));
+    }
+    return p;
   };
 
   return {

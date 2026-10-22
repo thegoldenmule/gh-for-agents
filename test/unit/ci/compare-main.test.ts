@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import {
@@ -6,11 +7,12 @@ import {
   createMainComparer,
   type FailingJobFacts,
   failingJobFacts,
+  MAIN_LOG_FETCH_TIMEOUT_MS,
   notCompared,
 } from '../../../src/ci/compare-main.ts';
 import { SameOnMain } from '../../../src/schemas/ci.ts';
 import { GH_FIXTURE_ROOT } from '../../helpers/fixture-match.ts';
-import { ciEnv, httpReply, ok, repoOf } from './_helpers.ts';
+import { ciEnv, httpReply, ok, repoOf, tempRoot } from './_helpers.ts';
 
 const repo = repoOf('o/r');
 const PR_HEAD = 'a'.repeat(40);
@@ -326,4 +328,70 @@ test('failingJobFacts carries logParsed and testsTruncated from a JobAnalysis', 
     logParsed: false,
   });
   assert.equal(failingJobFacts({ ...a, logPath: '/x.log' }).logParsed, true);
+});
+
+test('jobTests shares one in-flight fetch per job: concurrent calls fetch the log once', async () => {
+  const { comparer, env } = setup({
+    jobs: [job(930, 'test', 'failure')],
+    logs: { 930: logReply('--- FAIL: TestA (0.00s)\n') },
+  });
+  const j = (await comparer.mainJobs(900))[0];
+  assert.ok(j);
+  const [a, b] = await Promise.all([comparer.jobTests(j), comparer.jobTests(j)]);
+  assert.deepEqual(a.tests, ['TestA']);
+  assert.deepEqual(b, a);
+  assert.equal(env.fake.calls.filter((c) => c.argv.some((x) => x.endsWith('/jobs/930/logs'))).length, 1);
+});
+
+test('a main log cut by the 8 MB cap never proves same-tests', async () => {
+  const big = join(tempRoot(), 'main-big.raw');
+  const head = 'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n';
+  writeFileSync(big, `${head}${`${'x'.repeat(1023)}\n`.repeat(8 * 1024 + 16)}--- FAIL: TestA (0.00s)\n`);
+  const { comparer } = setup({
+    jobs: [job(931, 'test', 'failure')],
+    logs: { 931: { exitCode: 0, stdout: '', stderr: '', stdoutFile: big } },
+  });
+  const s = await comparer.compare(prJob(['TestA']));
+  assert.deepEqual(s.mainTests, ['TestA']);
+  assert.equal(s.verdict, 'different');
+  const runRef = { id: 1, head_sha: MAIN_SHA, created_at: '2026-10-22T09:00:00Z', run_started_at: null };
+  const main = (logTruncated: boolean) => ({
+    run: runRef,
+    job: { conclusion: 'failure', tests: ['a'], step: null, logParsed: true, logTruncated },
+  });
+  assert.equal(compareVerdict({ tests: ['a'], step: null }, main(true), 'main').verdict, 'different');
+  assert.equal(compareVerdict({ tests: ['a'], step: null }, main(false), 'main').verdict, 'same-tests');
+  // A cut PR log (LOG_TRUNCATED) is a cut test list too.
+  const facts = failingJobFacts({
+    job: job(932, 'test', 'failure') as never,
+    tests: ['a'],
+    step: null,
+    logPath: '/x.log',
+    testsTruncated: false,
+    warnings: [{ code: 'LOG_TRUNCATED', message: 'cut' }],
+  });
+  assert.equal(facts.testsTruncated, true);
+});
+
+test('main log fetches have a 20 s per-fetch timeout', async () => {
+  const { env } = setup({ jobs: [job(933, 'test', 'failure')], logs: { 933: logReply('--- FAIL: TestA (0.00s)\n') } });
+  const timeouts: (number | undefined)[] = [];
+  const gh = {
+    ...env.gh,
+    apiText: ((call, opts) => {
+      timeouts.push(opts?.timeoutMs);
+      return env.gh.apiText(call, opts);
+    }) as typeof env.gh.apiText,
+  };
+  const comparer = createMainComparer({
+    gh,
+    artifacts: env.artifacts,
+    clock: env.clock,
+    repo,
+    defaultBranch: 'main',
+    prHeadSha: PR_HEAD,
+  });
+  await comparer.compare(prJob(['TestA']));
+  assert.equal(MAIN_LOG_FETCH_TIMEOUT_MS, 20_000);
+  assert.deepEqual(timeouts, [20_000]);
 });
