@@ -27,9 +27,11 @@ export async function recordScenario(
   state: SimState,
   argv: string[],
   o: ConstructorParameters<typeof GitHubSim>[2] = {},
+  setup?: (sim: GitHubSim) => void,
 ): Promise<{ scenario: string; calls: number }> {
   // Real "now", so job timestamps mean the same thing to the spawned process's real clock.
   const sim = new GitHubSim(new FakeClock(Date.now()), state, o);
+  setup?.(sim);
   const rec: Recorded[] = [];
   const run = wait(sim, argv, { proc: recordingRunner(sim, rec), maxMs: 1 });
   await run.catch(() => {});
