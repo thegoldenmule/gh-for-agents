@@ -28,7 +28,7 @@ test('ghx --help is JSON under 4 KB and lists commands and builtins', async () =
     const r = await runInProcess(argv);
     assert.equal(r.exitCode, 0);
     assert.ok(Buffer.byteLength(r.stdout) < 4096, `${Buffer.byteLength(r.stdout)} bytes`);
-    const names = r.json.commands.map((c: { name: string }) => c.name);
+    const names = Object.keys(r.json.commands);
     assert.ok(names.includes('version') && names.includes('schema') && names.includes('help'));
   }
 });
