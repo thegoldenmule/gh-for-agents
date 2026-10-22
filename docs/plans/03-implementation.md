@@ -1226,3 +1226,27 @@ The PR commands are dogfooded on the sandbox, by the live suite and by the accep
 - **Stall false positives.** The running rule depends on base-branch baselines. A PR that legitimately adds a lot of test time could trip `max(3×p90, p90+15m)`. The summary reports `forSec`, `thresholdSec` and `basis`, so the agent can see why and re-wait.
 - **Unobserved live precondition.** `stuck.yml` relies on a job with unmatched self-hosted labels staying `queued` rather than failing fast. GitHub documents that behaviour, but it hasn't been observed here yet; the first `live.yml` run proves it.
 - **Live-suite cost and flakiness.** Real Actions queue times vary. The live tests are opt-in and never gate merges, and the 20-minute running-stall case sits in a separate slow tier.
+
+### Coordinator decisions on Q1, Q3–Q6 (2026-10-22)
+
+These are implementation calls, so they were settled without the user. Q2 needs the user's resources and is asked separately.
+
+- **Q1 (accepted, with a separate knob).**
+  - A required or config-expected check that never registers ends the wait as `stalled` with `state:"missing"`. This happens once everything else has settled and `ci.stall.missingMinutes` (default **10**) has passed.
+  - A workflow that never triggers is a misconfiguration, not slow CI, so it gets a shorter fuse than the 30-minute queue rule.
+  - Add `"missing"` to the `stalled[].state` enum in 02 §11.9.
+- **Q3 (accepted).** Both seams are inert unless `GHX_TEST_HOOKS=1`. `ghx doctor` warns if `GHX_TEST_HOOKS` or `GHX_TEST_*` is set outside the test runner.
+- **Q4 (accepted, narrowly).**
+  - ghx may fetch the pre-signed log URL directly, but only when gh stops following the redirect.
+  - The URL must come from GitHub's own `Location` header, and its host must be on an allowlist of GitHub's log storage hosts.
+  - It is a plain GET, never sends credentials, and is detected and logged as a warning.
+- **Q5 (confirmed as proposed):**
+  - `DIFF_TOO_LARGE` is exit 7.
+  - `READBACK_MISMATCH` is exit 7.
+  - The new warnings `LOGS_NOT_READY`, `LOGS_UNAVAILABLE`, `REQUIRED_CHECKS_UNKNOWN` and `WAIT_STATE_DISCARDED` are accepted.
+  - Passthrough inline text is capped to fit the 16 KB global bound.
+  - The expired-log 410 must map to `LOGS_UNAVAILABLE` and must never be classified as transient (§3.3).
+- **Q6 (line scan).**
+  - `timeout-minutes` comes from a line scan of the workflow YAML. If the scan can't resolve it, the value falls back to 360.
+  - GitHub cancels at the same limit, so precision here only moves an early exit.
+  - This keeps zod as the only runtime dependency.
