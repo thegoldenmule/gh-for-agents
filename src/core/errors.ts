@@ -69,6 +69,7 @@ export const ERROR_CODES = {
     exit: (d) => (d?.exitClass === 'state' ? ExitCode.STATE : ExitCode.POLICY),
   },
   AUTHOR_NOT_VIEWER: { exit: ExitCode.POLICY },
+  WRITER_UNTRUSTED: { exit: ExitCode.POLICY },
   RERUN_LIMIT: { exit: ExitCode.POLICY },
   METHOD_NOT_ALLOWED: { exit: ExitCode.POLICY },
   PASSTHROUGH_WRITE_REFUSED: { exit: ExitCode.POLICY },

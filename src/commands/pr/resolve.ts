@@ -2,12 +2,14 @@
 // append `resolve` status events. Never edits a comment. Ids must be findings or preconditions the fold
 // trusts (an untrusted author's block is not an id). An inline finding gets a thread reply, then a
 // best-effort resolveReviewThread (unresolve for `open`); everything else shares one issue comment.
-// An id already in the requested status is skipped with ALREADY_IN_STATUS (exit 0).
+// An id already in the requested status is skipped with ALREADY_IN_STATUS (exit 0). A viewer whose events
+// the trust gate would ignore is refused up front (WRITER_UNTRUSTED), so re-runs cannot pile up comments.
 import { z } from 'zod';
 import { defineCommand } from '../../core/command.ts';
 import { rethrowControlFlow } from '../../core/control-flow.ts';
 import { GhxError, type IssueDetail } from '../../core/errors.ts';
 import { foldFeedback } from '../../feedback/fold.ts';
+import { trustOf } from '../../feedback/trust.ts';
 import type { CommentBlock } from '../../meta/schemas.ts';
 import { validationError } from '../../pr/create/rules.ts';
 import { assertBodySize } from '../../pr/feedback-writes/post.ts';
@@ -17,6 +19,7 @@ import {
   offlineResolveIssues,
   RESOLVE_STATUSES,
   statusIssue,
+  writerTrust,
 } from '../../pr/feedback-writes/resolve.ts';
 import { renderResolveComment, renderResolveReply } from '../../render/comment.ts';
 import { IssueRef, OneLine, PrRef, ShaInput } from '../../schemas/common.ts';
@@ -51,7 +54,13 @@ const Output = z.object({
   ),
 });
 
-const Posted = z.looseObject({ id: z.number().int(), html_url: z.string() });
+const Posted = z.looseObject({
+  id: z.number().int(),
+  html_url: z.string(),
+  // What the trust gate will see (02 §9.4); read only when the pre-check had nothing to go on.
+  author_association: z.string().optional(),
+  user: z.looseObject({ login: z.string(), type: z.string().optional() }).nullable().optional(),
+});
 const ThreadResult = z.looseObject({});
 const RESOLVE_THREAD = 'mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{isResolved}}}';
 const UNRESOLVE_THREAD =
@@ -91,6 +100,19 @@ export default defineCommand({
     const { config } = await ctx.config({ ref: t.repo });
 
     const pr = await readPrForWrite(ctx, t);
+    // The fold ignores an untrusted author's events (02 §9.4), the viewer's own included: such an event
+    // never changes the status, so every re-run would post another. Refuse before writing anything.
+    const writer = writerTrust(pr.q1, config.trust);
+    if (writer.known && !writer.trusted) {
+      throw new GhxError(
+        'WRITER_UNTRUSTED',
+        `Your resolve events on ${t.ref} would be ignored: ${writer.reason} is not in trust.associations or trust.bots.`,
+        {
+          hint: 'Ask a maintainer to resolve it, or to add your association to trust.associations (or your app to trust.bots) in .github/ghx.json.',
+          details: { viewer: pr.viewerLogin, association: writer.association, trusted: config.trust.associations },
+        },
+      );
+    }
     const fold = foldFeedback(pr.feedbackInput({ trust: config.trust, bots: config.bots }));
     const findings = new Map(fold.feedback.findings.map((f) => [f.id, f]));
     const preconditions = new Map(fold.preconditions.map((p) => [p.id, p]));
@@ -165,6 +187,19 @@ export default defineCommand({
 
     const events: z.input<typeof Output>['events'] = [];
     let current = '';
+    let warnedUntrusted = writer.known;
+    /** With no evidence beforehand, GitHub's association on the posted comment tells whether it will fold. */
+    const checkPosted = (p: z.infer<typeof Posted>) => {
+      if (warnedUntrusted || p.author_association === undefined) return;
+      const actor = { __typename: p.user?.type === 'Bot' ? 'Bot' : 'User' };
+      const v = trustOf(p.user?.login ?? pr.viewerLogin, p.author_association, config.trust, actor);
+      if (v.trusted) return;
+      warnedUntrusted = true;
+      ctx.warn({
+        code: 'WRITER_UNTRUSTED',
+        message: `Posted, but the fold ignores it: ${v.reason} is not in trust.associations or trust.bots, so the status does not change. Ask a maintainer to resolve it.`,
+      });
+    };
     try {
       for (const { plan, body } of replies) {
         current = plan.id;
@@ -180,6 +215,7 @@ export default defineCommand({
           { notFound: 'ID_NOT_FOUND' },
         );
         if (posted.notModified) throw new GhxError('INTERNAL', 'POST replies returned 304.');
+        checkPosted(posted.data);
         const want = input.status !== 'open';
         let threadResolved = thread.isResolved;
         if (thread.isResolved !== want) {
@@ -219,6 +255,7 @@ export default defineCommand({
           { notFound: 'PR_NOT_FOUND' },
         );
         if (posted.notModified) throw new GhxError('INTERNAL', 'POST issues/comments returned 304.');
+        checkPosted(posted.data);
         for (const p of rest) {
           events.push({
             id: p.id,

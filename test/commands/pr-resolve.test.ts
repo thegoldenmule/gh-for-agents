@@ -15,6 +15,7 @@ import { argvKey, GH_FIXTURE_ROOT } from '../helpers/fixture-match.ts';
 import { runInProcess } from '../helpers/harness.ts';
 import { snapshotConfig } from '../unit/pr/snapshot-fixture.ts';
 import {
+  dynamic,
   HEAD,
   OLD_HEAD,
   PR_URL,
@@ -239,6 +240,44 @@ test('an untrusted or unknown id is ID_NOT_FOUND (5), with the known ids', async
   assert.deepEqual(sequence(s.gh), ['config', 'q1']);
   const r2 = await run(writeScene({ pr: prState() }), ['f_zzzzzz', '--status', 'open']);
   assert.equal(r2.json.error.code, 'ID_NOT_FOUND');
+});
+
+/** drive-by's own earlier `met` event for c_a1b2c3: posted, but never folded (CONTRIBUTOR is untrusted). */
+const driveByResolve: Node = {
+  databaseId: 2401000009,
+  author: { __typename: 'User', login: 'drive-by' },
+  authorAssociation: 'CONTRIBUTOR',
+  body: '`c_a1b2c3` Met: ops said ok.\n\n<!-- ghx:v1 {"gen":"ghx/0.1.0","id":"c_dr1ve1","kind":"resolve","t":"comment","targets":[{"id":"c_a1b2c3","note":"ops said ok.","status":"met"}]} -->',
+  createdAt: '2026-10-21T17:00:00Z',
+  lastEditedAt: null,
+  url: `${PR_URL}#issuecomment-2401000009`,
+};
+
+test('an untrusted writer is refused with WRITER_UNTRUSTED (6) instead of posting an event that never folds', async () => {
+  const s = writeScene({ viewer: 'drive-by', pr: prState({ extraComments: [driveByResolve] }) });
+  const r = await run(s, ['c_a1b2c3', '--status', 'met', '--note', 'ops said ok.']);
+  assert.equal(r.exitCode, EXIT.POLICY, r.stdout);
+  assert.equal(r.json.error.code, 'WRITER_UNTRUSTED');
+  assert.equal(r.json.error.details.association, 'CONTRIBUTOR');
+  assert.match(r.json.error.hint, /trust\.associations/);
+  assert.deepEqual(sequence(s.gh), ['config', 'q1'], 'nothing posted, so a re-run cannot pile up comments');
+});
+
+test('a writer with no item on the PR yet posts once, and WRITER_UNTRUSTED warns when GitHub says untrusted', async () => {
+  const s = writeScene({ viewer: 'newcomer', pr: prState() });
+  dynamic(s.gh, 'post-comment', () =>
+    reply(
+      201,
+      { id: 2401000010, html_url: `${PR_URL}#issuecomment-2401000010`, author_association: 'NONE' },
+      'Created',
+    ),
+  );
+  const r = await run(s, ['c_a1b2c3', '--status', 'met', '--note', 'Ops confirmed the window.']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.events.length, 1);
+  const w = (r.json.warnings ?? []).find((x: { code: string }) => x.code === 'WRITER_UNTRUSTED');
+  assert.ok(w, 'warned');
+  assert.match(w.message, /NONE/);
 });
 
 test('--dry-run reads and renders, halts at the first POST: no mutation', async () => {
