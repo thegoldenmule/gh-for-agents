@@ -2,14 +2,17 @@
 // `pull_request` workflows on the current merge ref, which a rerun cannot do. A closed PR is never left
 // behind silently: a failed close is re-read (a timed-out PATCH may have landed), the reopen is retried
 // (setting state:open twice equals once, so it is marked idempotent; the close is not), and a reopen that
-// still fails is REOPEN_FAILED with a hint to reopen in the UI. New check suites on the head are found by
+// still fails is REOPEN_FAILED with a hint to reopen in the UI. Once the close may have landed, the reopen
+// runs on a gh client the runner's abort cannot kill, for the shutdown grace window. New check suites on the head are found by
 // diffing suite ids against a baseline read before the close, so no clocks are compared.
 import { z } from 'zod';
 import type { Clock } from '../../core/clock.ts';
-import { rethrowControlFlow } from '../../core/control-flow.ts';
+import { isControlFlow, rethrowControlFlow } from '../../core/control-flow.ts';
+import { formatDuration } from '../../core/duration.ts';
 import { GhxError } from '../../core/errors.ts';
+import { GRACE_MS } from '../../core/signals.ts';
 import type { Gh } from '../../gh/index.ts';
-import { GhFailure } from '../../gh/index.ts';
+import { DryRunHalt, GhFailure } from '../../gh/index.ts';
 import type { RetryPolicy } from '../../gh/retry.ts';
 import type { RepoRef } from '../../gh/types.ts';
 import { githubMessage } from '../../pr/feedback-writes/post.ts';
@@ -174,26 +177,71 @@ function patchState(gh: Gh, repo: RepoRef, number: number, state: 'open' | 'clos
 const messageOf = (e: unknown): string =>
   e instanceof GhFailure ? githubMessage(e) : e instanceof Error ? e.message : String(e);
 
-/** Close the PR. A failed PATCH is re-read: a close that landed anyway proceeds to the reopen. */
-export async function closePr(o: {
-  gh: Gh;
-  clock: Clock;
-  repo: RepoRef;
-  number: number;
-}): Promise<{ closedAt: string }> {
+/**
+ * The close's outcome. `unknown` means it may have landed: an abort killed the PATCH in flight, or it
+ * failed and the re-read failed too. The caller must then reopen (state:open on an open PR is a no-op).
+ */
+export type CloseOutcome =
+  | { landed: true; closedAt: string }
+  | { landed: 'unknown'; attemptedAt: string; cause: unknown };
+
+/**
+ * Close the PR. A failed PATCH is re-read: a close that landed anyway proceeds to the reopen. Throws only a
+ * dry-run halt or a failure the re-read shows did not land (still open), so no reopen is needed.
+ */
+export async function closePr(o: { gh: Gh; clock: Clock; repo: RepoRef; number: number }): Promise<CloseOutcome> {
+  const attemptedAt = new Date(o.clock.now()).toISOString();
   try {
     const r = await patchState(o.gh, o.repo, o.number, 'closed');
     if (r.notModified) throw new GhxError('INTERNAL', 'PATCH pulls returned 304.');
-    return { closedAt: r.data.closed_at ?? new Date(o.clock.now()).toISOString() };
+    return { landed: true, closedAt: r.data.closed_at ?? new Date(o.clock.now()).toISOString() };
   } catch (e) {
-    rethrowControlFlow(e);
+    if (e instanceof DryRunHalt) throw e;
+    // An abort (signal or deadline) may have killed the PATCH after GitHub applied it.
+    if (isControlFlow(e)) return { landed: 'unknown', attemptedAt, cause: e };
+    let cause: unknown = e;
     const now = await readRetriggerPr(o.gh, o.repo, o.number).catch((re: unknown) => {
-      rethrowControlFlow(re);
+      if (isControlFlow(re)) cause = re;
       return null;
     });
-    if (now?.state === 'CLOSED') return { closedAt: new Date(o.clock.now()).toISOString() };
+    if (now === null) return { landed: 'unknown', attemptedAt, cause };
+    if (now.state === 'CLOSED') return { landed: true, closedAt: new Date(o.clock.now()).toISOString() };
     throw e;
   }
+}
+
+/** Kept back from the runner's shutdown grace window, so the reopen settles before a forced exit. */
+const GRACE_MARGIN_MS = 500;
+export const REOPEN_GRACE_MS = GRACE_MS - GRACE_MARGIN_MS;
+
+/**
+ * A gh client for the reopen that the runner's abort cannot kill: once `parent` (the command signal, which
+ * carries SIGINT/SIGTERM and the deadline) aborts, it keeps working for REOPEN_GRACE_MS, then gives up with
+ * an ordinary error (not control flow), so the reopen still ends in REOPEN_FAILED rather than vanishing.
+ */
+export function reopenClient(o: { gh: Gh; clock: Clock; parent: AbortSignal; graceMs?: number }): {
+  gh: Gh;
+  dispose: () => void;
+} {
+  const graceMs = o.graceMs ?? REOPEN_GRACE_MS;
+  const own = new AbortController();
+  const stop = new AbortController();
+  const arm = (): void => {
+    o.clock.sleep(graceMs, stop.signal).then(
+      () =>
+        own.abort(new Error(`the ${formatDuration(graceMs)} shutdown grace window ended before the reopen finished`)),
+      () => {},
+    );
+  };
+  if (o.parent.aborted) arm();
+  else o.parent.addEventListener('abort', arm, { once: true });
+  return {
+    gh: o.gh.detached?.(own.signal) ?? o.gh,
+    dispose: () => {
+      o.parent.removeEventListener('abort', arm);
+      stop.abort();
+    },
+  };
 }
 
 /**

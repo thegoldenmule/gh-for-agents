@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { RETRIGGER_PR_QUERY } from '../../src/ci/rerun/retrigger.ts';
+import { createShutdown, type Shutdown } from '../../src/core/signals.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeClock } from '../helpers/fake-clock.ts';
 import { FakeGh, type GhReply } from '../helpers/fake-gh.ts';
@@ -84,10 +85,10 @@ function scene(s: Scene = {}): FakeGh {
 }
 
 /** Run with a FakeClock that is advanced until the command finishes (retry backoff, suite polling). */
-async function retrigger(fake: FakeGh, args: string[] = []) {
+async function retrigger(fake: FakeGh, args: string[] = [], o: { shutdown?: Shutdown } = {}) {
   const clock = clocks.get(fake) ?? new FakeClock();
   let done = false;
-  const p = runInProcess(['ci', 'retrigger', `${SLUG}#7`, ...args], { gh: fake, clock }).finally(() => {
+  const p = runInProcess(['ci', 'retrigger', `${SLUG}#7`, ...args], { gh: fake, clock, ...o }).finally(() => {
     done = true;
   });
   await clock.runUntil(() => done, { stepMs: 500, maxMs: 600_000 });
@@ -232,6 +233,61 @@ test('a close that failed and did not land is GH_FAILED, and no reopen is sent',
   assert.equal(r.json.error.code, 'GH_FAILED');
   assert.equal(count(fake, isPatch('closed')), 1);
   assert.equal(count(fake, isPatch('open')), 0);
+});
+
+test('a close whose re-read also fails still sends the reopen, and warns CLOSE_UNCONFIRMED', async () => {
+  const fake = scene({ close: [serverError()], pr: [prReply(), serverError()] });
+  const r = await retrigger(fake);
+  assert.equal(count(fake, isPatch('closed')), 1, 'the close is never retried');
+  assert.equal(count(fake, isPatch('open')), 1, 'the close may have landed, so the PR is reopened');
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  const w = r.json.warnings.find((x: { code: string }) => x.code === 'CLOSE_UNCONFIRMED');
+  assert.match(w.message, /may not have closed; it was reopened/);
+});
+
+/** Fire `shutdown` as the close PATCH is answered: the close lands, then SIGINT arrives before the reopen. */
+function interruptOnClose(fake: FakeGh, shutdown: Shutdown): void {
+  fake.on(
+    (a, stdin) => {
+      if (!isPatch('closed')(a, stdin)) return false;
+      shutdown.trigger('SIGINT');
+      return true;
+    },
+    pull('closed', '2026-10-22T12:00:01Z'),
+  );
+}
+
+test('SIGINT between the close and the reopen still reopens the PR, then reports INTERRUPTED', async () => {
+  const fake = scene();
+  const shutdown = createShutdown();
+  interruptOnClose(fake, shutdown);
+  const r = await retrigger(fake, [], { shutdown });
+  assert.equal(count(fake, isPatch('closed')), 1);
+  assert.equal(count(fake, isPatch('open')), 1, 'the reopen runs on a client the abort cannot kill');
+  assert.equal(r.exitCode, EXIT.SIGINT, r.stdout);
+  assert.equal(r.json.error.code, 'INTERRUPTED');
+});
+
+test('a deadline that kills the close PATCH in flight still sends the reopen (the close may have landed)', async () => {
+  const fake = scene({ close: [{ ...pull('closed', '2026-10-22T12:00:01Z'), delayMs: 60_000 }] });
+  const r = await retrigger(fake, ['--timeout', '10s']);
+  assert.equal(count(fake, isPatch('closed')), 1);
+  assert.equal(count(fake, isPatch('open')), 1);
+  assert.equal(r.exitCode, EXIT.TIMEOUT, r.stdout);
+  assert.equal(r.json.error.code, 'TIMEOUT');
+});
+
+test('a reopen still hanging when the grace window after the deadline ends is REOPEN_FAILED with closedAt', async () => {
+  const fake = scene({
+    close: [{ ...pull('closed', '2026-10-22T12:00:01Z'), delayMs: 9_000 }],
+    open: [{ ...pull('open', '2026-10-22T12:00:02Z'), hang: true }],
+  });
+  const r = await retrigger(fake, ['--timeout', '10s']);
+  assert.equal(count(fake, isPatch('open')), 1);
+  assert.equal(r.exitCode, EXIT.GH_FAILED, r.stdout);
+  assert.equal(r.json.error.code, 'REOPEN_FAILED');
+  assert.match(r.json.error.message, /grace window ended before the reopen finished/);
+  assert.equal(r.json.error.details.closedAt, '2026-10-22T12:00:01Z');
 });
 
 test('no new check suite within the window warns NO_NEW_RUNS; the window runs on the injected clock', async () => {

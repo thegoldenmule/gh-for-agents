@@ -156,6 +156,12 @@ export interface Gh {
    * Optional so hand-written doubles stay valid: use `gh.withSignal?.(s) ?? gh`.
    */
   withSignal?(signal: AbortSignal): Gh;
+  /**
+   * A view of this client bound to `signal` *instead of* the runner's signal, with no command deadline,
+   * for cleanup that must still run after an abort (ci retrigger's reopen). The caller bounds it.
+   * Optional so hand-written doubles stay valid: use `gh.detached?.(s) ?? gh`.
+   */
+  detached?(signal: AbortSignal): Gh;
 }
 
 export interface ApiCallOptions {
@@ -637,5 +643,6 @@ function buildGh(deps: GhDeps, shared: GhShared): Gh {
     refreshRateBudget,
     version,
     withSignal: (signal) => buildGh({ ...deps, signal: AbortSignal.any([deps.signal, signal]) }, shared),
+    detached: (signal) => buildGh({ ...deps, signal, deadline: undefined }, shared),
   };
 }

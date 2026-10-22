@@ -1,7 +1,8 @@
 // ghx ci retrigger <pr> (02 §13.2; 03 M5.2): fire fresh pull_request workflows by closing and reopening
 // the PR, replacing the agents' `close && reopen && sleep` (§5.4). Flow: preflight read (state, head and
 // base refs, author, viewer, head) → baseline check suites on H → PATCH closed (--dry-run halts here) →
-// PATCH open (retried) → poll for new suites on H within --wait-for-runs (default 60 s, not a CI wait).
+// PATCH open (retried, on a gh client that outlives an abort for the grace window) → poll for new suites
+// on H within --wait-for-runs (default 60 s, not a CI wait).
 import { z } from 'zod';
 import { parseCommandOverrides } from '../../ci/rerun/overrides.ts';
 import {
@@ -10,9 +11,11 @@ import {
   pollNewSuites,
   preflight,
   readRetriggerPr,
+  reopenClient,
   reopenPr,
 } from '../../ci/rerun/retrigger.ts';
 import { defineCommand } from '../../core/command.ts';
+import { isControlFlow } from '../../core/control-flow.ts';
 import { formatDuration, parseDuration } from '../../core/duration.ts';
 import { GhxError } from '../../core/errors.ts';
 import { formatPrRef, parseTargetRef } from '../../gh/refs.ts';
@@ -108,9 +111,28 @@ export default defineCommand({
 
     const baseline = new Set((await listCheckSuites(ctx.gh, repo, pr.headSha)).map((s) => s.id));
     ctx.preview({ ref, headSha: pr.headSha, steps: ['PATCH state:closed', 'PATCH state:open'], windowMs: window });
-    // Close and reopen back to back: nothing may run between them.
-    const { closedAt } = await closePr({ gh: ctx.gh, clock: ctx.clock, repo, number: pr.number });
-    const { reopenedAt } = await reopenPr({ gh: ctx.gh, clock: ctx.clock, repo, number: pr.number, ref, closedAt });
+    // Close and reopen back to back: nothing may run between them. Never start a close after an abort.
+    ctx.signal.throwIfAborted();
+    const close = await closePr({ gh: ctx.gh, clock: ctx.clock, repo, number: pr.number });
+    const closedAt = close.landed === true ? close.closedAt : close.attemptedAt;
+    // From here the PR may be closed: the reopen must outlive SIGINT/SIGTERM and the deadline.
+    const detached = reopenClient({ gh: ctx.gh, clock: ctx.clock, parent: ctx.signal });
+    let reopenedAt: string;
+    try {
+      ({ reopenedAt } = await reopenPr({ gh: detached.gh, clock: ctx.clock, repo, number: pr.number, ref, closedAt }));
+    } finally {
+      detached.dispose();
+    }
+    if (close.landed === 'unknown') {
+      if (isControlFlow(close.cause)) throw close.cause;
+      ctx.warn({
+        code: 'CLOSE_UNCONFIRMED',
+        message: `The close of ${ref} failed and the PR could not be re-read, so it may not have closed; it was reopened in case it had.`,
+        details: { error: close.cause instanceof Error ? close.cause.message : String(close.cause) },
+      });
+    }
+    // The PR is open again; an abort that came meanwhile still ends the command (INTERRUPTED/TIMEOUT).
+    ctx.signal.throwIfAborted();
 
     const left = ctx.deadline === undefined ? window : ctx.deadline - ctx.clock.monotonic() - OUTPUT_MARGIN_MS;
     const newRuns = await pollNewSuites({
