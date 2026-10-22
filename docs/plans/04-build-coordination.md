@@ -145,3 +145,6 @@ Filled in by the wave 1 bootstrap agent (commits `f29f2eb`..`3cd7603`).
 - **2026-10-22, wave 3 wait-pure choices accepted.**
   - A skipped sibling job doesn't count as "started" for the queued-stall rule.
   - `ci.expected` and `ci.stall` are optional, with defaults in `stallConfig()`.
+- **2026-10-22, CI_PENDING spec conflict (wave 3 review #1).** 02 §11.2/§11.3 win over §8.2 row 10a. Merge policy blocks whenever `ci.state === 'pending'`, including when only baseline checks are missing. Baseline checks stop blocking only once `expectedState(…, agedOut)` has aged them out. The engine also fails `CI_PENDING` when `ci.headSha !== snapshot.head.sha`.
+- **2026-10-22, key steps.** `src/ci/key-steps.ts` is canonical, and `src/policy/key-steps.ts` is removed. A configured `ci.keySteps` with unreadable job data fails closed.
+- **2026-10-22, shared CI-summary composition.** The pr-status agent builds it as a reusable module, `src/pr/ci-summary.ts`. `pr merge` and `ci wait --until mergeable` must call that module rather than reassembling it.
