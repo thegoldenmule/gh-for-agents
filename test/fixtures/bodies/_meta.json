@@ -1,0 +1,12 @@
+{
+  "meta": { "source": "synthetic", "note": "PR and comment bodies for the codec and fold tests (03 §6.2)." },
+  "files": {
+    "structured-v1.md": { "source": "synthetic" },
+    "structured-v2-future.md": { "source": "synthetic" },
+    "malformed-block.md": { "source": "synthetic" },
+    "no-block-human.md": { "source": "synthetic" },
+    "two-pr-blocks.md": { "source": "synthetic" },
+    "crlf.md": { "source": "synthetic" },
+    "ci-duration-watch-bot.md": { "source": "corpus-shape", "note": "the §8c4 bot marker" }
+  }
+}
