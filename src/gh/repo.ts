@@ -130,7 +130,7 @@ export async function resolveRepo(o: ResolveRepoOptions): Promise<ResolvedRepo |
  * source and the toplevel in details, and a hint to pass --repo or the PR URL.
  */
 export function enrichNotFound(e: unknown, resolved: ResolvedRepo | undefined, what: string): unknown {
-  if (!resolved || resolved.source !== 'cwd') return e;
+  if (resolved?.source !== 'cwd') return e;
   if (!(e instanceof GhxError) || !['PR_NOT_FOUND', 'RUN_NOT_FOUND', 'REF_NOT_FOUND'].includes(e.code)) return e;
   const slug = repoSlug(resolved.repo);
   const details: Record<string, unknown> = { ...(e.details ?? {}), repo: slug, repoSource: 'cwd' };
