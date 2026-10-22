@@ -9,10 +9,11 @@ import { Glob } from './_shared.ts';
  */
 export const ComponentMinRisk = z.enum(['trivial', 'low', 'medium', 'high']);
 
+/** The same token as the title scope (02 §2.1), so every component can be a `type(scope)` scope. */
 export const ComponentName = z
   .string()
-  .regex(/^[a-z0-9][a-z0-9._-]*$/)
-  .describe('Conventional-commit scope token');
+  .regex(/^[a-z0-9][a-z0-9-]*$/)
+  .describe('Conventional-commit scope token: lowercase letters, digits and hyphens');
 
 export const Component = z.strictObject({
   description: z.string().max(200).optional(),

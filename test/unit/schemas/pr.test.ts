@@ -78,6 +78,10 @@ test('componentEnum: the config record keys; an empty config rejects everything'
   bad(none, 'reactor');
   ok(ComponentName, 'vetra');
   bad(ComponentName, 'Vetra');
+  // Same token as the title scope regex, so every component can be a scope.
+  ok(ComponentName, 'api-v2');
+  ok(ComponentName, '9p');
+  for (const n of ['my.pkg', 'my_pkg', '-x', '']) bad(ComponentName, n);
 });
 
 test('TestingItem: strict structure; cwd repo-relative; steps 1..5', () => {

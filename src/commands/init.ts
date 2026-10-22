@@ -42,7 +42,7 @@ export default defineCommand({
     } catch (e) {
       if (e instanceof z.ZodError) {
         throw new GhxError('VALIDATION', 'The component names do not form a valid config.', {
-          hint: 'Component names are lowercase scope tokens: [a-z0-9][a-z0-9._-]*',
+          hint: 'Component names are lowercase scope tokens: [a-z0-9][a-z0-9-]*',
           details: { issues: e.issues.map((i) => ({ path: i.path.join('.'), message: i.message, code: i.code })) },
         });
       }

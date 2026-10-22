@@ -135,6 +135,7 @@ test('outside a git checkout: REPO_NOT_FOUND', async () => {
 
 test('helpers: pnpm yaml line parse and component tokens', () => {
   assert.deepEqual(parsePnpmWorkspace('packages:\n  - a/*\n  - "b/*" # c\nx: 1\n  - nope\n'), ['a/*', 'b/*']);
-  assert.equal(componentToken('@scope/My_Pkg'), 'my_pkg');
+  assert.equal(componentToken('@scope/My_Pkg'), 'my-pkg');
+  assert.equal(componentToken('lodash.merge'), 'lodash-merge');
   assert.equal(componentToken('--'), 'root');
 });

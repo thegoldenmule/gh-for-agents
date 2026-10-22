@@ -20,7 +20,7 @@ export function componentToken(s: string): string {
   const t = s
     .toLowerCase()
     .replace(/^@[^/]+\//, '')
-    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/[^a-z0-9-]+/g, '-')
     .replace(/^[^a-z0-9]+/, '')
     .replace(/-+$/, '');
   return t || 'root';
