@@ -1,0 +1,19 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "repos/nodejs/undici/actions/jobs/118006467479/logs"
+  ],
+  "exitCode": 0,
+  "stdout": "",
+  "stderr": "",
+  "stdoutFile": "002-logs.log",
+  "meta": {
+    "source": "live:public",
+    "recordedAt": "2026-10-22T18:39:29.302Z",
+    "ghVersion": "2.86.0",
+    "note": "nodejs/undici node:test spec reporter (windows): Should handle http2 stream timeout (read ECONNRESET)"
+  }
+}

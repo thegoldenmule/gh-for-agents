@@ -1,0 +1,334 @@
+HTTP/1.1 200 OK
+Accept-Ranges: bytes
+Access-Control-Allow-Origin: *
+Access-Control-Expose-Headers: x-ms-request-id,Server,x-ms-version,Content-Type,ETag,Last-Modified,x-ms-creation-time,Content-MD5,x-ms-lease-status,x-ms-lease-state,x-ms-blob-type,x-ms-server-encrypted,x-ms-access-tier,x-ms-access-tier-inferred,Accept-Ranges,x-ms-last-access-time,Content-Length,Date,Transfer-Encoding
+Content-Length: 25973
+Content-Md5: 8Uqua55f0sH5/tZN3mZAkQ==
+Content-Type: text/plain
+Date: Thu, 22 Oct 2026 12:00:00 GMT
+Etag: "0x8DF2FEC87DC559D"
+Last-Modified: Thu, 22 Oct 2026 03:28:24 GMT
+Server: Windows-Azure-Blob/1.0 Microsoft-HTTPAPI/2.0
+X-Ms-Access-Tier: Hot
+X-Ms-Access-Tier-Inferred: true
+X-Ms-Blob-Type: BlockBlob
+X-Ms-Creation-Time: Thu, 22 Oct 2026 03:28:24 GMT
+X-Ms-Last-Access-Time: Thu, 22 Oct 2026 03:29:15 GMT
+X-Ms-Lease-State: available
+X-Ms-Lease-Status: unlocked
+X-Ms-Request-Id: 00000000-0000-0000-0000-000000000000
+X-Ms-Server-Encrypted: true
+X-Ms-Version: 2025-11-05
+
+﻿2026-10-22T03:25:39.2320896Z Current runner version: '2.338.0'
+2026-10-22T03:25:39.2347311Z ##[group]Runner Image Provisioner
+2026-10-22T03:25:39.2348218Z Hosted Compute Agent
+2026-10-22T03:25:39.2348864Z Version: 20261012.601
+2026-10-22T03:25:39.2349516Z Commit: f3dc54e1fb89da6852db922499a0233137369e1d
+2026-10-22T03:25:39.2350230Z Build Date: 2026-10-12T17:48:21Z
+2026-10-22T03:25:39.2350965Z Worker ID: {e2b99f2a-d0a5-46a7-99c1-731dada124fe}
+2026-10-22T03:25:39.2351704Z Region: eastus
+2026-10-22T03:25:39.2352229Z Cloud: Azure
+2026-10-22T03:25:39.2352826Z ##[endgroup]
+2026-10-22T03:25:39.2354909Z ##[group]Operating System
+2026-10-22T03:25:39.2355685Z Ubuntu
+2026-10-22T03:25:39.2356211Z 24.04.5
+2026-10-22T03:25:39.2356838Z LTS
+2026-10-22T03:25:39.2357387Z ##[endgroup]
+2026-10-22T03:25:39.2357920Z ##[group]Runner Image
+2026-10-22T03:25:39.2358613Z Image: ubuntu-24.04
+2026-10-22T03:25:39.2359223Z Version: 20261012.334.1
+2026-10-22T03:25:39.2360537Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-22T03:25:39.2362068Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261012.334
+2026-10-22T03:25:39.2363094Z ##[endgroup]
+2026-10-22T03:25:39.2364536Z ##[group]GITHUB_TOKEN Permissions
+2026-10-22T03:25:39.2366887Z Metadata: read
+2026-10-22T03:25:39.2367497Z ##[endgroup]
+2026-10-22T03:25:39.2369711Z Secret source: Actions
+2026-10-22T03:25:39.2370732Z Cache mode: write
+2026-10-22T03:25:39.2371825Z Prepare workflow directory
+2026-10-22T03:25:39.2766361Z Prepare all required actions
+2026-10-22T03:25:39.2814725Z Getting action download info
+2026-10-22T03:25:39.5022520Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-10-22T03:25:39.5975300Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2026-10-22T03:25:39.6921070Z Download action repository 'actions/cache@v4' (SHA:0057852bfaa89a56745cba8c7296529d2fc39830)
+2026-10-22T03:25:39.8910641Z Complete job name: yarn test -r=www-classic --env=development --variant=false (Shard 4/5)
+2026-10-22T03:25:39.9655745Z ##[group]Run actions/checkout@v4
+2026-10-22T03:25:39.9656650Z with:
+2026-10-22T03:25:39.9657128Z   ref: a30f6ca4fd4e2b22456e19373ff0f23629cca5a0
+2026-10-22T03:25:39.9657740Z   repository: react/react
+2026-10-22T03:25:39.9661742Z   token: ***
+2026-10-22T03:25:39.9662186Z   ssh-strict: true
+2026-10-22T03:25:39.9662619Z   ssh-user: git
+2026-10-22T03:25:39.9663065Z   persist-credentials: true
+2026-10-22T03:25:39.9663545Z   clean: true
+2026-10-22T03:25:39.9664227Z   sparse-checkout-cone-mode: true
+2026-10-22T03:25:39.9664772Z   fetch-depth: 1
+2026-10-22T03:25:39.9665205Z   fetch-tags: false
+2026-10-22T03:25:39.9665651Z   show-progress: true
+2026-10-22T03:25:39.9666113Z   lfs: false
+2026-10-22T03:25:39.9666533Z   submodules: false
+2026-10-22T03:25:39.9666987Z   set-safe-directory: true
+2026-10-22T03:25:39.9667499Z   allow-unsafe-pr-checkout: false
+2026-10-22T03:25:39.9668281Z env:
+2026-10-22T03:25:39.9668770Z   TZ: /usr/share/zoneinfo/America/Los_Angeles
+2026-10-22T03:25:39.9669411Z   SEGMENT_DOWNLOAD_TIMEOUT_MINS: 1
+2026-10-22T03:25:39.9669926Z ##[endgroup]
+2026-10-22T03:25:40.0659898Z Syncing repository: react/react
+2026-10-22T03:25:40.0661825Z ##[group]Getting Git version info
+2026-10-22T03:25:40.0662544Z Working directory is '/home/runner/work/react/react'
+2026-10-22T03:25:40.0663529Z [command]/usr/bin/git version
+2026-10-22T03:25:40.0781886Z git version 2.55.0
+2026-10-22T03:25:40.0805052Z ##[endgroup]
+2026-10-22T03:25:40.0821845Z Temporarily overriding HOME='/home/runner/work/_temp/ef953818-29ae-4348-bf34-bfe44e6f1010' before making global git config changes
+2026-10-22T03:25:40.0824585Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-22T03:25:40.0828660Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/react/react
+2026-10-22T03:25:40.0884173Z Deleting the contents of '/home/runner/work/react/react'
+2026-10-22T03:25:40.0888685Z ##[group]Initializing the repository
+2026-10-22T03:25:40.0893813Z [command]/usr/bin/git init /home/runner/work/react/react
+2026-10-22T03:25:40.1030463Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-22T03:25:40.1032462Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-22T03:25:40.1034511Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-22T03:25:40.1035862Z hint: call:
+2026-10-22T03:25:40.1036408Z hint:
+2026-10-22T03:25:40.1037374Z hint: 	git config --global init.defaultBranch <name>
+2026-10-22T03:25:40.1038639Z hint:
+2026-10-22T03:25:40.1039330Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-22T03:25:40.1040425Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-22T03:25:40.1041284Z hint:
+2026-10-22T03:25:40.1041972Z hint: 	git branch -m <name>
+2026-10-22T03:25:40.1042597Z hint:
+2026-10-22T03:25:40.1043471Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-22T03:25:40.1045398Z Initialized empty Git repository in /home/runner/work/react/react/.git/
+2026-10-22T03:25:40.1047817Z [command]/usr/bin/git remote add origin https://github.com/react/react
+2026-10-22T03:25:40.1100790Z ##[endgroup]
+2026-10-22T03:25:40.1102017Z ##[group]Disabling automatic garbage collection
+2026-10-22T03:25:40.1104624Z [command]/usr/bin/git config --local gc.auto 0
+2026-10-22T03:25:40.1136724Z ##[endgroup]
+2026-10-22T03:25:40.1137875Z ##[group]Setting up auth
+2026-10-22T03:25:40.1143722Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-22T03:25:40.1176600Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-22T03:25:40.1553661Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-22T03:25:40.1588067Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-22T03:25:40.1816791Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-22T03:25:40.1850478Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-22T03:25:40.2084756Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-22T03:25:40.2124821Z ##[endgroup]
+2026-10-22T03:25:40.2125765Z ##[group]Fetching the repository
+2026-10-22T03:25:40.2133885Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin a30f6ca4fd4e2b22456e19373ff0f23629cca5a0
+2026-10-22T03:25:40.6829793Z From https://github.com/react/react
+2026-10-22T03:25:40.6832082Z  * branch            a30f6ca4fd4e2b22456e19373ff0f23629cca5a0 -> FETCH_HEAD
+2026-10-22T03:25:40.6836896Z ##[endgroup]
+2026-10-22T03:25:40.6838031Z ##[group]Determining the checkout info
+2026-10-22T03:25:40.6839052Z ##[endgroup]
+2026-10-22T03:25:40.6842014Z [command]/usr/bin/git sparse-checkout disable
+2026-10-22T03:25:40.6892558Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-10-22T03:25:40.6923399Z ##[group]Checking out the ref
+2026-10-22T03:25:40.6927485Z [command]/usr/bin/git checkout --progress --force a30f6ca4fd4e2b22456e19373ff0f23629cca5a0
+2026-10-22T03:25:41.0689390Z Note: switching to 'a30f6ca4fd4e2b22456e19373ff0f23629cca5a0'.
+2026-10-22T03:25:41.0690530Z 
+2026-10-22T03:25:41.0691222Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-10-22T03:25:41.0692728Z changes and commit them, and you can discard any commits you make in this
+2026-10-22T03:25:41.0694126Z state without impacting any branches by switching back to a branch.
+2026-10-22T03:25:41.0694808Z 
+2026-10-22T03:25:41.0695711Z If you want to create a new branch to retain commits you create, you may
+2026-10-22T03:25:41.0696861Z do so (now or later) by using -c with the switch command. Example:
+2026-10-22T03:25:41.0697483Z 
+2026-10-22T03:25:41.0697897Z   git switch -c <new-branch-name>
+2026-10-22T03:25:41.0771903Z 
+2026-10-22T03:25:41.0772626Z Or undo this operation with:
+2026-10-22T03:25:41.0773552Z 
+2026-10-22T03:25:41.0774254Z   git switch -
+2026-10-22T03:25:41.0774881Z 
+2026-10-22T03:25:41.0775663Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-10-22T03:25:41.0776597Z 
+2026-10-22T03:25:41.0777184Z HEAD is now at a30f6ca [Flight] Refer to a typed array by its row when it is held in more than one place
+2026-10-22T03:25:41.0779890Z ##[endgroup]
+2026-10-22T03:25:41.0781565Z [command]/usr/bin/git log -1 --format=%H
+2026-10-22T03:25:41.0787593Z a30f6ca4fd4e2b22456e19373ff0f23629cca5a0
+2026-10-22T03:25:41.1110102Z ##[group]Run actions/setup-node@v4
+2026-10-22T03:25:41.1111284Z with:
+2026-10-22T03:25:41.1112362Z   node-version-file: .nvmrc
+2026-10-22T03:25:41.1113336Z   always-auth: false
+2026-10-22T03:25:41.1114405Z   check-latest: false
+2026-10-22T03:25:41.1118770Z   token: ***
+2026-10-22T03:25:41.1119781Z env:
+2026-10-22T03:25:41.1120804Z   TZ: /usr/share/zoneinfo/America/Los_Angeles
+2026-10-22T03:25:41.1121927Z   SEGMENT_DOWNLOAD_TIMEOUT_MINS: 1
+2026-10-22T03:25:41.1123075Z ##[endgroup]
+2026-10-22T03:25:41.2528989Z Node version file is not JSON file
+2026-10-22T03:25:41.2530868Z Resolved .nvmrc as 20.19.0
+2026-10-22T03:25:41.2552340Z Attempting to download 20.19.0...
+2026-10-22T03:25:41.2691639Z (node:2380) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-10-22T03:25:41.2693790Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-22T03:25:41.6238781Z Acquiring 20.19.0 - x64 from https://github.com/actions/node-versions/releases/download/20.19.0-13838090974/node-20.19.0-linux-x64.tar.gz
+2026-10-22T03:25:42.0534606Z Extracting ...
+2026-10-22T03:25:42.0650815Z [command]/usr/bin/tar xz --strip 1 --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/a156abe6-f8f3-4a95-8e90-58158944ad19 -f /home/runner/work/_temp/9c79132e-a607-4160-bf44-a8c4732810bb
+2026-10-22T03:25:43.0807129Z Adding to the cache ...
+2026-10-22T03:25:44.7689007Z ##[group]Environment details
+2026-10-22T03:25:44.9949063Z node: v20.19.0
+2026-10-22T03:25:44.9949564Z npm: 10.8.2
+2026-10-22T03:25:44.9950054Z yarn: 1.22.22
+2026-10-22T03:25:44.9950770Z ##[endgroup]
+2026-10-22T03:25:45.0761614Z ##[group]Run actions/cache/restore@v4
+2026-10-22T03:25:45.0761955Z with:
+2026-10-22T03:25:45.0762201Z   path: **/node_modules
+
+2026-10-22T03:25:45.0762809Z   key: runtime-and-compiler-node_modules-v10-X64-Linux-746c356b4b51dc251a6745e23ea46e3646d6dc308fe855f69c0bc245512453d8
+2026-10-22T03:25:45.0763460Z   enableCrossOsArchive: false
+2026-10-22T03:25:45.0763733Z   fail-on-cache-miss: false
+2026-10-22T03:25:45.0764260Z   lookup-only: false
+2026-10-22T03:25:45.0764516Z env:
+2026-10-22T03:25:45.0764752Z   TZ: /usr/share/zoneinfo/America/Los_Angeles
+2026-10-22T03:25:45.0765067Z   SEGMENT_DOWNLOAD_TIMEOUT_MINS: 1
+2026-10-22T03:25:45.0765332Z ##[endgroup]
+2026-10-22T03:25:45.1839845Z (node:2427) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-10-22T03:25:45.1841163Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-22T03:25:45.2601634Z Cache hit for: runtime-and-compiler-node_modules-v10-X64-Linux-746c356b4b51dc251a6745e23ea46e3646d6dc308fe855f69c0bc245512453d8
+2026-10-22T03:25:45.2703799Z (node:2427) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-10-22T03:25:46.3035948Z Received 247463936 of 477545272 (51.8%), 233.9 MBs/sec
+2026-10-22T03:25:46.9916901Z Received 477545272 of 477545272 (100.0%), 268.1 MBs/sec
+2026-10-22T03:25:46.9919031Z Cache Size: ~455 MB (477545272 B)
+2026-10-22T03:25:47.0032936Z [command]/usr/bin/tar -xf /home/runner/work/_temp/2b04149a-b9bc-4b19-af83-3935af033104/cache.tzst -P -C /home/runner/work/react/react --use-compress-program unzstd
+2026-10-22T03:25:57.1987449Z Cache restored successfully
+2026-10-22T03:25:57.2292394Z Cache restored from key: runtime-and-compiler-node_modules-v10-X64-Linux-746c356b4b51dc251a6745e23ea46e3646d6dc308fe855f69c0bc245512453d8
+2026-10-22T03:25:57.2499437Z ##[group]Run rm -rf build
+2026-10-22T03:25:57.2499785Z [36;1mrm -rf build[0m
+2026-10-22T03:25:57.2824320Z shell: /usr/bin/bash -e {0}
+2026-10-22T03:25:57.2824661Z env:
+2026-10-22T03:25:57.2824942Z   TZ: /usr/share/zoneinfo/America/Los_Angeles
+2026-10-22T03:25:57.2825320Z   SEGMENT_DOWNLOAD_TIMEOUT_MINS: 1
+2026-10-22T03:25:57.2825635Z ##[endgroup]
+2026-10-22T03:25:57.3007389Z ##[group]Run node --version
+2026-10-22T03:25:57.3007713Z [36;1mnode --version[0m
+2026-10-22T03:25:57.3071952Z shell: /usr/bin/bash -e {0}
+2026-10-22T03:25:57.3072222Z env:
+2026-10-22T03:25:57.3072455Z   TZ: /usr/share/zoneinfo/America/Los_Angeles
+2026-10-22T03:25:57.3072777Z   SEGMENT_DOWNLOAD_TIMEOUT_MINS: 1
+2026-10-22T03:25:57.3073041Z ##[endgroup]
+2026-10-22T03:25:57.3190207Z v20.19.0
+2026-10-22T03:25:57.3251719Z ##[group]Run yarn test -r=www-classic --env=development --variant=false --ci --shard=4/5
+2026-10-22T03:25:57.3252423Z [36;1myarn test -r=www-classic --env=development --variant=false --ci --shard=4/5[0m
+2026-10-22T03:25:57.3316673Z shell: /usr/bin/bash -e {0}
+2026-10-22T03:25:57.3316939Z env:
+2026-10-22T03:25:57.3317190Z   TZ: /usr/share/zoneinfo/America/Los_Angeles
+2026-10-22T03:25:57.3317512Z   SEGMENT_DOWNLOAD_TIMEOUT_MINS: 1
+2026-10-22T03:25:57.3317772Z ##[endgroup]
+2026-10-22T03:25:57.4628409Z yarn run v1.22.22
+2026-10-22T03:25:57.4880817Z $ node ./scripts/jest/jest-cli.js -r=www-classic --env=development --variant=false --ci --shard=4/5
+2026-10-22T03:26:21.9846839Z FAIL packages/react-server-dom-webpack/src/__tests__/ReactFlightDOMEdge-test.js (21.506 s)
+2026-10-22T03:26:21.9855877Z   ● ReactFlightDOMEdge › can pass a large typed array from two places
+2026-10-22T03:26:21.9856861Z 
+2026-10-22T03:26:21.9857376Z     asserConsoleLogsCleared(expected)
+2026-10-22T03:26:21.9858018Z 
+2026-10-22T03:26:21.9858576Z     console.error was called without assertConsoleErrorDev:
+2026-10-22T03:26:21.9860948Z     + React copied a partial view into a fresh buffer as a safety precaution because the environment does not implement ArrayBuffer.prototype.detached. This negatively impacts performance. Please upgrade to a modern Edge runtime.
+2026-10-22T03:26:21.9862815Z 
+2026-10-22T03:26:21.9863491Z     You must call one of the assertConsoleDev helpers between each act call.
+2026-10-22T03:26:21.9864555Z 
+2026-10-22T03:26:21.9865392Z       at Promise.finally.completed (node_modules/jest-circus/build/jestAdapterInit.js:1561:28)
+2026-10-22T03:26:21.9866323Z 
+2026-10-22T03:26:27.6005879Z PASS packages/react-dom/src/__tests__/ReactDOMServerPartialHydration-test.internal.js (27.218 s)
+2026-10-22T03:26:29.5073238Z PASS packages/react-refresh/src/__tests__/ReactFresh-test.js (29.203 s)
+2026-10-22T03:26:32.8120752Z PASS packages/react-reconciler/src/__tests__/ReactTransitionTracing-test.js
+2026-10-22T03:26:35.4965919Z PASS packages/react-reconciler/src/__tests__/ReactSuspenseList-test.js (7.878 s)
+2026-10-22T03:26:37.0819946Z PASS packages/react-debug-tools/src/__tests__/ReactHooksInspectionIntegration-test.js
+2026-10-22T03:26:44.4187171Z PASS packages/react-dom/src/__tests__/ReactDOMServerSelectiveHydration-test.internal.js (7.246 s)
+2026-10-22T03:26:45.2705765Z PASS packages/react-dom/src/__tests__/ReactUpdates-test.js (9.711 s)
+2026-10-22T03:26:50.5054783Z PASS packages/react-reconciler/src/__tests__/ReactLazy-test.internal.js (6.062 s)
+2026-10-22T03:26:51.7145790Z PASS packages/react-dom/src/__tests__/ReactDOMTestSelectors-test.js (6.429 s)
+2026-10-22T03:26:55.4390424Z PASS packages/react-server-dom-webpack/src/__tests__/ReactFlightDOM-test.js (33.422 s)
+2026-10-22T03:26:56.0991439Z PASS packages/react-dom/src/__tests__/ReactDOMViewTransition-test.js
+2026-10-22T03:26:59.3571235Z PASS packages/react-dom/src/__tests__/ReactDOM-test.js
+2026-10-22T03:27:03.0033329Z PASS packages/react-dom/src/__tests__/ReactDOMSingletonComponents-test.js (12.464 s)
+2026-10-22T03:27:04.8265946Z PASS packages/react-dom/src/__tests__/ReactServerRenderingHydration-test.js (5.42 s)
+2026-10-22T03:27:05.9259415Z PASS packages/react-dom/src/__tests__/ReactDOMFizzForm-test.js
+2026-10-22T03:27:08.6357926Z PASS packages/react-reconciler/src/__tests__/ReactFragment-test.js
+2026-10-22T03:27:08.6501722Z PASS packages/react/src/__tests__/ReactTypeScriptClass-test.ts
+2026-10-22T03:27:10.5229341Z PASS packages/react-dom/src/__tests__/ReactDOMImageLoad-test.internal.js
+2026-10-22T03:27:11.1692865Z PASS packages/react/src/__tests__/ReactCoffeeScriptClass-test.coffee
+2026-10-22T03:27:13.4706902Z PASS packages/react-reconciler/src/__tests__/ReactSuspenseyCommitPhase-test.js
+2026-10-22T03:27:14.7379563Z PASS packages/react-dom/src/__tests__/ReactDOMConsoleErrorReportingLegacy-test.js
+2026-10-22T03:27:14.7669622Z PASS packages/react-dom/src/__tests__/ReactDOMFizzViewTransition-test.js (6.098 s)
+2026-10-22T03:27:16.1601356Z PASS packages/react-reconciler/src/__tests__/ReactSuspenseEffectsSemanticsDOM-test.js
+2026-10-22T03:27:16.2349162Z PASS packages/react-reconciler/src/__tests__/ActivitySuspense-test.js
+2026-10-22T03:27:17.5554234Z PASS packages/react-reconciler/src/__tests__/ReactPerformanceTrack-test.js
+2026-10-22T03:27:20.8195926Z PASS packages/react-dom/src/__tests__/ReactDOMRoot-test.js
+2026-10-22T03:27:21.2000127Z PASS packages/scheduler/src/__tests__/SchedulerPostTask-test.js
+2026-10-22T03:27:22.2488815Z PASS packages/react-dom/src/__tests__/ReactDOMServerLifecycles-test.js
+2026-10-22T03:27:22.3137280Z PASS packages/react-dom/src/__tests__/ReactDOMFragmentRefsDocument-test.js
+2026-10-22T03:27:23.1856414Z PASS packages/react-reconciler/src/__tests__/ReactIncrementalErrorLogging-test.js
+2026-10-22T03:27:23.9401161Z PASS packages/react-dom/src/__tests__/ReactBrowserEventEmitter-test.js
+2026-10-22T03:27:24.5911384Z PASS packages/react-server-dom-turbopack/src/__tests__/ReactFlightTurbopackDOMNode-test.js
+2026-10-22T03:27:24.6564967Z PASS packages/react-dom/src/__tests__/ReactTreeTraversal-test.js
+2026-10-22T03:27:25.0180056Z PASS packages/react-dom/src/__tests__/ReactDOMTextComponent-test.js
+2026-10-22T03:27:25.5227334Z PASS packages/react-reconciler/src/__tests__/ActivityStrictMode-test.js
+2026-10-22T03:27:26.0984950Z PASS packages/react-dom/src/__tests__/ReactLegacyContextDisabled-test.internal.js
+2026-10-22T03:27:26.6525393Z PASS packages/react-reconciler/src/__tests__/ReactCPUSuspense-test.js
+2026-10-22T03:27:27.5732633Z PASS packages/react-reconciler/src/__tests__/ReactSuspenseCallback-test.js
+2026-10-22T03:27:27.6840253Z PASS packages/react/src/__tests__/ReactJSXTransformIntegration-test.js
+2026-10-22T03:27:28.1742564Z PASS packages/react/src/__tests__/ReactProfilerDevToolsIntegration-test.internal.js
+2026-10-22T03:27:28.2004470Z PASS scripts/eslint-rules/__tests__/no-production-logging-test.internal.js
+2026-10-22T03:27:28.4931754Z PASS packages/react-reconciler/src/__tests__/ReactIncrementalReflection-test.js
+2026-10-22T03:27:29.2035443Z PASS packages/react-dom/src/__tests__/ReactDOMSelection-test.internal.js
+2026-10-22T03:27:30.4619612Z PASS packages/react-test-renderer/src/__tests__/ReactTestRenderer-test.js
+2026-10-22T03:27:31.1201913Z PASS packages/react-reconciler/src/__tests__/ReactBatching-test.internal.js
+2026-10-22T03:27:32.3599044Z PASS packages/react-dom/src/__tests__/ReactDOMHostComponentTransitions-test.js
+2026-10-22T03:27:33.2215746Z PASS packages/react-dom/src/__tests__/ReactTestUtilsActUnmockedScheduler-test.js
+2026-10-22T03:27:33.8850926Z PASS packages/react-reconciler/src/__tests__/ReactIncrementalUpdatesMinimalism-test.js
+2026-10-22T03:27:35.1800716Z PASS packages/react-dom/src/__tests__/ReactDOMInvalidARIAHook-test.js
+2026-10-22T03:27:35.7611042Z PASS packages/react-server-dom-turbopack/src/__tests__/ReactFlightTurbopackDOMReply-test.js
+2026-10-22T03:27:39.9856175Z PASS packages/react-dom/src/__tests__/ReactDOMServerIntegrationBasic-test.js (11.463 s)
+2026-10-22T03:27:42.1915985Z PASS packages/react-dom/src/__tests__/ReactDOMServerIntegrationInput-test.js (6.413 s)
+2026-10-22T03:27:42.5318347Z PASS packages/react-dom/src/__tests__/InvalidEventListeners-test.js
+2026-10-22T03:27:42.7655516Z PASS packages/react-reconciler/src/__tests__/ActivityErrorHandling-test.js
+2026-10-22T03:27:42.9924896Z PASS packages/react-dom/src/__tests__/ReactDOMNestedEvents-test.js
+2026-10-22T03:27:43.1727354Z PASS packages/react-dom/src/__tests__/ReactDOMLegacyComponentTree-test.internal.js
+2026-10-22T03:27:43.4499769Z PASS packages/react-server-dom-webpack/src/__tests__/ReactFlightNonWritablePromiseThen-test.js
+2026-10-22T03:27:43.6649781Z PASS packages/react/src/__tests__/ReactCreateRef-test.js
+2026-10-22T03:27:43.7864758Z PASS packages/shared/__tests__/normalizeConsoleFormat-test.internal.js
+2026-10-22T03:27:43.8881565Z PASS scripts/babel/__tests__/transform-prevent-infinite-loops-test.js
+2026-10-22T03:27:43.9786970Z PASS packages/react-server/src/__tests__/ReactFlightStackConfigV8-test.js
+2026-10-22T03:27:44.0667325Z PASS packages/react/src/__tests__/ReactVersion-test.js
+2026-10-22T03:27:44.1594706Z PASS scripts/babel/__tests__/transform-lazy-jsx-import-test.js
+2026-10-22T03:27:44.3107686Z PASS packages/react-dom/src/__tests__/ReactDOMServerIntegrationFragment-test.js
+2026-10-22T03:28:23.4520147Z PASS packages/react-dom/src/__tests__/ReactDOMServerIntegrationAttributes-test.js (87.324 s)
+2026-10-22T03:28:23.6003709Z 
+2026-10-22T03:28:23.6006896Z Summary of all failing tests
+2026-10-22T03:28:23.6016396Z FAIL packages/react-server-dom-webpack/src/__tests__/ReactFlightDOMEdge-test.js (21.506 s)
+2026-10-22T03:28:23.6026133Z   ● ReactFlightDOMEdge › can pass a large typed array from two places
+2026-10-22T03:28:23.6026849Z 
+2026-10-22T03:28:23.6027256Z     asserConsoleLogsCleared(expected)
+2026-10-22T03:28:23.6027671Z 
+2026-10-22T03:28:23.6028165Z     console.error was called without assertConsoleErrorDev:
+2026-10-22T03:28:23.6041435Z     + React copied a partial view into a fresh buffer as a safety precaution because the environment does not implement ArrayBuffer.prototype.detached. This negatively impacts performance. Please upgrade to a modern Edge runtime.
+2026-10-22T03:28:23.6042860Z 
+2026-10-22T03:28:23.6043321Z     You must call one of the assertConsoleDev helpers between each act call.
+2026-10-22T03:28:23.6043842Z 
+2026-10-22T03:28:23.6050089Z       at Promise.finally.completed (node_modules/jest-circus/build/jestAdapterInit.js:1561:28)
+2026-10-22T03:28:23.6050809Z 
+2026-10-22T03:28:23.6050819Z 
+2026-10-22T03:28:23.6053355Z Test Suites: 1 failed, 65 passed, 66 total
+2026-10-22T03:28:23.6053805Z Tests:       1 failed, 2 skipped, 1622 passed, 1625 total
+2026-10-22T03:28:23.6054680Z Snapshots:   38 passed, 38 total
+2026-10-22T03:28:23.6055152Z Time:        144.812 s
+2026-10-22T03:28:23.6055574Z Ran all test suites.
+2026-10-22T03:28:23.6301666Z error Command failed with exit code 1.
+2026-10-22T03:28:23.6305741Z info Visit https://yarnpkg.com/en/docs/cli/run for documentation about this command.
+2026-10-22T03:28:23.6399289Z ##[error]Process completed with exit code 1.
+2026-10-22T03:28:23.6525822Z Post job cleanup.
+2026-10-22T03:28:23.7384354Z [command]/usr/bin/git version
+2026-10-22T03:28:23.7423146Z git version 2.55.0
+2026-10-22T03:28:23.7461570Z Temporarily overriding HOME='/home/runner/work/_temp/7b41f97f-d585-4bf5-852a-746d63654a16' before making global git config changes
+2026-10-22T03:28:23.7463105Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-22T03:28:23.7467644Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/react/react
+2026-10-22T03:28:23.7506287Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-22T03:28:23.7541168Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-22T03:28:23.7783129Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-22T03:28:23.7816723Z http.https://github.com/.extraheader
+2026-10-22T03:28:23.7828139Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-10-22T03:28:23.7865237Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-22T03:28:23.8105378Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-22T03:28:23.8140418Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-22T03:28:23.8539027Z Cleaning up orphan processes
+2026-10-22T03:28:23.8845997Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/cache/restore@v4, actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

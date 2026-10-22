@@ -1,0 +1,19 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "repos/pytest-dev/pytest/actions/jobs/118816259139/logs"
+  ],
+  "exitCode": 0,
+  "stdout": "",
+  "stderr": "",
+  "stdoutFile": "002-logs.log",
+  "meta": {
+    "source": "live:public",
+    "recordedAt": "2026-10-22T18:39:29.302Z",
+    "ghVersion": "2.86.0",
+    "note": "pytest-dev/pytest pytest: TestOverlappingCollectionArguments::test_multiple_file_args_do_not_rescan_parent_directory"
+  }
+}
