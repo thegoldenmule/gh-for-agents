@@ -16,8 +16,13 @@ const CSI = new RegExp(`${ESC}\\[[0-?]*[ -/]*[@-~]`, 'g');
 const ESC2 = new RegExp(`${ESC}[@-Z\\\\-_]?`, 'g');
 
 const TS = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)(?:[ \t]|$)/;
-/** gh run view --log / --log-failed: `<job>\t<step>\t<ts> ` (the step is often "UNKNOWN STEP"). */
-const GH_PREFIX = /^[^\t\n]*\t[^\t\n]*\t(?=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/;
+/**
+ * gh run view --log / --log-failed: `<job>\t<step>\t<ts> ` (the step is often "UNKNOWN STEP"). Anchored to that
+ * shape: the line does not itself start with a runner timestamp, and the third field is a full UTC runner
+ * timestamp followed by a space, a tab or the line end, so tabbed output that contains a date is kept.
+ */
+const GH_PREFIX =
+  /^(?!\d{4}-\d{2}-\d{2}T)[^\t\n]*\t[^\t\n]*\t(?=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z(?:[ \t]|$))/;
 
 export function stripAnsi(s: string): string {
   return s.replace(OSC, '').replace(CSI, '').replace(ESC2, '');

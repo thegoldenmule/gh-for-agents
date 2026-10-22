@@ -21,7 +21,8 @@ export const nodeTest: Extractor = {
       if (!tap && !spec) return;
       const raw = (tap ? (tap[1] ?? '') : (spec?.[1] ?? '')).trim();
       if (tap && /#\s*(?:SKIP|TODO)\b/i.test(raw)) return;
-      const name = stripDuration(raw.replace(/\s+#.*$/, ''));
+      // Only a TAP directive (` # SKIP`, ` # TODO`) follows ` #`; any other `#` belongs to the name.
+      const name = stripDuration(tap ? raw.replace(/\s+#\s*(?:SKIP|TODO)\b.*$/i, '') : raw);
       if (name === '') return;
       tests.push(name);
       firstLine ??= i;

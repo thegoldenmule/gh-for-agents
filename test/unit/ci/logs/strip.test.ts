@@ -45,6 +45,12 @@ test("gh's --log-failed prefix (job, UNKNOWN STEP, timestamp) is removed (§6)",
   assert.equal(stripLine('build\tUNKNOWN STEP\t2026-10-21T16:55:29.0214049Z\t##[error]boom'), '##[error]boom');
   // A tab inside ordinary output is untouched.
   assert.equal(stripLine('FAIL\tgithub.com/x/y\t0.12s'), 'FAIL\tgithub.com/x/y\t0.12s');
+  // A runner line whose output has tabs and a timestamp keeps its output.
+  assert.equal(
+    stripLine('2026-10-21T16:55:29.0214049Z name\tstarted\t2026-01-01T00:00:00Z done'),
+    'name\tstarted\t2026-01-01T00:00:00Z done',
+  );
+  assert.equal(stripLine('id\twhen\t2026-01-01T00:00:00+02:00 x'), 'id\twhen\t2026-01-01T00:00:00+02:00 x');
 });
 
 test('stripText cleans a whole log', () => {

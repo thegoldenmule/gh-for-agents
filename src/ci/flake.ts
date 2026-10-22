@@ -129,8 +129,10 @@ export async function sameShaPassed(o: { gh: Gh; repo: RepoRef; job: FlakeJob })
       return { kind: 'same-sha-passed', detail: `${job.name} passed on attempt ${n} of run ${job.runId}` };
     }
   }
+  // Other runs only count for the same workflow: with it unknown, a same-named job elsewhere proves nothing.
+  if (job.workflowId === null) return null;
   const siblings = (await listRunsForSha({ gh: o.gh, repo: o.repo, headSha: job.headSha }))
-    .filter((r) => r.id !== job.runId && (job.workflowId === null || r.workflow_id === job.workflowId))
+    .filter((r) => r.id !== job.runId && r.workflow_id === job.workflowId)
     .filter((r) => r.status === 'completed')
     .slice(0, MAX_SAME_SHA_LOOKUPS);
   for (const r of siblings) {

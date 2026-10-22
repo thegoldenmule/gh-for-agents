@@ -49,3 +49,15 @@ test('synthetic spec reporter: ✖ name (duration), repeated under failing tests
   assert.deepEqual(f.tests, ['adds', 'math']);
   assert.deepEqual(f.errors, ['AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:']);
 });
+
+test('node:test names keep a # that is not a TAP directive', () => {
+  const lines = [
+    'TAP version 13',
+    'not ok 1 - handles issue #42',
+    'not ok 2 - flaky # SKIP',
+    '✖ parses # comments (1.1ms)',
+    '# tests 3',
+    '# fail 2',
+  ];
+  assert.deepEqual(extractFailures(lines).tests, ['handles issue #42', 'parses # comments']);
+});

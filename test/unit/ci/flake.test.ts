@@ -128,6 +128,21 @@ test('same-sha-passed: the job passed in another run of the workflow on the same
   env.fake.expectNoCall((a) => a.some((x) => x.includes('/runs/702/')));
 });
 
+test('same-sha-passed: with an unknown workflow, other runs on the commit are not checked', async () => {
+  const env = ciEnv();
+  env.fake.on(
+    (a) => a.some((x) => x.startsWith(`repos/o/r/actions/runs?head_sha=${SHA}`)),
+    ok({ total_count: 2, workflow_runs: [run(700, 'failure'), run(702, 'success', { workflow_id: 9 })] }),
+  );
+  env.fake.on(
+    (a) => a.some((x) => x.startsWith('repos/o/r/actions/runs/702/jobs')),
+    ok({ total_count: 1, jobs: [rjob(72, 'test', 'success')] }),
+  );
+  const f = await assessFlake({ gh: env.gh, repo, job: { ...job, workflowId: null }, tests: ['T'], lines: [] });
+  assert.equal(f.score, 'none');
+  env.fake.expectNoCall((a) => a.some((x) => x.includes('/runs/702/')));
+});
+
 test('main-intermittent end to end: parsed main failures interleave with passing runs (≤5 parsed)', async () => {
   const env = ciEnv();
   env.fake.on(
