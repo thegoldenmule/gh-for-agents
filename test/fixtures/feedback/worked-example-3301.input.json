@@ -1,0 +1,159 @@
+{
+  "viewerLogin": "thegoldenmule",
+  "headSha": "9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d",
+  "reviews": [
+    {
+      "databaseId": 2398765432,
+      "author": {
+        "__typename": "User",
+        "login": "thegoldenmule"
+      },
+      "authorAssociation": "MEMBER",
+      "body": "**ghx review** · request-changes · 2 findings (1 high, 0 medium, 1 low)\n\nThe signing fix covers createDocument and addActions, but deleteDocument still signs without a documentId.\n\nScope: 8 files on fix/reactor-bind-document-id plus the sign/verify call graph\n\n1. **[high]** `packages/reactor/src/client/reactor-client.ts:1071` deleteDocument still signs without documentId\n2. **[low]** `packages/shared/document-model/crypto.ts:179` Rejection error does not name the documentId\n\n<!-- ghx:v1 {\"commit\":\"4b1e7d20c9a35f8e61d24b07c3a9e5f1d8b62c47\",\"findings\":[\"f_h4x8pz\",\"f_n2c6rv\"],\"gen\":\"ghx/0.1.0\",\"id\":\"r_7tq2wd\",\"scope\":\"8 files on fix/reactor-bind-document-id plus the sign/verify call graph\",\"summary\":\"The signing fix covers createDocument and addActions, but deleteDocument still signs without a documentId.\",\"t\":\"review\",\"verdict\":\"request-changes\"} -->",
+      "state": "COMMENTED",
+      "submittedAt": "2026-10-21T15:40:03Z",
+      "createdAt": "2026-10-21T15:40:03Z",
+      "lastEditedAt": null,
+      "commit": {
+        "oid": "4b1e7d20c9a35f8e61d24b07c3a9e5f1d8b62c47"
+      },
+      "url": "https://github.com/powerhouse-inc/powerhouse/pull/3301#pullrequestreview-2398765432"
+    },
+    {
+      "databaseId": 2398799120,
+      "author": {
+        "__typename": "User",
+        "login": "thegoldenmule"
+      },
+      "authorAssociation": "MEMBER",
+      "body": "",
+      "state": "COMMENTED",
+      "submittedAt": "2026-10-21T16:22:45Z",
+      "createdAt": "2026-10-21T16:22:45Z",
+      "lastEditedAt": null,
+      "commit": {
+        "oid": "9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d"
+      },
+      "url": "https://github.com/powerhouse-inc/powerhouse/pull/3301#pullrequestreview-2398799120"
+    }
+  ],
+  "reviewThreads": [
+    {
+      "isResolved": true,
+      "isOutdated": true,
+      "path": "packages/reactor/src/client/reactor-client.ts",
+      "line": null,
+      "comments": {
+        "nodes": [
+          {
+            "databaseId": 1834567890,
+            "author": {
+              "__typename": "User",
+              "login": "thegoldenmule"
+            },
+            "authorAssociation": "MEMBER",
+            "body": "**[high] deleteDocument still signs without documentId**\n\ndeleteDocument builds its action through the legacy helper, which never passes documentId to signAction, so a delete signature still verifies on any document.\n\nAlso at: `packages/reactor/src/client/reactor-client.ts:1111`\n\n<!-- ghx:v1 {\"alsoAt\":[{\"line\":1111,\"path\":\"packages/reactor/src/client/reactor-client.ts\"}],\"body\":\"deleteDocument builds its action through the legacy helper, which never passes documentId to signAction, so a delete signature still verifies on any document.\",\"commit\":\"4b1e7d20c9a35f8e61d24b07c3a9e5f1d8b62c47\",\"gen\":\"ghx/0.1.0\",\"id\":\"f_h4x8pz\",\"line\":1071,\"path\":\"packages/reactor/src/client/reactor-client.ts\",\"review\":\"r_7tq2wd\",\"severity\":\"high\",\"side\":\"RIGHT\",\"t\":\"finding\",\"title\":\"deleteDocument still signs without documentId\"} -->",
+            "createdAt": "2026-10-21T15:40:03Z",
+            "lastEditedAt": null,
+            "url": "https://github.com/powerhouse-inc/powerhouse/pull/3301#discussion_r1834567890",
+            "path": "packages/reactor/src/client/reactor-client.ts",
+            "line": null,
+            "originalLine": 1071,
+            "outdated": true,
+            "commit": {
+              "oid": "4b1e7d20c9a35f8e61d24b07c3a9e5f1d8b62c47"
+            },
+            "replyTo": null,
+            "pullRequestReview": {
+              "databaseId": 2398765432
+            }
+          },
+          {
+            "databaseId": 1834570012,
+            "author": {
+              "__typename": "User",
+              "login": "thegoldenmule"
+            },
+            "authorAssociation": "MEMBER",
+            "body": "Addressed in 9f2c4e1.\n\n<!-- ghx:v1 {\"gen\":\"ghx/0.1.0\",\"id\":\"c_w5j1ve\",\"kind\":\"resolve\",\"t\":\"comment\",\"targets\":[{\"commit\":\"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d\",\"id\":\"f_h4x8pz\",\"status\":\"addressed\"}]} -->",
+            "createdAt": "2026-10-21T16:22:45Z",
+            "lastEditedAt": null,
+            "url": "https://github.com/powerhouse-inc/powerhouse/pull/3301#discussion_r1834570012",
+            "path": "packages/reactor/src/client/reactor-client.ts",
+            "line": null,
+            "originalLine": 1071,
+            "outdated": true,
+            "commit": {
+              "oid": "4b1e7d20c9a35f8e61d24b07c3a9e5f1d8b62c47"
+            },
+            "replyTo": {
+              "databaseId": 1834567890
+            },
+            "pullRequestReview": {
+              "databaseId": 2398799120
+            }
+          }
+        ]
+      }
+    },
+    {
+      "isResolved": false,
+      "isOutdated": false,
+      "path": "packages/shared/document-model/crypto.ts",
+      "line": 179,
+      "comments": {
+        "nodes": [
+          {
+            "databaseId": 1834567955,
+            "author": {
+              "__typename": "User",
+              "login": "thegoldenmule"
+            },
+            "authorAssociation": "MEMBER",
+            "body": "**[low] Rejection error does not name the documentId**\n\nThe thrown error says \"signature not bound\" without the expected and actual documentId, which makes client logs hard to trace.\n\n<!-- ghx:v1 {\"alsoAt\":[],\"body\":\"The thrown error says \\\"signature not bound\\\" without the expected and actual documentId, which makes client logs hard to trace.\",\"commit\":\"4b1e7d20c9a35f8e61d24b07c3a9e5f1d8b62c47\",\"gen\":\"ghx/0.1.0\",\"id\":\"f_n2c6rv\",\"line\":179,\"path\":\"packages/shared/document-model/crypto.ts\",\"review\":\"r_7tq2wd\",\"severity\":\"low\",\"side\":\"RIGHT\",\"t\":\"finding\",\"title\":\"Rejection error does not name the documentId\"} -->",
+            "createdAt": "2026-10-21T15:40:03Z",
+            "lastEditedAt": null,
+            "url": "https://github.com/powerhouse-inc/powerhouse/pull/3301#discussion_r1834567955",
+            "path": "packages/shared/document-model/crypto.ts",
+            "line": 179,
+            "originalLine": 179,
+            "outdated": false,
+            "commit": {
+              "oid": "4b1e7d20c9a35f8e61d24b07c3a9e5f1d8b62c47"
+            },
+            "replyTo": null,
+            "pullRequestReview": {
+              "databaseId": 2398765432
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "issueComments": [
+    {
+      "databaseId": 2412345678,
+      "author": {
+        "__typename": "User",
+        "login": "maria-dev"
+      },
+      "authorAssociation": "MEMBER",
+      "body": "Does connect need a Switchboard release before this lands, or is the verify change backward compatible?",
+      "createdAt": "2026-10-21T16:05:12Z",
+      "lastEditedAt": null,
+      "url": "https://github.com/powerhouse-inc/powerhouse/pull/3301#issuecomment-2412345678"
+    },
+    {
+      "databaseId": 2412399001,
+      "author": {
+        "__typename": "Bot",
+        "login": "github-actions"
+      },
+      "authorAssociation": "NONE",
+      "body": "<!-- ci-duration-watch -->\n⚠️ CI duration regression: Test Reactor (shard 2/3) 14m02s vs baseline median 9m40s\n\n| job | now | median |\n|---|---|---|\n| Test Reactor (shard 2/3) | 14m02s | 9m40s |",
+      "createdAt": "2026-10-21T16:30:40Z",
+      "lastEditedAt": null,
+      "url": "https://github.com/powerhouse-inc/powerhouse/pull/3301#issuecomment-2412399001"
+    }
+  ]
+}

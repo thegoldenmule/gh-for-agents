@@ -1,0 +1,152 @@
+{
+  "feedback": {
+    "reviews": [
+      {
+        "id": "r_7tq2wd",
+        "structured": true,
+        "author": {
+          "login": "thegoldenmule",
+          "isViewer": true,
+          "isBot": false,
+          "association": "MEMBER"
+        },
+        "verdict": "request-changes",
+        "githubState": "COMMENTED",
+        "verdictDowngraded": true,
+        "submittedAt": "2026-10-21T15:40:03Z",
+        "commit": "4b1e7d20c9a35f8e61d24b07c3a9e5f1d8b62c47",
+        "outdated": true,
+        "summary": "The signing fix covers createDocument and addActions, but deleteDocument still signs without a documentId.",
+        "truncated": false,
+        "findingIds": [
+          "f_h4x8pz",
+          "f_n2c6rv"
+        ],
+        "url": "https://github.com/powerhouse-inc/powerhouse/pull/3301#pullrequestreview-2398765432"
+      }
+    ],
+    "findings": [
+      {
+        "id": "f_h4x8pz",
+        "reviewId": "r_7tq2wd",
+        "severity": "high",
+        "path": "packages/reactor/src/client/reactor-client.ts",
+        "line": 1071,
+        "endLine": null,
+        "alsoAt": [
+          {
+            "path": "packages/reactor/src/client/reactor-client.ts",
+            "line": 1111
+          }
+        ],
+        "title": "deleteDocument still signs without documentId",
+        "body": "deleteDocument builds its action through the legacy helper, which never passes documentId to signAction, so a delete signature still verifies on any document.",
+        "truncated": false,
+        "inline": true,
+        "commit": "4b1e7d20c9a35f8e61d24b07c3a9e5f1d8b62c47",
+        "outdated": true,
+        "status": "addressed",
+        "statusEvent": {
+          "id": "c_w5j1ve",
+          "by": "thegoldenmule",
+          "at": "2026-10-21T16:22:45Z",
+          "commit": "9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d",
+          "note": null,
+          "verified": true,
+          "url": "https://github.com/powerhouse-inc/powerhouse/pull/3301#discussion_r1834570012"
+        },
+        "url": "https://github.com/powerhouse-inc/powerhouse/pull/3301#discussion_r1834567890"
+      },
+      {
+        "id": "f_n2c6rv",
+        "reviewId": "r_7tq2wd",
+        "severity": "low",
+        "path": "packages/shared/document-model/crypto.ts",
+        "line": 179,
+        "endLine": null,
+        "alsoAt": [],
+        "title": "Rejection error does not name the documentId",
+        "body": "The thrown error says \"signature not bound\" without the expected and actual documentId, which makes client logs hard to trace.",
+        "truncated": false,
+        "inline": true,
+        "commit": "4b1e7d20c9a35f8e61d24b07c3a9e5f1d8b62c47",
+        "outdated": false,
+        "status": "open",
+        "statusEvent": null,
+        "url": "https://github.com/powerhouse-inc/powerhouse/pull/3301#discussion_r1834567955"
+      }
+    ],
+    "comments": [
+      {
+        "id": "c_w5j1ve",
+        "source": "inline",
+        "author": {
+          "login": "thegoldenmule",
+          "isViewer": true,
+          "isBot": false,
+          "association": "MEMBER"
+        },
+        "at": "2026-10-21T16:22:45Z",
+        "body": "Addressed in 9f2c4e1.",
+        "truncated": false,
+        "structured": true,
+        "kind": "resolve",
+        "path": "packages/reactor/src/client/reactor-client.ts",
+        "line": 1071,
+        "threadResolved": true,
+        "inReplyTo": "f_h4x8pz",
+        "edited": false,
+        "blockError": null,
+        "url": "https://github.com/powerhouse-inc/powerhouse/pull/3301#discussion_r1834570012"
+      },
+      {
+        "id": "ic:2412345678",
+        "source": "issue",
+        "author": {
+          "login": "maria-dev",
+          "isViewer": false,
+          "isBot": false,
+          "association": "MEMBER"
+        },
+        "at": "2026-10-21T16:05:12Z",
+        "body": "Does connect need a Switchboard release before this lands, or is the verify change backward compatible?",
+        "truncated": false,
+        "structured": false,
+        "kind": null,
+        "path": null,
+        "line": null,
+        "threadResolved": null,
+        "inReplyTo": null,
+        "edited": false,
+        "blockError": null,
+        "url": "https://github.com/powerhouse-inc/powerhouse/pull/3301#issuecomment-2412345678"
+      }
+    ],
+    "bots": [
+      {
+        "id": "ic:2412399001",
+        "source": "issue",
+        "author": "github-actions[bot]",
+        "at": "2026-10-21T16:30:40Z",
+        "marker": "ci-duration-watch",
+        "summary": "⚠️ CI duration regression: Test Reactor (shard 2/3) 14m02s vs baseline median 9m40s",
+        "path": null,
+        "line": null,
+        "url": "https://github.com/powerhouse-inc/powerhouse/pull/3301#issuecomment-2412399001"
+      }
+    ],
+    "counts": {
+      "reviews": 1,
+      "findingsTotal": 2,
+      "findingsOpen": 1,
+      "comments": 2,
+      "bots": 1,
+      "unresolvedHumanThreads": 0,
+      "omitted": 0
+    }
+  },
+  "openFindings": [
+    "f_n2c6rv"
+  ],
+  "preconditions": []
+}

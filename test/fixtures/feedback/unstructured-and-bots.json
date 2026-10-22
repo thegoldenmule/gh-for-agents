@@ -1,0 +1,167 @@
+{
+  "viewerLogin": "viewer-user",
+  "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "reviews": [
+    {
+      "databaseId": 501,
+      "author": {
+        "__typename": "User",
+        "login": "viewer-user"
+      },
+      "authorAssociation": "OWNER",
+      "body": "**ghx review** · comment · 1 finding\n\nOne nit.\n\n<!-- ghx:v1 {\"commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"findings\":[\"f_d4e5f6\"],\"gen\":\"ghx/0.1.0\",\"id\":\"r_a1b2c3\",\"summary\":\"One nit.\",\"t\":\"review\",\"verdict\":\"comment\"} -->",
+      "state": "COMMENTED",
+      "submittedAt": "2026-10-20T10:00:00Z",
+      "createdAt": "2026-10-20T10:00:00Z",
+      "commit": {
+        "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "url": "https://github.com/viewer-user/ghx-sandbox/pull/12#pullrequestreview-501"
+    },
+    {
+      "databaseId": 502,
+      "author": {
+        "__typename": "Bot",
+        "login": "copilot-pull-request-reviewer"
+      },
+      "authorAssociation": "NONE",
+      "body": "",
+      "state": "COMMENTED",
+      "submittedAt": "2026-10-20T10:05:00Z",
+      "createdAt": "2026-10-20T10:05:00Z",
+      "commit": {
+        "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "url": "https://github.com/viewer-user/ghx-sandbox/pull/12#pullrequestreview-502"
+    },
+    {
+      "databaseId": 503,
+      "author": {
+        "__typename": "User",
+        "login": "maria-dev"
+      },
+      "authorAssociation": "MEMBER",
+      "body": "",
+      "state": "COMMENTED",
+      "submittedAt": "2026-10-20T11:00:00Z",
+      "createdAt": "2026-10-20T11:00:00Z",
+      "commit": {
+        "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "url": "https://github.com/viewer-user/ghx-sandbox/pull/12#pullrequestreview-503"
+    }
+  ],
+  "reviewThreads": [
+    {
+      "isResolved": false,
+      "isOutdated": false,
+      "path": "src/a.ts",
+      "line": 3,
+      "comments": {
+        "nodes": [
+          {
+            "databaseId": 601,
+            "author": {
+              "__typename": "User",
+              "login": "viewer-user"
+            },
+            "authorAssociation": "OWNER",
+            "body": "**[low] Nit**\n\nRename x.\n\n<!-- ghx:v1 {\"alsoAt\":[],\"body\":\"Rename x.\",\"commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"gen\":\"ghx/0.1.0\",\"id\":\"f_d4e5f6\",\"line\":3,\"path\":\"src/a.ts\",\"review\":\"r_a1b2c3\",\"severity\":\"low\",\"side\":\"RIGHT\",\"t\":\"finding\",\"title\":\"Nit\"} -->",
+            "createdAt": "2026-10-20T10:00:00Z",
+            "url": "https://github.com/viewer-user/ghx-sandbox/pull/12#discussion_r601",
+            "path": "src/a.ts",
+            "line": 3,
+            "originalLine": 3,
+            "outdated": false,
+            "replyTo": null,
+            "pullRequestReview": {
+              "databaseId": 501
+            }
+          }
+        ]
+      }
+    },
+    {
+      "isResolved": false,
+      "isOutdated": false,
+      "path": "src/b.ts",
+      "line": 41,
+      "comments": {
+        "nodes": [
+          {
+            "databaseId": 602,
+            "author": {
+              "__typename": "Bot",
+              "login": "copilot-pull-request-reviewer"
+            },
+            "authorAssociation": "NONE",
+            "body": "This loop never terminates when `n` is negative.\n\n```suggestion\nwhile (n > 0) {\n```",
+            "createdAt": "2026-10-20T10:05:00Z",
+            "url": "https://github.com/viewer-user/ghx-sandbox/pull/12#discussion_r602",
+            "path": "src/b.ts",
+            "line": 41,
+            "originalLine": 41,
+            "outdated": false,
+            "replyTo": null,
+            "pullRequestReview": {
+              "databaseId": 502
+            }
+          }
+        ]
+      }
+    },
+    {
+      "isResolved": false,
+      "isOutdated": false,
+      "path": "src/c.ts",
+      "line": 7,
+      "comments": {
+        "nodes": [
+          {
+            "databaseId": 603,
+            "author": {
+              "__typename": "User",
+              "login": "maria-dev"
+            },
+            "authorAssociation": "MEMBER",
+            "body": "Why not reuse the helper here?",
+            "createdAt": "2026-10-20T11:00:00Z",
+            "url": "https://github.com/viewer-user/ghx-sandbox/pull/12#discussion_r603",
+            "path": "src/c.ts",
+            "line": 7,
+            "originalLine": 7,
+            "outdated": false,
+            "replyTo": null,
+            "pullRequestReview": {
+              "databaseId": 503
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "issueComments": [
+    {
+      "databaseId": 701,
+      "author": {
+        "__typename": "User",
+        "login": "maria-dev"
+      },
+      "authorAssociation": "MEMBER",
+      "body": "Looks good once CI is green.",
+      "createdAt": "2026-10-20T12:00:00Z",
+      "url": "https://github.com/viewer-user/ghx-sandbox/pull/12#issuecomment-701"
+    },
+    {
+      "databaseId": 702,
+      "author": {
+        "__typename": "Bot",
+        "login": "github-actions"
+      },
+      "authorAssociation": "NONE",
+      "body": "<!-- ci-duration-watch -->\nCI took 14m 2s (p90 11m). Slowest job: Test Reactor (shard 1/3).",
+      "createdAt": "2026-10-20T12:30:00Z",
+      "url": "https://github.com/viewer-user/ghx-sandbox/pull/12#issuecomment-702"
+    }
+  ]
+}

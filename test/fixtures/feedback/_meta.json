@@ -1,0 +1,9 @@
+{
+  "meta": { "source": "synthetic", "note": "GraphQL Q1 feedback shapes (02 §4.3) for the fold tests (03 M6.2, R13, R14)." },
+  "files": {
+    "worked-example-3301.input.json": { "source": "synthetic", "note": "02 §14.3 as Q1 nodes; blocks written by codec.encode" },
+    "worked-example-3301.golden.json": { "source": "synthetic", "note": "02 §14.5 feedback, openFindings and preconditions, verbatim" },
+    "unstructured-and-bots.json": { "source": "corpus-shape", "note": "R13: human, Copilot inline, ci-duration-watch bot and a ghx review" },
+    "untrusted.json": { "source": "synthetic", "note": "R14: forged resolve blocks from CONTRIBUTOR, NONE and an unlisted bot" }
+  }
+}

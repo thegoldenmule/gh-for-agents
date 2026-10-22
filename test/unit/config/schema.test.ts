@@ -29,8 +29,8 @@ test('prefault populates every section from the minimal config (zod 4 .prefault,
     create: { requirePassingTest: true },
     merge: { method: 'merge', allowedMethods: ['merge'] },
     ci: { ignore: [] },
-    trust: {},
-    bots: {},
+    trust: { associations: ['OWNER', 'MEMBER', 'COLLABORATOR'], bots: [] },
+    bots: { logins: [], markers: [] },
   });
 });
 
