@@ -219,6 +219,18 @@ export function machinePaths(command: string): string[] {
  * substitute. A backslash escapes the next character.
  */
 export function compoundOperators(command: string): string[] {
+  return scanShell(command).operators;
+}
+
+/**
+ * The quote still open at the end of the command, or null. An unbalanced quote hides every operator after
+ * it from compoundOperators (`--grep don't | tail`), so createRules flags it as testing.compound_command.
+ */
+export function unclosedQuote(command: string): "'" | '"' | null {
+  return scanShell(command).openQuote;
+}
+
+function scanShell(command: string): { operators: string[]; openQuote: "'" | '"' | null } {
   const found = new Set<string>();
   let quote: "'" | '"' | null = null;
   for (let i = 0; i < command.length; i++) {
@@ -242,7 +254,7 @@ export function compoundOperators(command: string): string[] {
       if (next === c) i++;
     } else if (c === ';' || c === '>' || c === '<') found.add(c);
   }
-  return [...found];
+  return { operators: [...found], openQuote: quote };
 }
 
 function testingRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDetail[] {
@@ -278,8 +290,18 @@ function testingRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDet
           ),
         );
       }
+      const open = unclosedQuote(t.command);
+      if (open !== null) {
+        out.push(
+          issue(
+            `${at}.command`,
+            'testing.compound_command',
+            `unbalanced quote (${open}): everything after it is hidden from the operator check; quote or escape it (\\${open})`,
+          ),
+        );
+      }
       const ops = compoundOperators(t.command);
-      if (ops.length > 0) {
+      if (open === null && ops.length > 0) {
         out.push(
           issue(
             `${at}.command`,

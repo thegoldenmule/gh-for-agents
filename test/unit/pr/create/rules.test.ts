@@ -288,6 +288,16 @@ describe('testing', () => {
     assert.deepEqual(compoundOperators('a 2>&1 | tail && b'), ['>', '&', '|', '&&']);
   });
 
+  test('testing.compound_command: a quote left open hides later operators, so it is flagged', () => {
+    for (const c of ["pnpm test --grep don't | tail", 'pnpm test -t "a | b', "echo 'x"]) {
+      failOnly({ testing: [unit({ command: c })] }, 'testing.compound_command');
+    }
+    const [issue] = createRules(make({ testing: [unit({ command: "pnpm test --grep don't | tail" })] }), CTX);
+    assert.match(issue?.message ?? '', /unbalanced quote/);
+    pass({ testing: [unit({ command: 'pnpm test --grep "don\'t"' })] });
+    pass({ testing: [unit({ command: "pnpm test --grep don\\'t" })] });
+  });
+
   test('testing.notes_required for every non-pass result', () => {
     pass({ testing: [unit(), unit({ result: 'fail', notes: 'flaky upstream' })] });
     for (const result of ['fail', 'skipped', 'not-run']) {
