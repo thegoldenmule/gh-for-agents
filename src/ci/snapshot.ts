@@ -270,6 +270,7 @@ export function snapshotSummary(
     checks: s.checks,
     ignored: s.ignored,
     shaMismatch: !s.forHeadSha,
+    truncated: s.truncated,
     ...extra,
   });
 }

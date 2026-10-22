@@ -28,6 +28,8 @@ export const MERGE_CHECKS = [
   { row: '12', code: 'KEY_STEP_SKIPPED', class: 'policy', overridable: true },
   { row: '13', code: 'CHANGES_REQUESTED', class: 'policy', overridable: true },
   { row: '14', code: 'FINDINGS_OPEN', class: 'policy', overridable: true },
+  // Not in 02 §8.2: more feedback existed than ghx reads, so an unread finding may be open (fails closed).
+  { row: '14b', code: 'FEEDBACK_TRUNCATED', class: 'policy', overridable: true },
   { row: '15', code: 'PRECONDITION_UNMET', class: 'policy', overridable: true },
 ] as const satisfies readonly CheckSpec[];
 

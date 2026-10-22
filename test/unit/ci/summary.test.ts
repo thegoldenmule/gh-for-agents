@@ -20,6 +20,15 @@ const check = (name: string, bucket: Bucket): Check => ({
   completedAt: null,
 });
 
+test('a truncated read is never green: pending/partial with truncated:true; red stays red', () => {
+  const s = summariseCi({ headSha, checks: [check('a', 'pass')], truncated: true });
+  assert.deepEqual([s.state, s.phase, s.truncated], ['pending', 'partial', true]);
+  CiSummary.parse(s);
+  const r = summariseCi({ headSha, checks: [check('a', 'fail')], truncated: true });
+  assert.deepEqual([r.state, r.truncated], ['red', true]);
+  assert.equal('truncated' in summariseCi({ headSha, checks: [check('a', 'pass')] }), false);
+});
+
 test('zero checks gives no-checks/registering, never green', () => {
   const s = summariseCi({ headSha, checks: [] });
   assert.equal(s.state, 'no-checks');

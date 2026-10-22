@@ -127,6 +127,32 @@ test('connections with hasNextPage are followed with a per-connection query', as
   assert.equal(s.queries, 3);
 });
 
+test('feedback past MAX_PAGES sets feedbackTruncated, so merge policy fails closed', async () => {
+  const c = {
+    databaseId: 1,
+    author: { __typename: 'User', login: 'maria-dev' },
+    authorAssociation: 'MEMBER',
+    body: 'comment',
+    createdAt: '2026-10-21T16:01:00Z',
+    url: 'https://github.com/powerhouse-inc/powerhouse/pull/3301#issuecomment-1',
+  };
+  const env = ciEnv();
+  const pageQuery = connectionPageQuery('comments');
+  env.fake
+    .on(isQ1, q1Reply(q1Pr({ comments: page([c], 'CUR') })))
+    .on(
+      (argv) => argv.includes(`query=${pageQuery}`),
+      [ok({ data: { repository: { pullRequest: { comments: page([c], 'CUR') } } } })],
+    )
+    .on(isQ2, q2Reply());
+  const s = await fetch(env);
+  assert.equal(s.feedbackTruncated, true);
+  assert.ok(s.warnings.some((w) => w.code === 'FEEDBACK_TRUNCATED'));
+  const clean = ciEnv();
+  clean.fake.on(isQ1, q1Reply()).on(isQ2, q2Reply());
+  assert.equal((await fetch(clean)).feedbackTruncated, false);
+});
+
 test('a missing PR is PR_NOT_FOUND', async () => {
   const env = ciEnv();
   env.fake.on(isQ1, q1Reply(null));

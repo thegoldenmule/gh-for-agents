@@ -49,6 +49,7 @@ export type PolicySnapshot = Pick<
   | 'repoSettings'
   | 'meta'
   | 'stack'
+  | 'feedbackTruncated'
 >;
 
 export interface MergeRequest {
@@ -227,6 +228,12 @@ function ciPending(i: MergePolicyInput): Result {
       hint: `Re-read CI for the head: ghx ci wait ${s.ref} --until mergeable (run it in the background).`,
     });
   }
+  if (ci.truncated) {
+    return fail(`More checks reported for ${short(ci.headSha)} than ghx reads; the unread ones are unknown.`, {
+      truncated: true,
+      hint: 'Check the PR checks on GitHub; merge only if the user confirms they all passed.',
+    });
+  }
   const missing = ci.expectedMissing.filter((e) => e.state === 'missing');
   const pendingState = ci.state === 'pending';
   if (ci.pending.length === 0 && missing.length === 0 && !pendingState) return pass('no checks pending');
@@ -362,6 +369,13 @@ function lowestLabel(fs: readonly Finding[]): string {
   return ranks.size === 1 ? ([...ranks][0] ?? '') : 'lower-severity';
 }
 
+function feedbackTruncated(i: MergePolicyInput): Result {
+  if (!i.snapshot.feedbackTruncated) return pass('all feedback read');
+  return fail(`${i.snapshot.ref} has more review feedback than ghx reads; an unread finding may be open.`, {
+    hint: `Read the PR on GitHub; if the user accepts it, add --override FEEDBACK_TRUNCATED --reason "…".`,
+  });
+}
+
 function preconditionUnmet(i: MergePolicyInput): Result {
   const unmet = i.feedback.preconditions.filter((p) => p.status !== 'met' && p.status !== 'withdrawn');
   if (unmet.length === 0)
@@ -448,6 +462,7 @@ export function evaluateMerge(i: MergePolicyInput): MergeEvaluation {
     ['KEY_STEP_SKIPPED', keyStepSkipped(i)],
     ['CHANGES_REQUESTED', changesRequested(i)],
     ['FINDINGS_OPEN', findings.result],
+    ['FEEDBACK_TRUNCATED', feedbackTruncated(i)],
     ['PRECONDITION_UNMET', preconditionUnmet(i)],
   ]);
   const stillFails = (code: MergeCheckCode) => results.get(code)?.status === 'fail' && !overrides.has(code);

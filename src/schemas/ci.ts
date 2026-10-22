@@ -127,6 +127,11 @@ export const CiSummary = z.object({
   expectedMissing: z.array(ExpectedCheck),
   eta: Eta.nullable(),
   next: z.array(z.string()),
+  /**
+   * Present (true) only when more checks existed than ghx reads (CI_CHECKS_TRUNCATED). The unread checks
+   * may be pending or red, so the state is never green and merge policy fails CI_PENDING.
+   */
+  truncated: z.literal(true).optional(),
 });
 
 // ── Diagnosis (02 §12, §11.9) ─────────────────────────────────────────────

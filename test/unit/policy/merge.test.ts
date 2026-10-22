@@ -115,6 +115,11 @@ const ROWS: Row[] = [
     pass: { feedback: feedback({ findings: [finding('f_h4x8pz', 'high', 'addressed', true)] }) },
   },
   {
+    code: 'FEEDBACK_TRUNCATED',
+    fail: { snapshot: { feedbackTruncated: true } },
+    pass: { snapshot: { feedbackTruncated: false } },
+  },
+  {
     code: 'PRECONDITION_UNMET',
     fail: { feedback: feedback({ preconditions: [precondition('c_p7q8r9', 'unmet')] }) },
     pass: { feedback: feedback({ preconditions: [precondition('c_p7q8r9', 'met')] }) },
@@ -384,6 +389,17 @@ test('CI_PENDING: pending with only a baseline check missing blocks (04: §11.2/
     ['CI_PENDING'],
   );
   assert.match(e.plan.blockers[0]?.message ?? '', /e2e not reported yet/);
+});
+
+test('CI_PENDING: a truncated check read blocks, even when every read check is red or green', () => {
+  for (const c of [
+    ci({ state: 'pending', phase: 'partial', truncated: true }),
+    { ...red(failing('t', 'same-tests')), truncated: true as const },
+  ]) {
+    const e = evaluate({ ci: c });
+    assert.ok(e.plan.blockers.some((b) => b.code === 'CI_PENDING'));
+    assert.match(e.plan.blockers.find((b) => b.code === 'CI_PENDING')?.message ?? '', /More checks reported/);
+  }
 });
 
 test('CI_PENDING: a green summary for a different SHA than the snapshot head blocks', () => {

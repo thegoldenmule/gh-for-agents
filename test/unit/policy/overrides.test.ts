@@ -57,7 +57,7 @@ test('all issues are reported together, and the hint lists the overridable codes
   }
 });
 
-test('the overridable set is exactly 02 §8.2 rows 4, 10b, 11–15', () => {
+test('the overridable set is exactly 02 §8.2 rows 4, 10b, 11–15, plus FEEDBACK_TRUNCATED (14b)', () => {
   assert.deepEqual(OVERRIDABLE_CODES, [
     'AUTHOR_NOT_VIEWER',
     'CI_NO_CHECKS',
@@ -65,6 +65,7 @@ test('the overridable set is exactly 02 §8.2 rows 4, 10b, 11–15', () => {
     'KEY_STEP_SKIPPED',
     'CHANGES_REQUESTED',
     'FINDINGS_OPEN',
+    'FEEDBACK_TRUNCATED',
     'PRECONDITION_UNMET',
   ]);
 });

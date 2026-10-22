@@ -78,6 +78,11 @@ export interface PrSnapshot {
   ci: CiSnapshot;
   feedbackInput: FeedbackInput;
   feedback: FoldResult;
+  /**
+   * More feedback existed than ghx reads (FEEDBACK_TRUNCATED): an unread finding may be open, so merge
+   * policy blocks with FEEDBACK_TRUNCATED. Optional so hand-built snapshots stay valid.
+   */
+  feedbackTruncated?: boolean;
   stack: Stack;
   /** Snapshot warnings (CI_SHA_MISMATCH, MERGEABLE_UNKNOWN, …). Fold warnings are in `feedback.warnings`. */
   warnings: Warning[];
@@ -305,6 +310,7 @@ export async function fetchPrSnapshot(o: FetchPrSnapshotOptions): Promise<PrSnap
     ci: ciSnapshotOf(o, q1, warnings),
     feedbackInput,
     feedback,
+    feedbackTruncated: q1.feedbackTruncated,
     stack: buildStack({
       q2,
       stackedOn: meta.status === 'ok' ? meta.block.refs?.stackedOn : undefined,

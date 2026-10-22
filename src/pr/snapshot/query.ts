@@ -178,6 +178,11 @@ export interface Q1Result {
   rollupOid: string | null;
   /** More than MAX_CONTEXT_PAGES pages of checks existed. */
   checksTruncated: boolean;
+  /**
+   * A feedback connection (comments, reviews, review threads or a thread's comments) had more pages than
+   * ghx reads (warned FEEDBACK_TRUNCATED): an unread finding may be open, so merge policy fails closed.
+   */
+  feedbackTruncated: boolean;
   issueComments: z.infer<typeof RawIssueComment>[];
   reviews: z.infer<typeof RawReview>[];
   threads: (RawReviewThread & { id: string })[];
@@ -222,7 +227,7 @@ export async function fetchQ1(o: Q1Options): Promise<Q1Result> {
   }
   const { data, pr } = first;
   const repository = data.repository as NonNullable<Q1Data['repository']>;
-  const counter = { queries };
+  const counter = { queries, feedbackTruncated: false };
 
   const rollupOid = oidOf(pr);
   let rollup: RollupContext[] | null = null;
@@ -247,6 +252,7 @@ export async function fetchQ1(o: Q1Options): Promise<Q1Result> {
           code: 'FEEDBACK_TRUNCATED',
           message: `A review thread on ${t.path} has more comments than ghx reads.`,
         });
+        counter.feedbackTruncated = true;
         break;
       }
       counter.queries++;
@@ -283,6 +289,7 @@ export async function fetchQ1(o: Q1Options): Promise<Q1Result> {
     rollup,
     rollupOid,
     checksTruncated,
+    feedbackTruncated: counter.feedbackTruncated,
     issueComments,
     reviews,
     threads,
@@ -329,7 +336,7 @@ async function follow<T extends z.ZodType>(
   name: ConnectionName,
   firstPage: { pageInfo: z.infer<typeof PageInfo>; nodes: (z.output<T> | null)[] },
   node: T,
-  counter: { queries: number },
+  counter: { queries: number; feedbackTruncated?: boolean },
 ): Promise<z.output<T>[]> {
   const out = nonNull(firstPage.nodes);
   let page = firstPage.pageInfo;
@@ -342,6 +349,8 @@ async function follow<T extends z.ZodType>(
         code: 'FEEDBACK_TRUNCATED',
         message: `PR ${repoSlug(o.repo)}#${o.number} has more ${name} than ghx reads (${MAX_PAGES} pages).`,
       });
+      // The base-change timeline is not feedback.
+      if (name !== 'timelineItems') counter.feedbackTruncated = true;
       break;
     }
     counter.queries++;

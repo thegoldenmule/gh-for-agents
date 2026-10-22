@@ -21,6 +21,8 @@ export interface SummariseInput {
    * another commit, so none are reported and the state is `pending`.
    */
   shaMismatch?: boolean;
+  /** More checks existed than were read (CI_CHECKS_TRUNCATED): never green; `truncated: true` is set. */
+  truncated?: boolean;
 }
 
 export function countChecks(checks: readonly Check[], ignored = 0): CiCounts {
@@ -52,10 +54,14 @@ export function summariseCi(i: SummariseInput): CiSummary {
   const pending: PendingCheck[] = checks
     .filter((c) => c.bucket === 'pending')
     .map((c) => ({ name: c.name, workflow: c.workflow, status: c.status, required: c.required }));
+  const state = ciState(checks, expectedMissing.length, i.shaMismatch === true);
+  // Unread checks may be pending or red: a truncated read is never green.
+  const truncated = i.truncated === true && !i.shaMismatch;
+  if (truncated && state.state === 'green') Object.assign(state, { state: 'pending', phase: 'partial' });
   return {
     headSha: i.headSha,
     forHeadSha: true,
-    ...ciState(checks, expectedMissing.length, i.shaMismatch === true),
+    ...state,
     counts: countChecks(checks, ignored.length),
     failing,
     pending,
@@ -63,5 +69,6 @@ export function summariseCi(i: SummariseInput): CiSummary {
     expectedMissing,
     eta: i.eta ?? null,
     next: [...(i.next ?? [])],
+    ...(truncated ? { truncated: true as const } : {}),
   };
 }
