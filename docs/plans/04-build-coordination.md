@@ -5,7 +5,7 @@ This file explains how the v1 build is split across subagents. Read it together 
 ## Rules for every implementer
 
 1. **Work on `main` in the shared working tree.** Don't create branches or worktrees, and never push. Commit freely in small logical commits, one per 03 commit-list item, using that item's message. End each message with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-2. **Stay inside your owned paths** (see the wave table). Stage with `git add <your paths>` only, never `git add -A` or `git add .`. If `git commit` hits `index.lock`, wait a few seconds and retry. Never run `git stash`, `reset`, `checkout -- <file>`, `rebase` or `clean`, because other agents' uncommitted work is in the same tree.
+2. **Stay inside your owned paths** (see the wave table). **Commit with an explicit pathspec in one command:** `git add <your paths> && git commit -m '…' -- <your paths>`. The index is shared, so a bare `git commit` sweeps in other agents' staged files. That happened once, in `042796e`. Never use `git add -A` or `git add .`. If `git commit` hits `index.lock`, wait a few seconds and retry. Never run `git stash`, `reset`, `checkout -- <file>`, `rebase` or `clean`, because other agents' uncommitted work is in the same tree.
 3. **Shared files.** If you must touch a file outside your paths, keep the edit minimal and additive (for example, appending one registration line), re-read the file immediately before editing, and commit it right away together with the code that needs it. Do not reformat or lint-fix files you don't own. Scope biome and other tools to your own paths.
 4. **Verify before every commit.** Typecheck must pass (`pnpm typecheck`, which covers the whole tree; if it fails only in another agent's files, note that and continue). Your own tests must pass. Each commit must also stand on its own.
 5. **Exit codes and error names** come from `test/contract/exit-table.ts` and `src/core/errors.ts`. Don't retype them.
@@ -137,3 +137,11 @@ Filled in by the wave 1 bootstrap agent (commits `f29f2eb`..`3cd7603`).
   - Each issue in the trailer gets its own `closes` keyword.
   - `scopeRequired` defaults to false.
   - Commands under `/usr`, `/bin`, `/sbin` and `/dev` are re-runnable.
+- **2026-10-22, wave 3 pr-create choices accepted.**
+  - Fork heads (`owner:branch`) are out of v1.
+  - `viewerPermission` READ/TRIAGE gives `GH_FORBIDDEN`, as 02 §6.2 says.
+  - Config is read from the default branch, not from `?ref=<base>`; revisit if stacked bases diverge.
+  - Prose fields are JSON-only (`.meta({jsonOnly:true})`).
+- **2026-10-22, wave 3 wait-pure choices accepted.**
+  - A skipped sibling job doesn't count as "started" for the queued-stall rule.
+  - `ci.expected` and `ci.stall` are optional, with defaults in `stallConfig()`.
