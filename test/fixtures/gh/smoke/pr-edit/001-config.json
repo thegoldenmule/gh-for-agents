@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/octo/demo/contents/.github/ghx.json"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"content\":\"eyJ2ZXJzaW9uIjoxLCJjb21wb25lbnRzIjp7ImFwcCI6eyJwYXRocyI6WyJzcmMvKioiXX0sImRvY3MiOnsicGF0aHMiOlsiZG9jcy8qKiJdfX19\",\"encoding\":\"base64\",\"url\":\"https://api.github.com/repos/octo/demo/contents/.github/ghx.json?ref=main\"}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "pr edit fixture (02 §3): the config and compare of the pr create smoke world"
+  }
+}
