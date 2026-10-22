@@ -25,5 +25,8 @@ export const CiSection = z
     ignore: z.array(IgnoredCheck).prefault([]),
     // M2.4: extra log lines that count as errors in a diagnosis (02 §12 step 4). Optional, no default.
     logPatterns: z.array(LogPattern).optional(),
+    // M2.6 (02 §11.8): jobs or tests known to be flaky (`*` wildcards), and extra infra-error log patterns.
+    knownFlaky: z.array(z.strictObject({ job: z.string().min(1), test: z.string().min(1).optional() })).optional(),
+    infraPatterns: z.array(LogPattern).optional(),
   })
   .prefault({});

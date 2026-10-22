@@ -1,0 +1,7 @@
+﻿2026-10-21T17:02:11.1000000Z ##[group]Run pnpm install --frozen-lockfile
+2026-10-21T17:02:11.1100000Z pnpm install --frozen-lockfile
+2026-10-21T17:02:11.1200000Z ##[endgroup]
+2026-10-21T17:02:14.3000000Z Progress: resolved 412, reused 380, downloaded 12, added 0
+2026-10-21T17:02:44.9000000Z [33m WARN [39m GET https://registry.npmjs.org/vitest error (ECONNRESET). Will retry in 10 seconds. 2 retries left.
+2026-10-21T17:03:25.2000000Z [31m ERR_PNPM_META_FETCH_FAIL [39m GET https://registry.npmjs.org/vitest: request to https://registry.npmjs.org/vitest failed, reason: read ECONNRESET
+2026-10-21T17:03:25.3000000Z ##[error]Process completed with exit code 1.

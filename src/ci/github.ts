@@ -111,3 +111,13 @@ export async function listRunJobs(o: {
   if (r.notModified) throw new Error('unreachable: unconditional request returned 304');
   return r.data.jobs;
 }
+
+/** GET repos/{o}/{r}/actions/runs?head_sha=… (one page, newest first): every run on one commit. */
+export async function listRunsForSha(o: { gh: Gh; repo: RepoRef; headSha: string }): Promise<ActionsRun[]> {
+  const r = await o.gh.api(
+    { path: 'repos/{owner}/{repo}/actions/runs', repo: o.repo, fields: { head_sha: o.headSha, per_page: 20 } },
+    RunsPage,
+  );
+  if (r.notModified) throw new Error('unreachable: unconditional request returned 304');
+  return r.data.workflow_runs;
+}
