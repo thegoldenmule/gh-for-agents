@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "pr",
+    "view",
+    "1",
+    "--json",
+    "number",
+    "-R",
+    "github.com/o/r"
+  ],
+  "exitCode": 0,
+  "stdout": "{\"number\":1}\n",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "FakeGh and fake gh bin self-test"
+  }
+}

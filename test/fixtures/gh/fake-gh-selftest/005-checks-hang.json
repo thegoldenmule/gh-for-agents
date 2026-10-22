@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "pr",
+    "checks",
+    "9",
+    "-R",
+    "github.com/o/r"
+  ],
+  "exitCode": 0,
+  "stdout": "",
+  "stderr": "",
+  "hang": true,
+  "meta": {
+    "source": "synthetic",
+    "note": "FakeGh and fake gh bin self-test"
+  }
+}

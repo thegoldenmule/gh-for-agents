@@ -1,7 +1,7 @@
 // Generic per-spec invariants (01 §3.8) and registry completeness. Every command added under
 // src/commands/ is covered automatically.
 import assert from 'node:assert/strict';
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { test } from 'node:test';
 import { z } from 'zod';
@@ -10,7 +10,9 @@ import { fsRegistry, isCommandSegment, MAX_NAME_DEPTH, scanCommandFiles } from '
 import { commandSchema } from '../src/cli/schema.ts';
 import type { AnyCommandSpec } from '../src/core/command.ts';
 import { isMutating } from '../src/gh/guard.ts';
+import { FakeGh } from './helpers/fake-gh.ts';
 import { FakeProc } from './helpers/fake-proc.ts';
+import { GH_FIXTURE_ROOT } from './helpers/fixture-match.ts';
 import { runInProcess, SRC_COMMANDS, TEST_COMMANDS } from './helpers/harness.ts';
 
 const RESERVED_EVENT_TYPES = new Set(['summary', 'error', 'heartbeat', 'warning']);
@@ -97,9 +99,14 @@ for (const { spec, smoke } of specs) {
     const argv = example.argv.split(/\s+/).slice(1);
     if (example.input !== undefined && !argv.includes('--input')) argv.push('--input', '-');
     if (spec.kind === 'write') argv.push('--dry-run');
+    // A command may ship test/fixtures/gh/smoke/<name-with-dashes>/ for its smoke run; otherwise every
+    // gh (and git) call fails with a 404, which a command must survive without exiting 1.
+    const smokeDir = join(GH_FIXTURE_ROOT, 'smoke', spec.name.join('-'));
     const hostile = new FakeProc().on(() => true, { exitCode: 1, stderr: 'gh: Not Found (HTTP 404)' });
     const r = await runInProcess(argv, {
-      proc: hostile.runner(),
+      ...(existsSync(smokeDir)
+        ? { gh: FakeGh.fromScenario(smokeDir), proc: hostile.runner() }
+        : { proc: hostile.runner() }),
       ...(example.input !== undefined ? { stdin: JSON.stringify(example.input) } : {}),
     });
     assert.notEqual(r.exitCode, 1, r.stdout);

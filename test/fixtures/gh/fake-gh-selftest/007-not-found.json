@@ -1,0 +1,16 @@
+{
+  "argv": [
+    "pr",
+    "view",
+    "404",
+    "-R",
+    "github.com/o/r"
+  ],
+  "exitCode": 1,
+  "stdout": "",
+  "stderr": "GraphQL: Could not resolve to a PullRequest with the number of 404. (repository.pullRequest)\n",
+  "meta": {
+    "source": "synthetic",
+    "note": "FakeGh and fake gh bin self-test"
+  }
+}

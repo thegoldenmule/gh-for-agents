@@ -15,6 +15,8 @@ import type { Git } from '../../src/git/index.ts';
 import type { ProcessRunner, ProcRequest } from '../../src/proc/runner.ts';
 import { VERSION } from '../../src/version.ts';
 import { FakeClock } from './fake-clock.ts';
+import type { FakeGh } from './fake-gh.ts';
+import { fakeGit } from './fake-git.ts';
 import { FakeProc } from './fake-proc.ts';
 
 const ROOT = join(import.meta.dirname, '..', '..');
@@ -38,8 +40,10 @@ export interface HarnessOptions {
   /** Extra in-memory specs (combined with the registry). */
   commands?: AnyCommandSpec[];
   proc?: ProcessRunner;
-  /** Replace the gh client entirely (rarely needed; prefer `proc`). */
-  gh?: (mode: 'read' | 'write', dryRun: boolean) => Gh;
+  /** The fake gh double; non-gh calls fall through to `proc` (or fail). */
+  gh?: FakeGh;
+  /** Replace the gh client entirely (rarely needed; prefer `gh` or `proc`). */
+  ghClient?: (mode: 'read' | 'write', dryRun: boolean) => Gh;
   clock?: Clock;
   random?: Random;
   /** Merged over a minimal scratch env; nothing is inherited from process.env. */
@@ -70,7 +74,7 @@ export function defaultRegistry(): Registry {
 export async function runInProcess(argv: string[], o: HarnessOptions = {}): Promise<HarnessResult> {
   const sink = createMemorySink();
   const calls: ProcRequest[] = [];
-  const inner = o.proc ?? new FakeProc().runner();
+  const inner = o.gh ? o.gh.runner(o.proc) : (o.proc ?? new FakeProc().runner());
   const proc: ProcessRunner = (req) => {
     calls.push(req);
     return inner(req);
@@ -97,8 +101,10 @@ export async function runInProcess(argv: string[], o: HarnessOptions = {}): Prom
       return v;
     },
     readStdin: async () => o.stdin ?? '',
-    ...(o.git ? { git: o.git } : {}),
-    ...(o.gh ? { gh: o.gh } : {}),
+    // Without an explicit git or proc, git is an in-memory "installed, not a checkout" probe, so a
+    // test never touches the real repository it happens to run in.
+    ...(o.git ? { git: o.git } : o.proc ? {} : { git: fakeGit({}) }),
+    ...(o.ghClient ? { gh: o.ghClient } : {}),
   };
   const outcome = await runCli(argv, deps);
   const stdout = sink.text();

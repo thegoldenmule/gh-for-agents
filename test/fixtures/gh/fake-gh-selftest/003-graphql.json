@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "graphql",
+    "--include",
+    "-F",
+    "n=1",
+    "-f",
+    "query={ viewer { login } }"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\n\n{\"data\":{\"viewer\":{\"login\":\"viewer-user\"}}}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "FakeGh and fake gh bin self-test"
+  }
+}

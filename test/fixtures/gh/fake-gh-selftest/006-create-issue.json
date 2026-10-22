@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "POST",
+    "repos/o/r/issues",
+    "--input",
+    "-"
+  ],
+  "stdin": {
+    "json": {
+      "title": "t",
+      "body": "b"
+    }
+  },
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 201 Created\n\n{\"number\":7}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "FakeGh and fake gh bin self-test"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "repos/o/r/actions/jobs/1/logs"
+  ],
+  "exitCode": 0,
+  "stdout": "",
+  "stderr": "",
+  "stdoutFile": "004-job-log.log",
+  "meta": {
+    "source": "synthetic",
+    "note": "FakeGh and fake gh bin self-test"
+  }
+}
