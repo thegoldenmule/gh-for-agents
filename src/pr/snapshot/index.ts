@@ -151,7 +151,7 @@ function authorOf(q1: Q1Result, bots: BotsConfig): Author {
   };
 }
 
-function ciSnapshotOf(o: FetchPrSnapshotOptions, q1: Q1Result, warnings: Warning[]): CiSnapshot {
+function ciSnapshotOf(o: FetchPrSnapshotOptions, q1: Q1Result): CiSnapshot {
   const pr = q1.pr;
   const base = {
     repo: o.repo,
@@ -163,11 +163,8 @@ function ciSnapshotOf(o: FetchPrSnapshotOptions, q1: Q1Result, warnings: Warning
     defaultBranch: q1.defaultBranch,
     queries: q1.queries,
   };
+  // completeRollup (in fetchQ1) already warned CI_SHA_MISMATCH.
   if (q1.rollup === null) {
-    warnings.push({
-      code: 'CI_SHA_MISMATCH',
-      message: `The check rollup is for ${q1.rollupOid?.slice(0, 7) ?? 'no commit'}, not the head ${pr.headRefOid.slice(0, 7)}; CI is reported as pending.`,
-    });
     return { ...base, forHeadSha: false, checks: [], ignored: [], runs: {}, truncated: false };
   }
   const norm: NormalisedRollup = normaliseRollup(q1.rollup, {
@@ -312,7 +309,7 @@ export async function fetchPrSnapshot(o: FetchPrSnapshotOptions): Promise<PrSnap
     viewer: { login: q1.viewerLogin },
     repoSettings: q1.repoSettings,
     meta,
-    ci: ciSnapshotOf(o, q1, warnings),
+    ci: ciSnapshotOf(o, q1),
     feedbackInput,
     feedback,
     feedbackTruncated: q1.feedbackTruncated,

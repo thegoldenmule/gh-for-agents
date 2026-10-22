@@ -1,11 +1,12 @@
 // GraphQL Q1 (02 §4.3 step 2; 03 M6.3): one query for the PR fields, the CI rollup (CI_COMMIT_FIELDS),
 // the three feedback sources, the base-change timeline [G-RETARGET], the viewer and the repo's merge
 // settings. Every connection that reports `hasNextPage` is followed with a narrow per-connection query,
-// up to MAX_PAGES pages each (warned FEEDBACK_TRUNCATED beyond that). Rollup pages reuse the CI module's
-// CI_SNAPSHOT_QUERY, with the same head-moved-between-pages guard as fetchCiSnapshot.
+// up to MAX_PAGES pages each (warned FEEDBACK_TRUNCATED beyond that). The rollup is finished by the CI
+// module's completeRollup (the head re-query, CI_SNAPSHOT_QUERY pages and the head-moved guard), with Q1
+// itself as the re-query so the PR fields stay in step with the head.
 import { z } from 'zod';
 import type { RollupContext } from '../../ci/checks.ts';
-import { CI_COMMIT_FIELDS, CI_SNAPSHOT_QUERY, CiCommit, MAX_CONTEXT_PAGES, rollupNodes } from '../../ci/snapshot.ts';
+import { CI_COMMIT_FIELDS, CI_SNAPSHOT_QUERY, CiCommit, completeRollup } from '../../ci/snapshot.ts';
 import { GhxError } from '../../core/errors.ts';
 import { RawIssueComment, RawReview, RawReviewComment, type RawReviewThread } from '../../feedback/raw.ts';
 import type { Gh } from '../../gh/index.ts';
@@ -174,7 +175,7 @@ export interface Q1Result {
   pr: Q1Pr;
   /** Every rollup node for the head commit; null when the rollup oid is not the head (CI_SHA_MISMATCH). */
   rollup: RollupContext[] | null;
-  /** The rollup oid seen (for the mismatch message). */
+  /** The rollup oid seen (completeRollup warned CI_SHA_MISMATCH when it is not the head). */
   rollupOid: string | null;
   /** More than MAX_CONTEXT_PAGES pages of checks existed. */
   checksTruncated: boolean;
@@ -217,26 +218,37 @@ async function runQ1(o: Q1Options): Promise<{ data: Q1Data; pr: Q1Pr }> {
 
 /** Q1 plus every follow-up page. The rollup is re-queried once when its oid is not the head [G-SHA]. */
 export async function fetchQ1(o: Q1Options): Promise<Q1Result> {
-  let queries = 1;
   let first = await runQ1(o);
-  const oidOf = (pr: Q1Pr) => pr.commits.nodes.at(-1)?.commit.oid ?? null;
-  if (oidOf(first.pr) !== first.pr.headRefOid) {
-    // Eventual consistency right after a push: re-query once (02 §4.3 step 3).
-    queries++;
-    first = await runQ1(o);
-  }
+  const commitOf = (pr: Q1Pr) => pr.commits.nodes.at(-1)?.commit ?? null;
+  const r = await completeRollup({
+    gh: o.gh,
+    repo: o.repo,
+    number: o.number,
+    headSha: first.pr.headRefOid,
+    firstPage: commitOf(first.pr),
+    warn: o.warn,
+    fetchPage: async (after) => {
+      if (after === null) {
+        // Eventual consistency right after a push: re-run Q1 itself, so every PR field matches the head.
+        first = await runQ1(o);
+        return { headSha: first.pr.headRefOid, commit: commitOf(first.pr) };
+      }
+      const next = await o.gh.graphql(
+        CI_SNAPSHOT_QUERY,
+        { owner: o.repo.owner, name: o.repo.name, number: o.number, after },
+        CiPageData,
+        { repo: o.repo, notFound: 'PR_NOT_FOUND' },
+      );
+      const np = next.repository?.pullRequest;
+      return { headSha: np?.headRefOid ?? '', commit: np?.commits.nodes.at(-1)?.commit ?? null };
+    },
+  });
   const { data, pr } = first;
   const repository = data.repository as NonNullable<Q1Data['repository']>;
-  const counter = { queries, feedbackTruncated: false };
-
-  const rollupOid = oidOf(pr);
-  let rollup: RollupContext[] | null = null;
-  let checksTruncated = false;
-  if (rollupOid === pr.headRefOid) {
-    const r = await followRollup(o, pr, counter);
-    rollup = r.nodes;
-    checksTruncated = r.truncated;
-  }
+  const counter = { queries: 1 + r.queries, feedbackTruncated: false };
+  const rollupOid = r.forHeadSha ? r.headSha : r.rollupOid;
+  const rollup: RollupContext[] | null = r.forHeadSha ? r.nodes : null;
+  const checksTruncated = r.forHeadSha && r.truncated;
 
   const issueComments = await follow(o, 'comments', pr.comments, RawIssueComment, counter);
   const reviews = await follow(o, 'reviews', pr.reviews, RawReview, counter);
@@ -296,39 +308,6 @@ export async function fetchQ1(o: Q1Options): Promise<Q1Result> {
     timeline,
     queries: counter.queries,
   };
-}
-
-async function followRollup(
-  o: Q1Options,
-  pr: Q1Pr,
-  counter: { queries: number },
-): Promise<{ nodes: RollupContext[] | null; truncated: boolean }> {
-  const commit = pr.commits.nodes.at(-1)?.commit ?? null;
-  const nodes = rollupNodes(commit);
-  let page = commit?.statusCheckRollup?.contexts.pageInfo;
-  for (let pages = 1; page?.hasNextPage && page.endCursor; pages++) {
-    if (pages >= MAX_CONTEXT_PAGES) {
-      o.warn({
-        code: 'CI_CHECKS_TRUNCATED',
-        message: `More than ${MAX_CONTEXT_PAGES * 100} checks; only the first ${MAX_CONTEXT_PAGES * 100} were read.`,
-      });
-      return { nodes, truncated: true };
-    }
-    counter.queries++;
-    const next = await o.gh.graphql(
-      CI_SNAPSHOT_QUERY,
-      { owner: o.repo.owner, name: o.repo.name, number: o.number, after: page.endCursor },
-      CiPageData,
-      { repo: o.repo, notFound: 'PR_NOT_FOUND' },
-    );
-    const np = next.repository?.pullRequest;
-    const nc = np?.commits.nodes.at(-1)?.commit ?? null;
-    // A push between pages: the remaining pages belong to another commit.
-    if (!np || np.headRefOid !== pr.headRefOid || nc?.oid !== pr.headRefOid) return { nodes: null, truncated: false };
-    nodes.push(...rollupNodes(nc));
-    page = nc.statusCheckRollup?.contexts.pageInfo;
-  }
-  return { nodes, truncated: false };
 }
 
 async function follow<T extends z.ZodType>(

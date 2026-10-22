@@ -363,5 +363,7 @@ test('rollup pages beyond the first are read with the CI module query; a push be
     .on(isQ2, q2Reply());
   const s2 = await fetch(env2);
   assert.equal(s2.ci.forHeadSha, false);
-  assert.ok(s2.warnings.some((w) => w.code === 'CI_SHA_MISMATCH'));
+  // completeRollup writes the CI_SHA_MISMATCH message; the snapshot does not repeat it.
+  assert.equal(s2.warnings.filter((w) => w.code === 'CI_SHA_MISMATCH').length, 1);
+  assert.match(s2.warnings.find((w) => w.code === 'CI_SHA_MISMATCH')?.message ?? '', /is for eeeeeee, not the head/);
 });
