@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/powerhouse-inc/powerhouse/commits/dddddddddddddddddddddddddddddddddddddddd/status?per_page=100"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nETag: W/\"74d85f3a5f202057\"\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4991\r\nX-Ratelimit-Used: 9\r\nX-Ratelimit-Reset: 1792674000\r\nX-Ratelimit-Resource: core\r\n\r\n{\"state\":\"pending\",\"statuses\":[]}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "ci wait smoke: a settled green PR, terminal on the first tick"
+  }
+}

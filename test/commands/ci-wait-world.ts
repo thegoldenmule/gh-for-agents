@@ -31,6 +31,8 @@ export interface SimJob {
   runnerId?: number | null;
   /** Failing tests for the log (vitest format). */
   tests?: string[];
+  /** Extra log lines (e.g. an infra error). */
+  logExtra?: string[];
 }
 
 export interface SimStatus {
@@ -38,8 +40,18 @@ export interface SimStatus {
   state: 'pending' | 'success' | 'failure' | 'error';
 }
 
+export interface SimPr {
+  state: 'open' | 'closed';
+  merged?: boolean;
+  head: string;
+  base?: string;
+}
+
 export interface SimState {
-  pr: { state: 'open' | 'closed'; merged?: boolean; head: string; base?: string };
+  /** PR number `o.number` (default 7). */
+  pr: SimPr;
+  /** Further PRs by number (multi-target tests). */
+  prs?: Record<number, SimPr>;
   branches?: Record<string, string>;
   /** Check runs per commit. */
   checks: Record<string, SimJob[]>;
@@ -271,10 +283,13 @@ export class GitHubSim {
     if (argv[1] === 'graphql') return this.#graphql(argv, st);
     const path = endpoint(argv) ?? '';
     const q = query(argv);
-    if (path === `${repo}/pulls/${this.number}`) {
-      const pr = st.pr;
+    let pm = new RegExp(`^${repo}/pulls/(\\d+)$`).exec(path);
+    if (pm) {
+      const n = Number(pm[1]);
+      const pr = n === this.number ? st.pr : st.prs?.[n];
+      if (!pr) return this.#notFound();
       return this.#conditional(argv, {
-        number: this.number,
+        number: n,
         state: pr.state,
         merged: pr.merged === true,
         merged_at: pr.merged ? this.iso(0) : null,
@@ -282,8 +297,12 @@ export class GitHubSim {
         base: { ref: pr.base ?? 'main', repo: { default_branch: 'main' } },
       });
     }
-    if (path === `${repo}/pulls/${this.number}/commits`) {
-      return this.#ok((this.o.prCommits ?? [st.pr.head]).map((s) => ({ sha: s })));
+    pm = new RegExp(`^${repo}/pulls/(\\d+)/commits$`).exec(path);
+    if (pm) {
+      const n = Number(pm[1]);
+      const pr = n === this.number ? st.pr : st.prs?.[n];
+      if (!pr) return this.#notFound();
+      return this.#ok((n === this.number ? (this.o.prCommits ?? [pr.head]) : [pr.head]).map((s) => ({ sha: s })));
     }
     if (path === `${repo}/pulls`) return this.#ok([]);
     if (path.startsWith(`${repo}/rules/branches/`)) return this.#ok([]);
@@ -373,7 +392,7 @@ export class GitHubSim {
       return {
         status: 200,
         exitCode: 0,
-        stdout: `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n${BOM}${vitestLog(hit.job.tests ?? ['src/a.test.ts > fails'])}`,
+        stdout: `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n${BOM}${vitestLog(hit.job.tests ?? ['src/a.test.ts > fails'], { extra: hit.job.logExtra ?? [] })}`,
         stderr: '',
       };
     }
@@ -549,12 +568,18 @@ export const forbidden = (): ProcResultLike => ({
 export function startWait(
   sim: GitHubSim,
   argv: string[],
-  o: { env?: Record<string, string | undefined>; artifacts?: string; shutdown?: HarnessOptions['shutdown'] } = {},
+  o: {
+    env?: Record<string, string | undefined>;
+    artifacts?: string;
+    shutdown?: HarnessOptions['shutdown'];
+    /** Replaces the sim's runner (e.g. a recording wrapper around it). */
+    proc?: ProcessRunner;
+  } = {},
 ) {
   const artifacts = o.artifacts ?? mkdtempSync(join(scratchDir(), 'wait-'));
   let done = false;
   const p = runInProcess(['ci', 'wait', ...argv], {
-    proc: sim.runner(),
+    proc: o.proc ?? sim.runner(),
     git: fakeGit({}),
     clock: sim.clock,
     env: { GHX_ARTIFACT_DIR: artifacts, CLAUDE_CODE_SESSION_ATTENDED: '1', ...o.env },

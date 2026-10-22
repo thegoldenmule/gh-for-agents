@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/powerhouse-inc/powerhouse/pulls/3301"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nETag: W/\"c8e441cc6b5f6bf6\"\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4999\r\nX-Ratelimit-Used: 1\r\nX-Ratelimit-Reset: 1792674000\r\nX-Ratelimit-Resource: core\r\n\r\n{\"number\":3301,\"state\":\"open\",\"merged\":false,\"merged_at\":null,\"head\":{\"sha\":\"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d\"},\"base\":{\"ref\":\"main\",\"repo\":{\"default_branch\":\"main\"}}}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "ci wait smoke: a settled green PR, terminal on the first tick"
+  }
+}

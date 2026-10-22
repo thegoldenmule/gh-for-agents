@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/powerhouse-inc/powerhouse/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=20"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4993\r\nX-Ratelimit-Used: 7\r\nX-Ratelimit-Reset: 1792674000\r\nX-Ratelimit-Resource: core\r\n\r\n[]",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "ci wait smoke: a settled green PR, terminal on the first tick"
+  }
+}

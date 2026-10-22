@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/powerhouse-inc/powerhouse/commits/9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d/check-runs?filter=latest&per_page=100"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nETag: W/\"7792f6421ef761bb\"\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4998\r\nX-Ratelimit-Used: 2\r\nX-Ratelimit-Reset: 1792674000\r\nX-Ratelimit-Resource: core\r\n\r\n{\"total_count\":2,\"check_runs\":[{\"id\":111978835001,\"name\":\"Typecheck\",\"status\":\"completed\",\"conclusion\":\"success\",\"started_at\":\"2026-10-22T11:50:00.000Z\",\"completed_at\":\"2026-10-22T11:55:00.000Z\",\"html_url\":\"https://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835001\",\"details_url\":\"https://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835001\",\"app\":{\"slug\":\"github-actions\"},\"check_suite\":{\"id\":37957190914}},{\"id\":111978835002,\"name\":\"Test\",\"status\":\"completed\",\"conclusion\":\"success\",\"started_at\":\"2026-10-22T11:50:00.000Z\",\"completed_at\":\"2026-10-22T11:58:00.000Z\",\"html_url\":\"https://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835002\",\"details_url\":\"https://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835002\",\"app\":{\"slug\":\"github-actions\"},\"check_suite\":{\"id\":37957190914}}]}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "ci wait smoke: a settled green PR, terminal on the first tick"
+  }
+}

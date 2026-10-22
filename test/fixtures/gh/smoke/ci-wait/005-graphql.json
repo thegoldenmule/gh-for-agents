@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "api",
+    "graphql",
+    "--include",
+    "--hostname",
+    "github.com",
+    "-f",
+    "query=query($owner:String!,$name:String!,$oid:GitObjectID!){repository(owner:$owner,name:$name){object(oid:$oid){... on Commit{checkSuites(first:100){nodes{databaseId workflowRun{databaseId event file{path} workflow{databaseId name}}}}}}}}",
+    "-f",
+    "name=powerhouse",
+    "-f",
+    "oid=9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d",
+    "-f",
+    "owner=powerhouse-inc"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4999\r\nX-Ratelimit-Used: 1\r\nX-Ratelimit-Reset: 1792674000\r\nX-Ratelimit-Resource: graphql\r\n\r\n{\"data\":{\"repository\":{\"object\":{\"checkSuites\":{\"nodes\":[{\"databaseId\":37957190914,\"workflowRun\":{\"databaseId\":37948190914,\"event\":\"pull_request\",\"file\":{\"path\":\".github/workflows/w5.yml\"},\"workflow\":{\"databaseId\":5,\"name\":\"CI\"}}}]}}}}}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "ci wait smoke: a settled green PR, terminal on the first tick"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/powerhouse-inc/powerhouse/commits/dddddddddddddddddddddddddddddddddddddddd/check-runs?per_page=100&filter=latest"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nETag: W/\"e83cfac35507982a\"\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4992\r\nX-Ratelimit-Used: 8\r\nX-Ratelimit-Reset: 1792674000\r\nX-Ratelimit-Resource: core\r\n\r\n{\"total_count\":0,\"check_runs\":[]}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "ci wait smoke: a settled green PR, terminal on the first tick"
+  }
+}
