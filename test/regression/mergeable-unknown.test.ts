@@ -161,3 +161,26 @@ test('R03: a merged PR reads UNKNOWN without retrying', async () => {
   assert.equal(s.merge.settled, false);
   env.fake.expectNoCall(isMergeable);
 });
+
+test('R03: a PR merged during the retry is re-read and reported MERGED, with its merge commit', async () => {
+  const merged = q1Pr({
+    state: 'MERGED',
+    mergeable: 'UNKNOWN',
+    mergeStateStatus: 'UNKNOWN',
+    mergedAt: '2026-10-22T09:16:00Z',
+    mergeCommit: { oid: 'd'.repeat(40) },
+  });
+  const env = setup(
+    [mergeableReply('UNKNOWN', { state: 'MERGED' })],
+    [q1Reply(q1Pr({ mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' })), q1Reply(merged)],
+  );
+  const s = await settle(
+    env,
+    fetchPrSnapshot({ gh: env.gh, clock: env.clock, repo: REPO, number: 3301, config: snapshotConfig() }),
+  );
+  assert.equal(s.state, 'MERGED');
+  assert.equal(s.merge.mergedAt, '2026-10-22T09:16:00Z');
+  assert.equal(s.merge.mergeCommit, 'd'.repeat(40));
+  assert.equal(env.fake.calls.filter((c) => isQ1(c.argv)).length, 2);
+  assert.deepEqual(s.warnings, []);
+});

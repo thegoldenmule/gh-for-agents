@@ -80,7 +80,13 @@ export type MergeableRetry =
       waitedMs: number;
     }
   | { kind: 'head-changed'; headSha: string; queries: number; waitedMs: number }
-  | { kind: 'not-open'; queries: number; waitedMs: number };
+  | {
+      kind: 'not-open';
+      /** The state GitHub reported (a PR merged or closed mid-retry). */
+      state?: 'CLOSED' | 'MERGED';
+      queries: number;
+      waitedMs: number;
+    };
 
 export interface MergeableRetryOptions {
   gh: Gh;
@@ -115,7 +121,10 @@ export async function retryMergeable(o: MergeableRetryOptions): Promise<Mergeabl
     const pr = data.repository?.pullRequest;
     if (!pr) continue;
     if (pr.headRefOid !== o.headSha) return { kind: 'head-changed', headSha: pr.headRefOid, queries, waitedMs };
-    if (pr.state !== 'OPEN') return { kind: 'not-open', queries, waitedMs };
+    if (pr.state !== 'OPEN') {
+      const state = pr.state === 'MERGED' || pr.state === 'CLOSED' ? pr.state : undefined;
+      return { kind: 'not-open', ...(state ? { state } : {}), queries, waitedMs };
+    }
     const mergeable = toMergeable(pr.mergeable);
     lastMergeable = mergeable;
     lastState = toMergeState(pr.mergeStateStatus);

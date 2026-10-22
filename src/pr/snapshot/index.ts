@@ -188,6 +188,7 @@ export async function fetchPrSnapshot(o: FetchPrSnapshotOptions): Promise<PrSnap
   let mergeable: Mergeable;
   let mergeStateStatus: MergeStateStatus;
   let retries = 0;
+  let closedMidRetry: 'CLOSED' | 'MERGED' | undefined;
   for (let restart = 0; ; restart++) {
     warnings.length = 0;
     q1 = await fetchQ1({ gh: o.gh, repo: o.repo, number: o.number, warn });
@@ -209,6 +210,10 @@ export async function fetchPrSnapshot(o: FetchPrSnapshotOptions): Promise<PrSnap
     queries += r.queries;
     retries += r.queries;
     if (r.kind === 'head-changed' && restart === 0) continue; // restart the whole read once
+    // Merged or closed mid-retry: re-read, so state, mergedAt and mergeCommit are current (pr merge's
+    // already-merged path). Bounded: a PR that keeps flipping falls back to the retry's state.
+    if (r.kind === 'not-open' && restart < 2) continue;
+    if (r.kind === 'not-open') closedMidRetry = r.state;
     if (r.kind === 'settled') {
       mergeable = r.mergeable;
       mergeStateStatus = r.mergeStateStatus;
@@ -277,7 +282,7 @@ export async function fetchPrSnapshot(o: FetchPrSnapshotOptions): Promise<PrSnap
     title: pr.title,
     body: pr.body,
     author: authorOf(q1, o.config.bots),
-    state: pr.state,
+    state: closedMidRetry ?? pr.state,
     draft: pr.isDraft,
     createdAt: pr.createdAt,
     updatedAt: pr.updatedAt,
