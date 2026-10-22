@@ -22,6 +22,15 @@ export function loginMatches(login: string, configured: string): boolean {
   return bare(login) === bare(configured);
 }
 
+/**
+ * The trust gate's matcher (02 §9.4): only a GraphQL Bot actor, by its exact login (case-insensitive, and the
+ * `[bot]` suffix optional on either side, since GraphQL drops it). A User named like an app never matches.
+ */
+export function trustedBotMatches(actor: Pick<RawActor, '__typename' | 'login'> | null, configured: string): boolean {
+  if (actor?.__typename !== 'Bot') return false;
+  return bare(actor.login) === bare(configured);
+}
+
 /** The author alone is a bot: a Bot actor, a `[bot]` login, or a `bots.logins` entry. */
 export function isBotAuthor(actor: RawActor | null, config: BotsConfig): boolean {
   if (!actor) return false;

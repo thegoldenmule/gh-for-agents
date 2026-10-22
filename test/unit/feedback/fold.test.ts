@@ -350,3 +350,34 @@ test('verification is capped at 10 commits; the rest stay verified:null with EVE
     conditions: new Map(),
   });
 });
+
+test('trust.bots: a human named like a trusted app cannot mark a finding addressed', () => {
+  const config = configWith({ trust: { bots: ['my-app[bot]'] } });
+  const rv = review(
+    encode({
+      t: 'review',
+      id: 'r_aaaaaa',
+      gen: 'ghx/0.1.0',
+      verdict: 'comment',
+      summary: 'S',
+      commit: OLD,
+      findings: ['f_aaaaaa'],
+    }) + encode(finding()),
+  );
+  const resolve = encode({
+    t: 'comment',
+    id: 'c_cccccc',
+    gen: 'ghx/0.1.0',
+    kind: 'resolve',
+    targets: [{ id: 'f_aaaaaa', status: 'wontfix', note: 'n' }],
+  });
+  const human = foldFeedback(
+    input({ config, reviews: [rv], issueComments: [issue(resolve, { login: 'my-app', assoc: 'NONE' })] }),
+  );
+  assert.deepEqual(human.openFindings, ['f_aaaaaa']);
+  assert.ok(human.warnings.some((w) => w.code === 'UNTRUSTED_BLOCK'));
+  const app = foldFeedback(
+    input({ config, reviews: [rv], issueComments: [issue(resolve, { login: 'my-app', assoc: 'NONE', bot: true })] }),
+  );
+  assert.deepEqual(app.openFindings, []);
+});

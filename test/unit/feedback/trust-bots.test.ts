@@ -23,13 +23,27 @@ test('trust: OWNER, MEMBER and COLLABORATOR by default; trust.bots by login; unk
     assert.equal(trustOf('u', a, cfg.trust).trusted, false, a);
   }
   assert.equal(normalizeAssociation('SUPERUSER'), 'NONE');
-  assert.deepEqual(trustOf('ghx-runner', 'NONE', cfg.trust), { trusted: true });
-  assert.deepEqual(trustOf('other[bot]', 'NONE', cfg.trust), {
+  assert.deepEqual(trustOf('ghx-runner[bot]', 'NONE', cfg.trust, { __typename: 'Bot' }), { trusted: true });
+  assert.deepEqual(trustOf('GHX-Runner', 'NONE', cfg.trust, { __typename: 'Bot' }), { trusted: true });
+  assert.deepEqual(trustOf('other[bot]', 'NONE', cfg.trust, { __typename: 'Bot' }), {
     trusted: false,
     reason: 'untrusted author other[bot] (NONE)',
   });
   const narrow = configWith({ trust: { associations: ['OWNER'] } });
   assert.equal(trustOf('u', 'MEMBER', narrow.trust).trusted, false);
+});
+
+test('trust.bots matches only Bot actors, by exact login: a human named like the app is not trusted', () => {
+  const app = configWith({ trust: { bots: ['my-app[bot]'] } }).trust;
+  assert.equal(trustOf('my-app', 'NONE', app).trusted, false);
+  assert.equal(trustOf('my-app', 'NONE', app, { __typename: 'User' }).trusted, false);
+  assert.equal(trustOf('my-app[bot]', 'NONE', app, { __typename: 'User' }).trusted, false);
+  assert.equal(trustOf('my-app[bot]', 'NONE', app).trusted, false, 'no actor type: fails closed');
+  assert.equal(trustOf('my-app-2', 'NONE', app, { __typename: 'Bot' }).trusted, false);
+  assert.deepEqual(trustOf('my-app', 'NONE', app, { __typename: 'Bot' }), { trusted: true });
+  const bare = configWith({ trust: { bots: ['my-app'] } }).trust;
+  assert.equal(trustOf('my-app', 'NONE', bare, { __typename: 'User' }).trusted, false);
+  assert.deepEqual(trustOf('my-app[bot]', 'NONE', bare, { __typename: 'Bot' }), { trusted: true });
 });
 
 test('displayLogin adds [bot] for GraphQL Bot actors and maps a deleted author to ghost', () => {

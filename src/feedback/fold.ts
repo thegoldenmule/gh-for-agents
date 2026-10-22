@@ -188,7 +188,7 @@ function classifyAll(input: FeedbackInput, items: Item[], warnings: Warning[]): 
       continue;
     }
     const login = displayLogin(item.actor);
-    const trust = trustOf(login, item.association, input.config.trust);
+    const trust = trustOf(login, item.association, input.config.trust, item.actor);
     if (!trust.trusted) {
       warnings.push({
         code: 'UNTRUSTED_BLOCK',
