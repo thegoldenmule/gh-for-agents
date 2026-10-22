@@ -1,0 +1,16 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "repos/o/r/rules/branches/main?per_page=100"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4990\r\nX-Ratelimit-Reset: 1792670400\r\nX-Ratelimit-Resource: core\r\nX-Ratelimit-Used: 10\r\n\r\n[{\"type\":\"deletion\",\"ruleset_source_type\":\"Repository\",\"ruleset_source\":\"o/r\",\"ruleset_id\":11},{\"type\":\"required_status_checks\",\"ruleset_source_type\":\"Repository\",\"ruleset_source\":\"o/r\",\"ruleset_id\":11,\"parameters\":{\"strict_required_status_checks_policy\":false,\"do_not_enforce_on_create\":false,\"required_status_checks\":[{\"context\":\"build (ubuntu-latest)\"},{\"context\":\"lint\",\"integration_id\":15368}]}},{\"type\":\"deletion\",\"ruleset_source_type\":\"Repository\",\"ruleset_source\":\"o/r\",\"ruleset_id\":12},{\"type\":\"required_status_checks\",\"ruleset_source_type\":\"Organization\",\"ruleset_source\":\"o\",\"ruleset_id\":90,\"parameters\":{\"strict_required_status_checks_policy\":true,\"required_status_checks\":[{\"context\":\"lint\"},{\"context\":\"security/scan\"}]}}]",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "No sampled repo had a required_status_checks ruleset rule (03 \u00a73.2); shape from the REST docs. Includes an org-level ruleset and a duplicated deletion rule."
+  }
+}

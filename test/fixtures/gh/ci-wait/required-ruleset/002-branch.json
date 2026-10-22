@@ -1,0 +1,16 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "repos/o/r/branches/main"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4990\r\nX-Ratelimit-Reset: 1792670400\r\nX-Ratelimit-Resource: core\r\nX-Ratelimit-Used: 10\r\n\r\n{\"name\":\"main\",\"commit\":{\"sha\":\"cccccccccccccccccccccccccccccccccccccccc\",\"url\":\"https://api.github.com/repos/o/r/commits/cccccccccccccccccccccccccccccccccccccccc\"},\"protected\":true,\"protection\":{\"enabled\":true,\"required_status_checks\":{\"enforcement_level\":\"non_admins\",\"contexts\":[\"build (ubuntu-latest)\",\"test\"],\"checks\":[{\"context\":\"build (ubuntu-latest)\",\"app_id\":15368},{\"context\":\"test\",\"app_id\":15368}]}},\"protection_url\":\"https://api.github.com/repos/o/r/branches/main/protection\"}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "No sampled repo had a required_status_checks ruleset rule (03 \u00a73.2); shape from the REST docs. Includes an org-level ruleset and a duplicated deletion rule."
+  }
+}
