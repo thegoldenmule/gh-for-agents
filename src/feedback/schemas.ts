@@ -103,7 +103,7 @@ export const FeedbackCounts = z.object({
   comments: z.number(),
   bots: z.number(),
   unresolvedHumanThreads: z.number(),
-  /** Bodies dropped by the caller's size budget; the fold itself never omits anything. */
+  /** Items whose body or whole entry the caller's size budget dropped, each counted once; the fold never omits. */
   omitted: z.number(),
 });
 

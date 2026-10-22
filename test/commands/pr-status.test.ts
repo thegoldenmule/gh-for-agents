@@ -153,6 +153,35 @@ test('truncation: caps each item, then drops the oldest comment bodies to stay u
   assert.match(hint.message, new RegExp(`^${fb.counts.omitted} `));
 });
 
+test('truncation: a 300-comment PR stays under 16 KB by dropping whole old entries, never open findings', async () => {
+  const comments = Array.from({ length: 300 }, (_, i) => ({
+    databaseId: 20000 + i,
+    author: { __typename: 'User', login: `reviewer-${i % 9}` },
+    authorAssociation: 'CONTRIBUTOR',
+    body: `${i} ${'word '.repeat(100)}`,
+    createdAt: new Date(Date.UTC(2026, 9, 20, 0, i)).toISOString(),
+    lastEditedAt: null,
+    url: `https://github.com/powerhouse-inc/powerhouse/pull/3301#issuecomment-${20000 + i}`,
+  }));
+  const r = await run(['pr', 'status', REF], install(undefined, { pr: workedPr({ comments: page(comments) }) }));
+  assert.equal(r.exitCode, EXIT.OK, r.stdout.slice(0, 500));
+  assert.equal(r.json.spilled, undefined, 'not spilled');
+  assert.ok(byteLength(r.stdout) < 16_384, `${byteLength(r.stdout)} bytes`);
+  const fb = r.json.feedback;
+  assert.ok(fb.comments.length < 301, 'whole entries dropped');
+  assert.equal(fb.counts.comments, 301, 'counts keep the fold totals');
+  assert.ok(
+    fb.findings.some((f: { id: string }) => f.id === 'f_n2c6rv'),
+    'the open finding stays',
+  );
+  assert.deepEqual(r.json.openFindings, ['f_n2c6rv']);
+  const kept = fb.comments.filter((c: { id: string }) => c.id.startsWith('ic:2'));
+  assert.ok(kept.length === 0 || kept.at(-1).id === 'ic:20299', 'the newest survive');
+  const hint = r.json.warnings.find((w: { code: string }) => w.code === 'FEEDBACK_OMITTED');
+  assert.match(hint.message, new RegExp(`^${fb.counts.omitted} `));
+  assert.match(hint.message, /ghx pr feedback powerhouse-inc\/powerhouse#3301/);
+});
+
 test('an invalid PR block gives meta null, metaError and structured:false', async () => {
   const body = 'Plain prose.\n\n<!-- ghx:v2 {"t":"pr","id":"p_aaaaaa"} -->';
   const r = await run(['pr', 'status', REF], install(undefined, { pr: workedPr({ body }) }));
