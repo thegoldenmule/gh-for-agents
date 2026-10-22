@@ -7,6 +7,8 @@ export interface FakeGitState {
   remotes?: GitRemote[];
   branch?: string;
   refs?: Record<string, string>;
+  /** `git diff --name-only` results keyed `<from>...<to>`; absent keys answer undefined. */
+  diffs?: Record<string, string[]>;
 }
 
 export function fakeGit(s: FakeGitState = {}): Git {
@@ -16,6 +18,7 @@ export function fakeGit(s: FakeGitState = {}): Git {
     remotes: async () => s.remotes ?? [],
     currentBranch: async () => s.branch,
     revParse: async (ref) => s.refs?.[ref],
+    diffNames: async (from, to) => s.diffs?.[`${from}...${to}`],
   };
 }
 

@@ -1,0 +1,30 @@
+{
+  "argv": [
+    "api",
+    "graphql",
+    "--include",
+    "--hostname",
+    "github.com",
+    "-f",
+    "query=query($owner:String!,$name:String!,$base:String!,$head:String!,$baseRef:String!,$headRef:String!){ viewer{login} repository(owner:$owner,name:$name){ nameWithOwner viewerPermission defaultBranchRef{name} baseRef:ref(qualifiedName:$baseRef){target{oid}} headRef:ref(qualifiedName:$headRef){target{oid}} headPrs:pullRequests(headRefName:$head,first:20,orderBy:{field:CREATED_AT,direction:DESC}){nodes{number state url headRepository{nameWithOwner}}} parentPrs:pullRequests(headRefName:$base,states:[OPEN],first:20){nodes{number state url headRepository{nameWithOwner}}} } }",
+    "-f",
+    "base=main",
+    "-f",
+    "baseRef=refs/heads/main",
+    "-f",
+    "head=feat/retry-banner",
+    "-f",
+    "headRef=refs/heads/feat/retry-banner",
+    "-f",
+    "name=demo",
+    "-f",
+    "owner=octo"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"data\":{\"viewer\":{\"login\":\"octocat\"},\"repository\":{\"nameWithOwner\":\"octo/demo\",\"viewerPermission\":\"WRITE\",\"defaultBranchRef\":{\"name\":\"main\"},\"baseRef\":{\"target\":{\"oid\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\"headRef\":{\"target\":{\"oid\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}},\"headPrs\":{\"nodes\":[]},\"parentPrs\":{\"nodes\":[]}}}}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "pr create fixture (02 §2.6), written by hand from the API docs"
+  }
+}

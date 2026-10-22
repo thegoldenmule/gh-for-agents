@@ -150,8 +150,13 @@ function pickBlock(item: Item, blocks: BlockRead[]): Pick {
     const other = blocks.find((b) => b.status === 'ok');
     return { ok: false, error: other?.status === 'ok' ? `unexpected ${other.block.t} block in a review body` : null };
   }
-  const b = blocks[blocks.length - 1];
-  if (!b) return { ok: false, error: null };
+  // Every block is read; the last readable one places the comment, so a trailing broken block (warned
+  // BLOCK_INVALID) cannot discard a valid resolve before it.
+  const b = blocks.findLast((x) => x.status !== 'invalid');
+  if (!b) {
+    const invalid = blocks.findLast((x) => x.status === 'invalid');
+    return { ok: false, error: invalid?.status === 'invalid' ? invalid.error : null };
+  }
   if (b.status === 'invalid') return { ok: false, error: b.error };
   if (b.status === 'unknown-type') return { ok: true, placement: { as: 'comment', id: b.id, block: null }, used: [b] };
   if (b.block.t === 'comment')
@@ -208,6 +213,8 @@ function classifyAll(input: FeedbackInput, items: Item[], warnings: Warning[]): 
     }
     const pick = pickBlock(item, blocks);
     if (!pick.ok) {
+      // An unknown block type that placed nothing (one in a review body) still warns (02 §9.3).
+      for (const b of blocks) if (b.status === 'unknown-type') warnings.push(...b.warnings);
       out.set(item, unstructuredOrBot(item, pick.error));
       continue;
     }

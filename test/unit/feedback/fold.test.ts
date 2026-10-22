@@ -431,3 +431,27 @@ test('an invalid inline finding listed by its review becomes an open placeholder
   assert.ok(r.warnings.some((w) => w.code === 'BLOCK_INVALID'));
   assert.match(r.feedback.comments[0]?.blockError ?? '', /^invalid finding block/);
 });
+
+test('an unknown block type in a review body warns UNKNOWN_BLOCK_TYPE', () => {
+  const rv = review(encode({ t: 'poll', id: 'x_aaaaaa', gen: 'ghx/0.9.0' }));
+  const r = foldFeedback(input({ reviews: [rv] }));
+  assert.equal(r.feedback.reviews[0]?.structured, false);
+  assert.ok(r.warnings.some((w) => w.code === 'UNKNOWN_BLOCK_TYPE'));
+});
+
+test('a comment reads every block: a trailing invalid block does not discard a valid resolve', () => {
+  const rv = review(`${reviewBlock(['f_aaaaaa'])}\n${encode(finding())}`);
+  const resolve = encode({
+    t: 'comment',
+    id: 'c_dddddd',
+    gen: 'ghx/0.1.0',
+    kind: 'resolve',
+    targets: [{ id: 'f_aaaaaa', status: 'wontfix', note: 'n' }],
+  });
+  const r = foldFeedback(
+    input({ reviews: [rv], issueComments: [issue(`${resolve}\n<!-- ghx:v1 {"t":"comment"} -->`)] }),
+  );
+  assert.deepEqual(r.openFindings, []);
+  assert.equal(r.feedback.comments[0]?.structured, true);
+  assert.ok(r.warnings.some((w) => w.code === 'BLOCK_INVALID'));
+});

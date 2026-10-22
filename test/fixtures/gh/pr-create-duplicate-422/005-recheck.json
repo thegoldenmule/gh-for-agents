@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "api",
+    "graphql",
+    "--include",
+    "--hostname",
+    "github.com",
+    "-f",
+    "query=query($owner:String!,$name:String!,$head:String!){repository(owner:$owner,name:$name){pullRequests(headRefName:$head,states:[OPEN],first:20){nodes{number state url body headRepository{nameWithOwner}}}}}",
+    "-f",
+    "head=feat/retry-banner",
+    "-f",
+    "name=demo",
+    "-f",
+    "owner=octo"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"data\":{\"repository\":{\"pullRequests\":{\"nodes\":[{\"number\":41,\"state\":\"OPEN\",\"url\":\"https://github.com/octo/demo/pull/41\",\"body\":\"someone else\",\"headRepository\":{\"nameWithOwner\":\"octo/demo\"}}]}}}}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "pr create fixture (02 §2.6), written by hand from the API docs"
+  }
+}

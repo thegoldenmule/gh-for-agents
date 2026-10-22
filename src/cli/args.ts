@@ -46,6 +46,7 @@ type JsonSchema = {
   required?: string[];
   anyOf?: unknown[];
   oneOf?: unknown[];
+  jsonOnly?: boolean;
 };
 
 export interface FlagSpec {
@@ -92,6 +93,11 @@ export function deriveInterface(spec: Pick<AnyCommandSpec, 'input' | 'positional
   const jsonOnly: string[] = [];
   for (const [field, prop] of Object.entries(js.properties ?? {})) {
     if (positional.has(field)) continue;
+    // `.meta({jsonOnly: true})`: prose and structured fields arrive through --input only (02 §0), never as flags.
+    if (prop.jsonOnly === true) {
+      jsonOnly.push(field);
+      continue;
+    }
     let type = scalarType(prop);
     let multiple = false;
     if (!type && prop.type === 'array') {

@@ -1,0 +1,20 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "POST",
+    "--hostname",
+    "github.com",
+    "repos/octo/demo/pulls",
+    "--input",
+    "-"
+  ],
+  "exitCode": 1,
+  "stdout": "HTTP/2.0 422 Unprocessable Entity\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"message\":\"Validation Failed\",\"errors\":[{\"resource\":\"PullRequest\",\"code\":\"custom\",\"message\":\"A pull request already exists for octo:feat/retry-banner.\"}]}",
+  "stderr": "gh: Unprocessable Entity (HTTP 422)\n",
+  "meta": {
+    "source": "synthetic",
+    "note": "pr create fixture (02 §2.6), written by hand from the API docs"
+  }
+}

@@ -1,0 +1,75 @@
+// ghx pr create (02 §2, 03 M9.3): open a PR from a validated object. The flow is 02 §2.6: config →
+// zod + createRules → one GraphQL preflight → compare → local head check → render (--dry-run halts at
+// the POST) → POST /pulls via `gh api --input -` → exact read-back.
+import { z } from 'zod';
+import { defineCommand } from '../../core/command.ts';
+import { repoSlug } from '../../gh/types.ts';
+import { PrCreateCommandOutput } from '../../pr/create/output.ts';
+import { isLocalTarget, offlineIssues, outputOf, planCreate, previewOf, renderPlan } from '../../pr/create/plan.ts';
+import { validationError } from '../../pr/create/rules.ts';
+import { PrCreateInput } from '../../pr/create/schema.ts';
+import { submitPull } from '../../pr/create/submit.ts';
+
+// Every PR field arrives through --input only (02 §0: prose is JSON, never flags). The runner checks
+// structure loosely; the handler re-validates strictly so all issues come back together.
+const prShape = PrCreateInput.partial().shape;
+const jsonFields = Object.fromEntries(
+  Object.entries(prShape).map(([k, s]) => [k, s.meta({ jsonOnly: true })]),
+) as typeof prShape;
+
+const Input = z.strictObject(jsonFields).describe('A structured PR (02 §2.1); run ghx pr create --schema');
+
+const EXAMPLE = {
+  title: 'feat(app): show a banner when a request is retried',
+  description: 'Requests retried after a transient failure now show a dismissable banner.',
+  testing: [{ kind: 'unit', command: 'pnpm test', result: 'pass' }],
+  risk: 'low',
+  components: ['app'],
+  revertPolicy: 'revert-safe',
+  base: 'main',
+  head: 'feat/retry-banner',
+};
+
+export default defineCommand({
+  name: ['pr', 'create'],
+  summary: 'Open a PR from validated JSON: compact body, hidden ghx block, exact read-back',
+  description:
+    'Write the PR object with your file tool and pass --input pr.json. Draft and stackedOn are derived from the base. ' +
+    'Fails with every input issue at once (VALIDATION), DUPLICATE_PR when the head already has an open PR.',
+  kind: 'write',
+  input: Input,
+  output: PrCreateCommandOutput,
+  needs: { repo: 'inferred', config: 'required' },
+  jsonInput: 'required',
+  timeout: { defaultMs: 120_000, maxMs: 600_000 },
+  replaces: ['gh pr create'],
+  examples: [
+    { argv: 'ghx pr create -R octo/demo --input -', note: 'or --input pr.json', input: EXAMPLE },
+    { argv: 'ghx pr create --input pr.json --dry-run', note: 'validate, check and render without creating' },
+  ],
+  async run(raw, ctx) {
+    const resolved = await ctx.repo();
+    const { config } = await ctx.config();
+    const slug = repoSlug(resolved.repo);
+    if (resolved.cwdRepo !== undefined && !isLocalTarget(resolved)) {
+      ctx.warn({
+        code: 'CWD_REPO_MISMATCH',
+        message: `The cwd is ${repoSlug(resolved.cwdRepo)} but the target is ${slug}: config came from ${slug} and local git checks were skipped.`,
+      });
+    }
+    const offline = offlineIssues(raw, config);
+    if (offline.input === null || offline.issues.length > 0) throw validationError(offline.issues);
+    const plan = await planCreate(offline.input, { ctx, repo: resolved, config });
+    for (const w of plan.warnings) ctx.warn(w);
+    if (plan.issues.length > 0) throw validationError(plan.issues);
+    const { input, body } = renderPlan(plan, config);
+    ctx.preview(previewOf(plan, input, body, slug));
+    const submitted = await submitPull(
+      ctx,
+      resolved.repo,
+      { title: input.title, head: input.head, base: input.base, body, draft: plan.draft },
+      plan.blockId,
+    );
+    return outputOf(plan, input, submitted, slug);
+  },
+});

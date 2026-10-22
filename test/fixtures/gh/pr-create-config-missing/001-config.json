@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/octo/demo/contents/.github/ghx.json"
+  ],
+  "exitCode": 1,
+  "stdout": "HTTP/2.0 404 Not Found\r\nContent-Type: application/json\r\n\r\n{\"message\":\"Not Found\",\"status\":\"404\"}",
+  "stderr": "gh: Not Found (HTTP 404)\n",
+  "meta": {
+    "source": "synthetic",
+    "note": "pr create fixture (02 §2.6), written by hand from the API docs"
+  }
+}

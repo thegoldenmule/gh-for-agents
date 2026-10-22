@@ -18,6 +18,8 @@ export interface Git {
   currentBranch(): Promise<string | undefined>;
   /** `git rev-parse --verify <ref>^{commit}`. */
   revParse(ref: string): Promise<string | undefined>;
+  /** `git diff --name-only -z <from>...<to>`; undefined when git cannot answer (objects missing, not a checkout). */
+  diffNames(from: string, to: string): Promise<string[] | undefined>;
 }
 
 export interface GitDeps {
@@ -77,6 +79,10 @@ export function createGit(deps: GitDeps): Git {
     revParse: async (ref) => {
       const r = await run(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
       return r.ok && r.out ? r.out : undefined;
+    },
+    diffNames: async (from, to) => {
+      const r = await run(['diff', '--name-only', '-z', '--no-color', `${from}...${to}`]);
+      return r.ok ? r.out.split('\0').filter((f) => f !== '') : undefined;
     },
   };
 }
