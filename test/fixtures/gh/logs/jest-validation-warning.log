@@ -1,0 +1,21 @@
+﻿2026-10-21T16:50:10.1000000Z ##[group]Run pnpm test
+2026-10-21T16:50:10.2000000Z pnpm test
+2026-10-21T16:50:10.3000000Z ##[endgroup]
+2026-10-21T16:50:10.4000000Z ● Validation Warning:
+2026-10-21T16:50:10.5000000Z 
+2026-10-21T16:50:10.6000000Z   Unknown option "testURL" with value "http://localhost" was found.
+2026-10-21T16:50:10.7000000Z   This is probably a typing mistake. Fixing it will remove this message.
+2026-10-21T16:50:10.8000000Z 
+2026-10-21T16:50:10.9000000Z ● Deprecation Warning:
+2026-10-21T16:50:10.10000000Z 
+2026-10-21T16:50:11.1000000Z   Option "testPathPattern" was replaced by "--testPathPatterns".
+2026-10-21T16:50:11.2000000Z 
+2026-10-21T16:50:11.3000000Z  PASS  src/sum.test.js
+2026-10-21T16:50:11.4000000Z  PASS  src/parse.test.js
+2026-10-21T16:50:11.5000000Z 
+2026-10-21T16:50:11.6000000Z Test Suites: 2 passed, 2 total
+2026-10-21T16:50:11.7000000Z Tests:       5 passed, 5 total
+2026-10-21T16:50:11.8000000Z Snapshots:   0 total
+2026-10-21T16:50:11.9000000Z Time:        1.204 s
+2026-10-21T16:50:11.10000000Z ERROR: coverage threshold for lines (90%) not met: 84.2%
+2026-10-21T16:50:12.1000000Z ##[error]Process completed with exit code 1.

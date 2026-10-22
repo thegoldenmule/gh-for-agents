@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { extractFailures } from '../../../../src/ci/logs/extract/index.ts';
 import { jest } from '../../../../src/ci/logs/extract/jest.ts';
-import { analyzeRecorded } from './_recorded.ts';
+import { analyzeRecorded, corpusLog } from './_recorded.ts';
 
 test('recorded jest log (facebook/react): the ● test, listed once though the summary repeats it', async () => {
   const a = await analyzeRecorded('jest');
@@ -37,4 +37,17 @@ test('synthetic jest: ● suite › test, Tests: 1 failed, matcher line, suite f
     'expect(received).toBe(expected) // Object.is equality',
     "Cannot find module './missing' from 'src/broken.test.js'",
   ]);
+});
+
+test('jest-validation-warning.log: ● Validation/Deprecation Warning is not a failing test', () => {
+  const f = extractFailures(corpusLog('jest-validation-warning.log'));
+  assert.ok(f.runners.includes('jest'));
+  assert.deepEqual(f.tests, []);
+  assert.ok(!f.errors.some((e) => e.includes('Unknown option')));
+});
+
+test('jest-warning-and-fail.log: tests come from FAIL sections or › titles; warnings and Console are not tests', () => {
+  const f = extractFailures(corpusLog('jest-warning-and-fail.log'));
+  assert.deepEqual(f.tests, ['adds 1 + 2 to equal 3', 'sum › handles negatives']);
+  assert.equal(f.errors[0], 'expect(received).toBe(expected) // Object.is equality');
 });

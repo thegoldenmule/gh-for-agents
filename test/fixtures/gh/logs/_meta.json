@@ -12,6 +12,14 @@
     },
     "infra-econnreset.log": {
       "source": "corpus-shape"
+    },
+    "jest-validation-warning.log": {
+      "source": "synthetic",
+      "note": "jest config warnings above passing suites: not failing tests"
+    },
+    "jest-warning-and-fail.log": {
+      "source": "synthetic",
+      "note": "a top-level jest test (no \u203a) under a FAIL header, after a validation warning"
     }
   }
 }

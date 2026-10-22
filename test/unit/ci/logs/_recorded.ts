@@ -29,6 +29,13 @@ export async function analyzeRecorded(
 }
 
 /** A corpus-shape raw log (gh/logs/<name>.log), cleaned. */
-export function corpusLog(name: 'cancelled.log' | 'pnpm-err.log' | 'infra-econnreset.log'): string[] {
+export function corpusLog(
+  name:
+    | 'cancelled.log'
+    | 'pnpm-err.log'
+    | 'infra-econnreset.log'
+    | 'jest-validation-warning.log'
+    | 'jest-warning-and-fail.log',
+): string[] {
   return stripText(readFileSync(join(GH_FIXTURE_ROOT, 'logs', name), 'utf8'));
 }
