@@ -5,6 +5,7 @@ import { ExitCode } from '../core/exit.ts';
 import {
   emitDocument,
   emitError,
+  type OutputOptions,
   outputOptions,
   type RunDeps,
   type RunOutcome,
@@ -26,6 +27,9 @@ export interface CliDeps extends RunDeps {
 }
 
 const done = (exitCode: number): RunOutcome => ({ exitCode, forced: false });
+
+/** Schema output is documentation, so it is never spilled (final review decisions); errors stay bounded. */
+const unbounded = (o: OutputOptions): OutputOptions => ({ ...o, maxBytes: Number.POSITIVE_INFINITY });
 
 function leadingWords(argv: readonly string[]): string[] {
   const out: string[] = [];
@@ -84,18 +88,18 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<Ru
         return done(ExitCode.OK);
       }
       if (target.length === 0) {
-        await emitDocument(deps.stdout, schemaIndex(await deps.registry.list()), out);
+        await emitDocument(deps.stdout, schemaIndex(await deps.registry.list()), unbounded(out));
         return done(ExitCode.OK);
       }
       const t = target.join(' ');
       const builtin = SCHEMA_TARGETS[t];
       if (builtin) {
-        await emitDocument(deps.stdout, builtin.build(), out);
+        await emitDocument(deps.stdout, builtin.build(), unbounded(out));
         return done(ExitCode.OK);
       }
       const hit = await deps.registry.resolve(target);
       if (hit && hit.consumed === target.length) {
-        await emitDocument(deps.stdout, commandSchema(hit.spec), out);
+        await emitDocument(deps.stdout, commandSchema(hit.spec), unbounded(out));
         return done(ExitCode.OK);
       }
       const names = [...Object.keys(SCHEMA_TARGETS), ...(await deps.registry.names()).map((n) => n.join(' '))];
@@ -126,7 +130,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<Ru
       return done(ExitCode.OK);
     }
     if (parsed.globals.schema) {
-      await emitDocument(deps.stdout, commandSchema(spec), out);
+      await emitDocument(deps.stdout, commandSchema(spec), unbounded(out));
       return done(ExitCode.OK);
     }
     return await runCommand(spec, parsed, deps);
