@@ -224,19 +224,32 @@ test('--no-deny and --no-hook each leave their part out', async () => {
   assert.ok(!existsSync(b.claudeMd), '--no-snippet');
 });
 
-test('project scope: .claude/settings.json and CLAUDE.md at the git toplevel, with an absolute-path warning', async () => {
+test('project scope: .claude/settings.local.json and CLAUDE.md at the git toplevel; warns unless git ignores it', async () => {
   const repo = join(tmp, `repo-${n++}`);
   mkdirSync(join(repo, 'sub'), { recursive: true });
   writeFileSync(join(repo, 'CLAUDE.md'), '# Repo\n');
+  const local = join(repo, '.claude', 'settings.local.json');
   const h = home();
   const r = await run(['install', '--scope', 'project'], { HOME: h.home }, { git: fakeGit({ toplevel: repo }) });
   assert.equal(r.exitCode, 0, r.stdout);
   assert.equal(r.json.scope, 'project');
-  assert.deepEqual(r.json.changed, [join(repo, '.claude', 'settings.json'), join(repo, 'CLAUDE.md')]);
-  assert.deepEqual(json(join(repo, '.claude', 'settings.json')).permissions.deny, GHX_DENY_RULES);
+  assert.deepEqual(r.json.changed, [local, join(repo, 'CLAUDE.md')]);
+  assert.deepEqual(json(local).permissions.deny, GHX_DENY_RULES);
+  assert.ok(!existsSync(join(repo, '.claude', 'settings.json')), 'the shared settings.json is never written');
   assert.ok(read(join(repo, 'CLAUDE.md')).startsWith(`# Repo\n\n${BEGIN}`));
-  assert.ok(r.json.warnings.some((w: { code: string }) => w.code === 'INSTALL_PROJECT_ABSOLUTE_PATHS'));
+  assert.ok(r.json.warnings.some((w: { code: string }) => w.code === 'SETTINGS_LOCAL_NOT_IGNORED'));
   assert.ok(!existsSync(h.settings), 'user scope untouched');
+
+  const ignored = fakeGit({ toplevel: repo, ignored: [local] });
+  const again = await run(['install', '--scope', 'project'], { HOME: h.home }, { git: ignored });
+  assert.deepEqual(again.json.changed, []);
+  assert.ok(!(again.json.warnings ?? []).some((w: { code: string }) => w.code === 'SETTINGS_LOCAL_NOT_IGNORED'));
+
+  const un = await run(['uninstall', '--scope', 'project'], { HOME: h.home }, { git: ignored });
+  assert.equal(un.exitCode, 0, un.stdout);
+  assert.ok(!existsSync(local), 'uninstall removes the settings.local.json it emptied');
+  assert.equal(read(join(repo, 'CLAUDE.md')), '# Repo\n');
+
   const outside = await run(['install', '--scope', 'project'], { HOME: h.home }, { git: fakeGit({}) });
   assert.equal(outside.json.error.code, 'REPO_NOT_FOUND');
 });
@@ -391,7 +404,9 @@ test('doctor reports the install per scope, informationally, and flags a hook wh
   assert.notEqual(before.exitCode, 1, before.stdout);
   assert.deepEqual(before.json.install.user.hook, { installed: false, command: null, missingPaths: [] });
   assert.equal(before.json.install.user.status, 'missing');
-  assert.equal(before.json.install.project.settings, join(repo, '.claude', 'settings.json'));
+  assert.equal(before.json.install.project.settings, join(repo, '.claude', 'settings.local.json'));
+  assert.equal(before.json.install.project.shared.settings, join(repo, '.claude', 'settings.json'));
+  assert.equal(before.json.install.project.shared.status, 'missing');
   assert.ok(!before.json.checks.some((c: { name: string }) => c.name.includes('install')), 'not a failing check');
 
   await run(['install'], { HOME: h.home });
@@ -413,6 +428,23 @@ test('doctor reports the install per scope, informationally, and flags a hook wh
   assert.deepEqual(stale.json.install.user.hook.missingPaths, ['/gone/node']);
   assert.ok(stale.json.warnings.some((w: { code: string }) => w.code === 'INSTALL_HOOK_STALE'));
   assert.equal(stale.exitCode, before.exitCode);
+
+  // A hand install in the repo's shared .claude/settings.json is read too, with its own remedy.
+  mkdirSync(join(repo, '.claude'), { recursive: true });
+  writeFileSync(join(repo, '.claude', 'settings.json'), JSON.stringify(s));
+  const hand = await run(['doctor'], { HOME: h.home }, { git });
+  const shared = hand.json.install.project.shared;
+  assert.equal(shared.status, 'ok');
+  assert.equal(shared.hook.installed, true);
+  assert.deepEqual(shared.hook.missingPaths, ['/gone/node']);
+  assert.equal(shared.deny.present, GHX_DENY_RULES.length);
+  assert.equal(hand.json.install.project.hook.installed, false, 'settings.local.json is reported separately');
+  assert.ok(
+    hand.json.warnings.some(
+      (w: { code: string; message: string }) =>
+        w.code === 'INSTALL_HOOK_STALE' && w.message.includes(join(repo, '.claude', 'settings.json')),
+    ),
+  );
 
   const none = await run(['doctor'], {});
   assert.deepEqual(none.json.install, { user: null, project: null });

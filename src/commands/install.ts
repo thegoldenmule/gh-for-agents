@@ -23,13 +23,17 @@ export default defineCommand({
   summary: 'Install the Claude Code hook, gh write deny rules and CLAUDE.md block (try --dry-run).',
   description:
     'User scope edits $CLAUDE_CONFIG_DIR (else ~/.claude)/settings.json and CLAUDE.md; project scope edits ' +
-    '.claude/settings.json and CLAUDE.md at the git toplevel. Keeps every other setting, backs up each changed ' +
+    '.claude/settings.local.json (per machine, uncommitted) and CLAUDE.md at the git toplevel. Warns ' +
+    'SETTINGS_LOCAL_NOT_IGNORED when git would not ignore that file. Keeps every other setting, backs up each changed ' +
     'file to <file>.bak-ghx-<time>, and writes atomically. The hook runs this checkout by absolute path. ' +
     'Re-running updates in place; --dry-run returns unified diffs and writes nothing. Undo: ghx uninstall.',
   kind: 'write',
   needs: { repo: 'none', config: 'none' },
   input: z.strictObject({
-    scope: z.enum(['user', 'project']).default('user').describe('user (~/.claude) or project (repo .claude/)'),
+    scope: z
+      .enum(['user', 'project'])
+      .default('user')
+      .describe('user (~/.claude) or project (repo .claude/settings.local.json)'),
     deny: z.boolean().default(true).describe('Merge the gh write deny rules; --no-deny skips them'),
     hook: z.boolean().default(true).describe('Register the PreToolUse hook; --no-hook skips it'),
     snippet: z.boolean().default(true).describe('Add the CLAUDE.md block; --no-snippet skips it'),
@@ -75,10 +79,11 @@ export default defineCommand({
     }
     const binLink = input.binDir ? planBinLink(resolve(ctx.cwd, input.binDir), ctx.env) : null;
 
-    if (input.scope === 'project' && command) {
+    const settingsChange = changes.find((c) => c.kind === 'settings');
+    if (input.scope === 'project' && settingsChange && (await ctx.git.isIgnored(targets.settings)) === false) {
       ctx.warn({
-        code: 'INSTALL_PROJECT_ABSOLUTE_PATHS',
-        message: `The hook command in ${targets.settings} holds this machine's absolute paths; don't commit it as-is for other contributors.`,
+        code: 'SETTINGS_LOCAL_NOT_IGNORED',
+        message: `git does not ignore ${targets.settings}, which holds this machine's absolute hook paths; add .claude/settings.local.json to .gitignore so it isn't committed.`,
       });
     }
     const next = ['Start a new Claude Code session so it loads the settings.', 'Check the install: ghx doctor'];

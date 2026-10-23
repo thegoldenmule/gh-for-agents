@@ -37,7 +37,10 @@ export default defineCommand({
   kind: 'write',
   needs: { repo: 'none', config: 'none' },
   input: z.strictObject({
-    scope: z.enum(['user', 'project']).default('user').describe('user (~/.claude) or project (repo .claude/)'),
+    scope: z
+      .enum(['user', 'project'])
+      .default('user')
+      .describe('user (~/.claude) or project (repo .claude/settings.local.json)'),
     binDir: z.string().min(1).optional().describe('Also remove <dir>/ghx if it links to this checkout'),
   }),
   output: InstallOutput,

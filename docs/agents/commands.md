@@ -219,11 +219,11 @@ Install the Claude Code hook, gh write deny rules and CLAUDE.md block (try --dry
 
 write, single document, timeout 1m (max 5m).
 
-User scope edits $CLAUDE_CONFIG_DIR (else ~/.claude)/settings.json and CLAUDE.md; project scope edits .claude/settings.json and CLAUDE.md at the git toplevel. Keeps every other setting, backs up each changed file to <file>.bak-ghx-<time>, and writes atomically. The hook runs this checkout by absolute path. Re-running updates in place; --dry-run returns unified diffs and writes nothing. Undo: ghx uninstall.
+User scope edits $CLAUDE_CONFIG_DIR (else ~/.claude)/settings.json and CLAUDE.md; project scope edits .claude/settings.local.json (per machine, uncommitted) and CLAUDE.md at the git toplevel. Warns SETTINGS_LOCAL_NOT_IGNORED when git would not ignore that file. Keeps every other setting, backs up each changed file to <file>.bak-ghx-<time>, and writes atomically. The hook runs this checkout by absolute path. Re-running updates in place; --dry-run returns unified diffs and writes nothing. Undo: ghx uninstall.
 
 Flags:
 
-- `--scope <user|project>` (default `"user"`): user (~/.claude) or project (repo .claude/)
+- `--scope <user|project>` (default `"user"`): user (~/.claude) or project (repo .claude/settings.local.json)
 - `--deny` (default `true`): Merge the gh write deny rules; --no-deny skips them
 - `--hook` (default `true`): Register the PreToolUse hook; --no-hook skips it
 - `--snippet` (default `true`): Add the CLAUDE.md block; --no-snippet skips it
@@ -479,7 +479,7 @@ Removes only the ghx PreToolUse hook, the exact ghx deny rules, a GHX_HOOK_MODE 
 
 Flags:
 
-- `--scope <user|project>` (default `"user"`): user (~/.claude) or project (repo .claude/)
+- `--scope <user|project>` (default `"user"`): user (~/.claude) or project (repo .claude/settings.local.json)
 - `--bin-dir <string>`: Also remove <dir>/ghx if it links to this checkout
 
 Input: Flags and positionals only; --input file.json is also accepted.

@@ -282,6 +282,13 @@ export default defineCommand({
           message: `The ${scope} ghx hook runs ${s.hook.missingPaths.join(', ')}, which no longer exists; it fails open. Re-run ghx install${scope === 'project' ? ' --scope project' : ''}.`,
         });
       }
+      const shared = s?.shared;
+      if (shared?.hook.installed && shared.hook.missingPaths.length > 0) {
+        ctx.warn({
+          code: 'INSTALL_HOOK_STALE',
+          message: `The ghx hook in ${shared.settings} runs ${shared.hook.missingPaths.join(', ')}, which no longer exists; it fails open. ghx doesn't write that file: fix it by hand, or remove it and run ghx install --scope project.`,
+        });
+      }
     }
 
     return { ok: checks.every((c) => c.ok), gh, auth, git, config, checks, install };

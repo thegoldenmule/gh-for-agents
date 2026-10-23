@@ -35,8 +35,11 @@ export type Scope = 'user' | 'project';
 
 export interface Targets {
   scope: Scope;
+  /** User scope: settings.json. Project scope: .claude/settings.local.json, the per-machine, uncommitted file. */
   settings: string;
   claudeMd: string;
+  /** Project scope only: .claude/settings.json, which ghx never writes but doctor reads (hand installs). */
+  sharedSettings?: string;
 }
 
 export function shellQuote(s: string): string {
@@ -74,7 +77,13 @@ export async function resolveTargets(scope: Scope, env: Env, git: Git): Promise<
       hint: 'cd into the repository first, or use --scope user.',
     });
   }
-  return { scope, settings: join(top, '.claude', 'settings.json'), claudeMd: join(top, 'CLAUDE.md') };
+  // The hook command holds this machine's absolute paths, so it goes in the file Claude Code keeps per machine.
+  return {
+    scope,
+    settings: join(top, '.claude', 'settings.local.json'),
+    claudeMd: join(top, 'CLAUDE.md'),
+    sharedSettings: join(top, '.claude', 'settings.json'),
+  };
 }
 
 export function readOrNull(path: string): string | null {

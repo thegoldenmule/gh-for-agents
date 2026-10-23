@@ -20,6 +20,8 @@ export interface Git {
   revParse(ref: string): Promise<string | undefined>;
   /** `git diff --name-only -z <from>...<to>`; undefined when git cannot answer (objects missing, not a checkout). */
   diffNames(from: string, to: string): Promise<string[] | undefined>;
+  /** `git check-ignore -q -- <path>`: true ignored, false not, undefined when git cannot answer. */
+  isIgnored(path: string): Promise<boolean | undefined>;
 }
 
 export interface GitDeps {
@@ -48,13 +50,14 @@ export function parseRemoteConfig(stdout: string): GitRemote[] {
 export function createGit(deps: GitDeps): Git {
   const cmd = deps.gitPath ?? 'git';
   const env = { ...deps.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' };
-  const memo = new Map<string, Promise<{ ok: boolean; out: string; missing: boolean }>>();
+  const memo = new Map<string, Promise<{ ok: boolean; code: number | null; out: string; missing: boolean }>>();
   const run = (args: string[]) => {
     const key = args.join('\0');
     let p = memo.get(key);
     if (!p) {
       p = deps.proc({ cmd, args, env, cwd: deps.cwd, signal: deps.signal, timeoutMs: 10_000 }).then((r) => ({
         ok: r.exitCode === 0,
+        code: r.exitCode,
         out: r.stdout.trim(),
         missing: r.spawnError?.code === 'ENOENT',
       }));
@@ -83,6 +86,10 @@ export function createGit(deps: GitDeps): Git {
     diffNames: async (from, to) => {
       const r = await run(['diff', '--name-only', '-z', '--no-color', `${from}...${to}`]);
       return r.ok ? r.out.split('\0').filter((f) => f !== '') : undefined;
+    },
+    isIgnored: async (path) => {
+      const r = await run(['check-ignore', '-q', '--', path]);
+      return r.code === 0 ? true : r.code === 1 ? false : undefined;
     },
   };
 }

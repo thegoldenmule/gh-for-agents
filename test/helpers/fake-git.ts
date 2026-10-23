@@ -9,6 +9,8 @@ export interface FakeGitState {
   refs?: Record<string, string>;
   /** `git diff --name-only` results keyed `<from>...<to>`; absent keys answer undefined. */
   diffs?: Record<string, string[]>;
+  /** Paths `isIgnored` reports as ignored; every other path is not ignored. */
+  ignored?: string[];
 }
 
 export function fakeGit(s: FakeGitState = {}): Git {
@@ -19,6 +21,7 @@ export function fakeGit(s: FakeGitState = {}): Git {
     currentBranch: async () => s.branch,
     revParse: async (ref) => s.refs?.[ref],
     diffNames: async (from, to) => s.diffs?.[`${from}...${to}`],
+    isIgnored: async (path) => s.ignored?.includes(path) ?? false,
   };
 }
 

@@ -113,7 +113,8 @@ ghx init        # in the repo you work on: writes .github/ghx.json
 
 `ghx install` keeps your other settings and backs up each file it changes. It's
 safe to run again, and `ghx uninstall` removes only what it added. Use
-`--scope project` to install into a repo's `.claude/settings.json` instead.
+`--scope project` to install into a repo's `.claude/settings.local.json` (per
+machine, not committed) instead.
 [docs/agents/hooks.md](docs/agents/hooks.md) describes what it writes. The
 [docs/agents](docs/agents/) folder also has the skill and the command reference.
 

@@ -8,14 +8,14 @@ import { isGhxError } from '../core/errors.ts';
 import type { Git } from '../git/index.ts';
 import { scanShell } from '../hook/shell.ts';
 import { findBlock } from './claude-md.ts';
-import { readOrNull, resolveTargets, type Scope } from './files.ts';
+import { readOrNull, resolveTargets, type Scope, type Targets } from './files.ts';
 import { GHX_DENY_RULES, inspectSettings, parseSettings } from './settings.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
-export const ScopeInstall = z.object({
+const SettingsInstall = z.object({
   settings: z.string(),
-  status: z.enum(['missing', 'invalid', 'ok']).describe('Of settings.json'),
+  status: z.enum(['missing', 'invalid', 'ok']).describe('Of the settings file'),
   hook: z.object({
     installed: z.boolean(),
     command: z.string().nullable(),
@@ -23,7 +23,14 @@ export const ScopeInstall = z.object({
   }),
   deny: z.object({ present: z.number(), total: z.number(), missing: z.array(z.string()) }),
   hookMode: z.string().nullable(),
+});
+type SettingsInstall = z.input<typeof SettingsInstall>;
+
+export const ScopeInstall = SettingsInstall.extend({
   claudeMd: z.object({ path: z.string(), block: z.boolean() }),
+  shared: SettingsInstall.nullable()
+    .optional()
+    .describe('Project scope: .claude/settings.json, which ghx never writes, read in case of a hand install'),
 });
 export type ScopeInstall = z.input<typeof ScopeInstall>;
 
@@ -53,9 +60,9 @@ function missingPaths(command: string, env: Env): string[] {
   return out;
 }
 
-function inspectScope(settingsPath: string, claudeMdPath: string, env: Env): ScopeInstall {
+function inspectSettingsFile(settingsPath: string, env: Env): SettingsInstall {
   const text = readOrNull(settingsPath);
-  let status: ScopeInstall['status'] = text === null ? 'missing' : 'ok';
+  let status: SettingsInstall['status'] = text === null ? 'missing' : 'ok';
   let found = inspectSettings({});
   try {
     found = inspectSettings(parseSettings(text, settingsPath));
@@ -63,27 +70,34 @@ function inspectScope(settingsPath: string, claudeMdPath: string, env: Env): Sco
     status = 'invalid';
   }
   const command = found.hookCommands[0] ?? null;
-  const md = readOrNull(claudeMdPath);
-  let block = false;
-  try {
-    block = md !== null && findBlock(md, claudeMdPath) !== null;
-  } catch {
-    block = false;
-  }
   return {
     settings: settingsPath,
     status,
     hook: { installed: command !== null, command, missingPaths: command ? missingPaths(command, env) : [] },
     deny: { present: found.denyPresent.length, total: GHX_DENY_RULES.length, missing: found.denyMissing },
     hookMode: found.hookMode,
-    claudeMd: { path: claudeMdPath, block },
+  };
+}
+
+function inspectScope(t: Targets, env: Env): ScopeInstall {
+  const md = readOrNull(t.claudeMd);
+  let block = false;
+  try {
+    block = md !== null && findBlock(md, t.claudeMd) !== null;
+  } catch {
+    block = false;
+  }
+  return {
+    ...inspectSettingsFile(t.settings, env),
+    claudeMd: { path: t.claudeMd, block },
+    ...(t.sharedSettings ? { shared: inspectSettingsFile(t.sharedSettings, env) } : {}),
   };
 }
 
 async function scopeOrNull(scope: Scope, env: Env, git: Git): Promise<ScopeInstall | null> {
   try {
     const t = await resolveTargets(scope, env, git);
-    return inspectScope(t.settings, t.claudeMd, env);
+    return inspectScope(t, env);
   } catch (e) {
     if (isGhxError(e)) return null;
     throw e;

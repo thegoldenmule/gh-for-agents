@@ -173,3 +173,4 @@ Filled in by the wave 1 bootstrap agent (commits `f29f2eb`..`3cd7603`).
   - The interrupted `ci wait` summary carries `ci.observed:false` when nothing has been observed yet.
   - New non-overridable policy blocker `NO_MERGE_PERMISSION`. It fails closed, so it also blocks when GitHub reports `viewerPermission: null`. Its hint must say so.
   - `ci wait --until mergeable` keeps its 6–12 scope and doesn't evaluate it.
+- **2026-10-23, project-scope install target.** `ghx install`/`uninstall --scope project` write `<git toplevel>/.claude/settings.local.json`, not `.claude/settings.json`, because the hook command holds machine-specific absolute paths. CLAUDE.md stays at the repo root. Install warns `SETTINGS_LOCAL_NOT_IGNORED` (replacing `INSTALL_PROJECT_ABSOLUTE_PATHS`) when git doesn't ignore that file, and never edits `.gitignore`; doctor also reads a hand-installed `.claude/settings.json` as `install.project.shared`.
