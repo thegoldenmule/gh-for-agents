@@ -319,11 +319,15 @@ export async function* runWait(
     r.store.save(r.key, r.st, targetKey(r.target));
   };
 
+  const notObserved = () => ({ state: 'pending' as const, phase: 'registering' as const, observed: false });
+
   /** The result for one target in this process (terminal, or pending/interrupted for an unfinished one). */
   const summarise = (r: Run, outcome: Outcome, reason: string | null, d: Decision | null): TargetSummary => {
     const st = r.st as WaitState;
     const obs = r.last ?? { checks: [], ignored: [], expected: [] };
     const s = summariseCi({ headSha: st.boundSha, checks: obs.checks, ignored: obs.ignored, expected: obs.expected });
+    // Nothing observed yet (bound, but the first check read has not completed): not "no checks".
+    const ci = r.last === null ? notObserved() : { state: s.state, phase: s.phase, observed: true };
     const red = obs.checks.filter(isRed);
     const diags = red.flatMap((c) => {
       const j = c.jobId === null ? undefined : st.diagnoses[String(c.jobId)];
@@ -338,11 +342,12 @@ export async function* runWait(
       restarts: r.restarts,
       elapsedSec: Math.max(0, Math.round((clock.now() - r.waitStartedAt) / 1000)),
       ci: {
-        state: s.state,
-        phase: s.phase,
+        state: ci.state,
+        phase: ci.phase,
         counts: s.counts,
         failing: red.map((c) => ({ name: c.name, workflow: c.workflow, jobId: c.jobId, runId: c.runId })),
         expectedMissing: s.expectedMissing.map((e) => e.name),
+        observed: ci.observed,
       },
       diagnosis:
         diags.length > 0
@@ -371,8 +376,7 @@ export async function* runWait(
     restarts: r.restarts,
     elapsedSec: Math.max(0, Math.round((clock.now() - r.waitStartedAt) / 1000)),
     ci: {
-      state: 'pending',
-      phase: 'registering',
+      ...notObserved(),
       counts: { pass: 0, fail: 0, pending: 0, skipped: 0, cancelled: 0, neutral: 0, ignored: 0 },
       failing: [],
       expectedMissing: [],

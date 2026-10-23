@@ -257,6 +257,12 @@ export const TargetSummary = z.object({
       z.object({ name: z.string(), workflow: z.string().nullable(), jobId: DbId.nullable(), runId: DbId.nullable() }),
     ),
     expectedMissing: z.array(z.string()),
+    /**
+     * false: no check read for the head completed in this run yet (interrupted or returned while binding
+     * or before the first observation), so state is pending/registering with zero counts, not no-checks.
+     * Absent only in summaries saved by an older ghx.
+     */
+    observed: z.boolean().optional(),
   }),
   diagnosis: z.object({ jobs: z.array(CompactDiagnosis).max(CI_CAPS.compactJobs), partial: z.boolean() }).nullable(),
   stalled: z.array(StalledCheck),

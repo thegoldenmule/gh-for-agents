@@ -6,6 +6,7 @@ import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createShutdown } from '../../src/core/signals.ts';
+import { WaitSummary } from '../../src/schemas/ci.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeClock, flush } from '../helpers/fake-clock.ts';
 import { GitHubSim, type SimCall, type SimJob, sha, startWait, wait } from './ci-wait-world.ts';
@@ -255,6 +256,45 @@ test('an interrupt during the ETA read leaves the workflow to be sampled again o
   ]);
   await clock.runUntil(run2.isDone, { stepMs: 5_000, maxMs: 10 * MIN });
   assert.equal((await run2.p).exitCode, EXIT.OK);
+});
+
+for (const [where, stuck] of [
+  ['the ETA read (bound, nothing observed)', /\/actions\/workflows\//],
+  ['the baseline read (binding)', /\/pulls\/7\/commits/],
+] as const) {
+  test(`an interrupt during ${where} reports observed:false, never no-checks`, async () => {
+    const { clock, sim } = world();
+    sim.override(
+      (argv) => argv.some((x) => stuck.test(x)),
+      () => ({ status: 0, exitCode: 0, stdout: '', stderr: '', hang: true }),
+    );
+    const shutdown = createShutdown();
+    const run1 = startWait(sim, ['o/r#7'], { shutdown });
+    await clock.advance(MIN);
+    assert.equal(run1.isDone(), false, `stuck in ${where}`);
+    shutdown.trigger('SIGTERM');
+    await clock.runUntil(run1.isDone, { stepMs: 1_000, maxMs: 10_000 });
+    const r = await run1.p;
+    WaitSummary.parse(r.json);
+    assert.equal(r.json.outcome, 'interrupted');
+    const ci = r.json.results[0].ci;
+    assert.equal(ci.observed, false, JSON.stringify(ci));
+    assert.notEqual(ci.state, 'no-checks');
+    assert.equal(ci.state, 'pending');
+    assert.equal(ci.phase, 'registering');
+  });
+}
+
+test('an interrupt after the first observation reports observed:true', async () => {
+  const { clock, sim } = world();
+  const shutdown = createShutdown();
+  const run1 = startWait(sim, ['o/r#7'], { shutdown });
+  await clock.advance(MIN);
+  shutdown.trigger('SIGTERM');
+  await clock.runUntil(run1.isDone, { stepMs: 1_000, maxMs: 10_000 });
+  const ci = (await run1.p).json.results[0].ci;
+  assert.equal(ci.observed, true);
+  assert.equal(ci.counts.pending, 2);
 });
 
 test('branch:main moved since run 1: run 2 binds the new head fresh, not the stored SHA', async () => {
