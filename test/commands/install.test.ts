@@ -42,7 +42,9 @@ const run = (argv: string[], env: Record<string, string>, o: { cwd?: string; git
 
 const read = (p: string) => readFileSync(p, 'utf8');
 const json = (p: string) => JSON.parse(read(p));
-const backups = (dir: string) => readdirSync(dir).filter((f) => f.includes('.bak-ghx-'));
+/** Every ghx backup under dir, at any depth (today's live in <config>/ghx-install/<target>/backups). */
+const backups = (dir: string) =>
+  (readdirSync(dir, { recursive: true }) as string[]).filter((f) => f.includes('.bak-ghx-')).sort();
 
 /** A settings file as Claude Code writes it, with other hooks, permissions and env. */
 const EXISTING = `${JSON.stringify(
@@ -298,6 +300,30 @@ test('project scope: .claude/settings.local.json and CLAUDE.md at the git toplev
 
   const outside = await run(['install', '--scope', 'project'], { HOME: h.home }, { git: fakeGit({}) });
   assert.equal(outside.json.error.code, 'REPO_NOT_FOUND');
+});
+
+test('project-scope backups go to the user config dir, never into the git tree, and are reported', async () => {
+  const repo = join(tmp, `repo-${n++}`);
+  const local = join(repo, '.claude', 'settings.local.json');
+  mkdirSync(join(repo, '.claude'), { recursive: true });
+  writeFileSync(local, '{\n  "model": "opus"\n}\n');
+  writeFileSync(join(repo, 'CLAUDE.md'), '# Repo\n');
+  const h = home();
+  const git = fakeGit({ toplevel: repo, ignored: [local] });
+  const r = await run(['install', '--scope', 'project'], { HOME: h.home }, { git });
+  assert.equal(r.exitCode, 0, r.stdout);
+  assert.deepEqual(backups(repo), [], 'nothing backed up inside the repository');
+  const paths = r.json.files.map((f: { backup: string }) => f.backup);
+  for (const p of paths) {
+    assert.ok(p.startsWith(join(h.dir, 'ghx-install', 'project-')), p);
+    assert.match(p, /\/backups\/(settings\.local\.json|CLAUDE\.md)\.bak-ghx-\d{8}T\d{6}Z$/);
+  }
+  assert.equal(read(paths[0]), '{\n  "model": "opus"\n}\n');
+  assert.equal(read(paths[1]), '# Repo\n');
+  const u = await run(['uninstall', '--scope', 'project'], { HOME: h.home }, { git });
+  assert.equal(u.exitCode, 0, u.stdout);
+  assert.deepEqual(backups(repo), []);
+  assert.equal(read(local), '{\n  "model": "opus"\n}\n');
 });
 
 test('--bin-dir links <dir>/ghx to bin/ghx.js, reports PATH, and is idempotent', async () => {

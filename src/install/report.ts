@@ -27,7 +27,10 @@ export const InstallOutput = z.object({
       path: z.string(),
       kind: z.enum(['settings', 'claude-md']),
       action: Action,
-      backup: z.string().nullable().describe('Copy of the file as it was; null when unchanged or new'),
+      backup: z
+        .string()
+        .nullable()
+        .describe('Copy of the file as it was, under <config dir>/ghx-install/; null when unchanged or new'),
     }),
   ),
   hookCommand: z.string().nullable(),
@@ -50,6 +53,8 @@ export type InstallOutput = z.input<typeof InstallOutput>;
 
 export interface Plan {
   scope: Scope;
+  /** Where backups of changed files go: Targets.stateDir/backups, in the user config dir. */
+  backupDir: string;
   changes: FileChange[];
   hookCommand: string | null;
   denyRules: readonly string[];
@@ -77,7 +82,7 @@ export function finish(plan: Plan, o: { dryRun: boolean; clock: Clock; next: str
       });
     }
   } else {
-    files = commitChanges(plan.changes, o.clock);
+    files = commitChanges(plan.changes, o.clock, plan.backupDir);
     if (plan.binLink) commitBinLink(plan.binLink);
     if (plan.manifest?.content === null) rmSync(plan.manifest.path, { force: true });
     else if (plan.manifest) atomicWrite(plan.manifest.path, plan.manifest.content);

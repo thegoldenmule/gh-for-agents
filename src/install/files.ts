@@ -149,13 +149,15 @@ function stamp(clock: Clock): string {
     .replace(/\.\d+Z$/, 'Z');
 }
 
-function backupPath(path: string, ts: string): string {
-  let p = `${path}.bak-ghx-${ts}`;
-  for (let n = 1; existsSync(p); n++) p = `${path}.bak-ghx-${ts}-${n}`;
+/** <dir>/<name>.bak-ghx-<ts>, numbered when taken. */
+function backupPath(dir: string, path: string, ts: string): string {
+  const base = join(dir, basename(path));
+  let p = `${base}.bak-ghx-${ts}`;
+  for (let n = 1; existsSync(p); n++) p = `${base}.bak-ghx-${ts}-${n}`;
   return p;
 }
 
-/** Every backup ghx made of `path`, by name. */
+/** Every backup a legacy ghx install made beside `path` (today's go to Targets.stateDir/backups), by name. */
 export function backupsOf(path: string): string[] {
   const dir = dirname(path);
   const prefix = `${basename(path)}.bak-ghx-`;
@@ -184,17 +186,19 @@ export function atomicWrite(path: string, content: string): void {
 }
 
 /**
- * Apply the changes: back up each changed file that exists, then write or delete it. Callers plan and
- * validate every file before calling this, so a refusal never leaves a half-applied install.
+ * Apply the changes: back up each changed file that exists into `backupDir` (never beside it, so a
+ * project-scope backup can't land in the git tree), then write or delete it. Callers plan and validate
+ * every file before calling this, so a refusal never leaves a half-applied install.
  */
-export function commitChanges(changes: readonly FileChange[], clock: Clock): FileResult[] {
+export function commitChanges(changes: readonly FileChange[], clock: Clock, backupDir: string): FileResult[] {
   const ts = stamp(clock);
   return changes.map((c) => {
     const action = actionOf(c);
     if (action === 'unchanged') return { path: c.path, kind: c.kind, action, backup: null };
     let backup: string | null = null;
     if (c.before !== null) {
-      backup = backupPath(c.path, ts);
+      mkdirSync(backupDir, { recursive: true });
+      backup = backupPath(backupDir, c.path, ts);
       copyFileSync(c.path, backup);
     }
     if (c.after === null) {

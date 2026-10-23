@@ -2,7 +2,7 @@
 // (src/install/owned.ts): its PreToolUse hook, the deny rules it added, the GHX_HOOK_MODE it set, the
 // containers it created, the marked CLAUDE.md block, and a bin link into this checkout. The user's own
 // identical rules and everything else stay. Backed up, atomic and idempotent, like install.
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { defineCommand } from '../core/command.ts';
 import { removeBlock } from '../install/claude-md.ts';
@@ -78,6 +78,7 @@ export default defineCommand({
     return finish(
       {
         scope: targets.scope,
+        backupDir: join(targets.stateDir, 'backups'),
         changes,
         hookCommand: found.hookCommands[0] ?? null,
         denyRules: found.denyPresent,

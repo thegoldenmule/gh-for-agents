@@ -5,7 +5,7 @@
 // User scope adds no deny rules (04 "enforcement scope"): they can't be conditional, and the hook
 // enforces only in repos with .github/ghx.json. A user-scope re-install removes ones ghx added earlier.
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { defineCommand } from '../core/command.ts';
 import { GhxError } from '../core/errors.ts';
@@ -41,7 +41,8 @@ export default defineCommand({
     '(per machine, uncommitted) and CLAUDE.md at the git toplevel, and also merges the gh write deny rules ' +
     '(--no-deny skips them). Warns ' +
     'SETTINGS_LOCAL_NOT_IGNORED when git would not ignore that file. Keeps every other setting, backs up each changed ' +
-    'file to <file>.bak-ghx-<time>, and writes atomically. The hook runs this checkout by absolute path. ' +
+    'file to <config dir>/ghx-install/<scope>-<hash>/backups/<name>.bak-ghx-<time> (never into the repo; ' +
+    'files[].backup gives each path) beside the record of what it added, and writes atomically. The hook runs this checkout by absolute path. ' +
     'Re-running updates in place; --dry-run returns unified diffs and writes nothing. Undo: ghx uninstall.',
   kind: 'write',
   needs: { repo: 'none', config: 'none' },
@@ -146,6 +147,7 @@ export default defineCommand({
     return finish(
       {
         scope: targets.scope,
+        backupDir: join(targets.stateDir, 'backups'),
         changes,
         hookCommand: command,
         denyRules: deny ? GHX_DENY_RULES : [],
