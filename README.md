@@ -98,10 +98,12 @@ order is in [04-build-coordination](docs/plans/04-build-coordination.md).
 
 To run it from source, you need Node 24, pnpm and `gh` 2.81.0 or later, logged
 in. There is no build step and no published package. `ghx install` sets up
-Claude Code: it adds deny rules for raw `gh` writes and the PreToolUse hook to
-`~/.claude/settings.json`, adds the CLAUDE.md snippet to `~/.claude/CLAUDE.md`,
-and with `--bin-dir` links `ghx` onto your `PATH`. Look at its diffs first, then
-apply them, check the setup, and write a config for your repo:
+Claude Code: it adds the PreToolUse hook to `~/.claude/settings.json`, adds the
+CLAUDE.md snippet to `~/.claude/CLAUDE.md`, and with `--bin-dir` links `ghx`
+onto your `PATH`. Enforcement is per repo: the hook blocks raw `gh` writes and
+suggests `ghx` reads only in repos that have `.github/ghx.json`, and stays
+silent elsewhere. Look at its diffs first, then apply them, check the setup,
+and write a config for your repo:
 
 ```sh
 pnpm install
@@ -114,7 +116,9 @@ ghx init        # in the repo you work on: writes .github/ghx.json
 `ghx install` keeps your other settings and backs up each file it changes. It's
 safe to run again, and `ghx uninstall` removes only what it added. Use
 `--scope project` to install into a repo's `.claude/settings.local.json` (per
-machine, not committed) instead.
+machine, not committed) instead; that scope also adds `permissions.deny` rules
+for raw `gh` writes. User scope doesn't, because deny rules can't be
+conditional: they would block `gh` in every repo, configured or not.
 [docs/agents/hooks.md](docs/agents/hooks.md) describes what it writes. The
 [docs/agents](docs/agents/) folder also has the skill and the command reference.
 

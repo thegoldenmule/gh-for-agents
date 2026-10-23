@@ -165,6 +165,38 @@ export function uninstallSettings(input: Json, prune: boolean): Json {
   return s;
 }
 
+/** The containers ghx creates when absent, innermost after outermost. */
+export const CONTAINERS = ['permissions', 'permissions.deny', 'hooks', 'hooks.PreToolUse', 'env'] as const;
+
+/** The value at a CONTAINERS path, or undefined. */
+export function containerOf(s: Json, path: string): unknown {
+  let v: unknown = s;
+  for (const k of path.split('.')) v = isObj(v) ? v[k] : undefined;
+  return v;
+}
+
+/** Delete each listed container that is now empty, innermost first. */
+export function pruneContainers(s: Json, containers: readonly string[]): void {
+  for (const path of [...CONTAINERS].reverse()) {
+    if (!containers.includes(path)) continue;
+    const keys = path.split('.');
+    const last = keys.pop() as string;
+    const parent = keys.length === 0 ? s : containerOf(s, keys.join('.'));
+    if (!isObj(parent)) continue;
+    const v = parent[last];
+    if (Array.isArray(v) ? v.length === 0 : isObj(v) && Object.keys(v).length === 0) delete parent[last];
+  }
+}
+
+/** The settings without these exact deny rules; listed containers this leaves empty are dropped. */
+export function removeDenyRules(input: Json, rules: readonly string[], containers: readonly string[]): Json {
+  const s = clone(input);
+  if (rules.length === 0 || !isObj(s.permissions) || !Array.isArray(s.permissions.deny)) return s;
+  s.permissions.deny = s.permissions.deny.filter((r) => !(typeof r === 'string' && rules.includes(r)));
+  pruneContainers(s, containers);
+  return s;
+}
+
 export interface SettingsInspection {
   /** Commands of every ghx PreToolUse hook. */
   hookCommands: string[];

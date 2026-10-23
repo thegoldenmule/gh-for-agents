@@ -59,7 +59,7 @@ const EXISTING = `${JSON.stringify(
   2,
 )}\n`;
 
-test('fresh install: creates settings.json and CLAUDE.md with the deny rules, one hook and the block', async () => {
+test('fresh install: creates settings.json and CLAUDE.md with one hook and the block, and no deny rules at user scope', async () => {
   const h = home();
   const r = await run(['install'], { HOME: h.home });
   assert.equal(r.exitCode, 0, r.stdout);
@@ -74,7 +74,8 @@ test('fresh install: creates settings.json and CLAUDE.md with the deny rules, on
     ],
   );
   const s = json(h.settings);
-  assert.deepEqual(s.permissions.deny, GHX_DENY_RULES);
+  assert.equal(s.permissions, undefined, 'user scope adds no deny rules');
+  assert.deepEqual(r.json.denyRules, []);
   assert.deepEqual(s.hooks.PreToolUse, [
     { matcher: 'Bash|Monitor', hooks: [{ type: 'command', command: r.json.hookCommand, timeout: 5 }] },
   ]);
@@ -82,7 +83,7 @@ test('fresh install: creates settings.json and CLAUDE.md with the deny rules, on
   assert.ok(r.json.hookCommand.includes(`'${process.execPath}'`));
   assert.ok(r.json.hookCommand.includes(`'${GHX_BIN}' hook claude-pretooluse`));
   const md = read(h.claudeMd);
-  assert.ok(md.startsWith(`${BEGIN}\n## GitHub: use \`ghx\`, not \`gh\``));
+  assert.ok(md.startsWith(`${BEGIN}\n## GitHub: use \`ghx\` in repos that have \`.github/ghx.json\``));
   assert.ok(md.endsWith(`${END}\n`));
   assert.equal(r.json.binLink, null);
   assert.deepEqual(backups(h.dir), []);
@@ -138,7 +139,7 @@ test('an existing settings file keeps its keys, order, other hooks, permissions 
   assert.deepEqual(Object.keys(s.permissions), ['allow', 'deny', 'defaultMode']);
   assert.deepEqual(s.env, { FOO: 'bar' });
   assert.deepEqual(s.permissions.allow, orig.permissions.allow);
-  assert.deepEqual(s.permissions.deny, ['Bash(rm -rf:*)', ...GHX_DENY_RULES]);
+  assert.deepEqual(s.permissions, orig.permissions);
   assert.deepEqual(s.hooks.PostToolUse, orig.hooks.PostToolUse);
   assert.equal(s.hooks.PreToolUse.length, 1);
   assert.equal(s.model, 'opus');
@@ -170,7 +171,7 @@ test('an existing CLAUDE.md is preserved, and its ghx block is replaced in place
   const md = read(h.claudeMd);
   assert.ok(md.startsWith(`# Global rules\n\n- be brief\n\n${BEGIN}\n`));
   // The user adds a section after the block, and the block goes stale.
-  const stale = `${md.replace(/## GitHub: use `ghx`, not `gh`/, '## Old ghx text')}\n## Later\n`;
+  const stale = `${md.replace(/## GitHub: use `ghx` in repos that have `.github\/ghx.json`/, '## Old ghx text')}\n## Later\n`;
   writeFileSync(h.claudeMd, stale);
   const r = await run(['install', '--no-deny', '--no-hook'], { HOME: h.home });
   assert.equal(r.exitCode, 0, r.stdout);
@@ -195,7 +196,7 @@ test('--dry-run writes nothing and returns unified diffs in wouldRun', async () 
   );
   const [sd, md] = r.json.wouldRun.map((w: { diff: string }) => w.diff);
   assert.match(sd, /^--- .*settings\.json\n\+\+\+ .*settings\.json\n@@ /);
-  assert.match(sd, /^\+ {6}"Bash\(gh pr merge:\*\)",?$/m);
+  assert.doesNotMatch(sd, /Bash\(gh pr merge/);
   assert.match(sd, /^\+ {12}"command": ".*hook claude-pretooluse",$/m);
   assert.match(md, /^\+<!-- ghx:begin -->$/m);
   assert.equal(read(h.settings), EXISTING);
@@ -208,20 +209,65 @@ test('--dry-run writes nothing and returns unified diffs in wouldRun', async () 
   assert.ok(!existsSync(fresh));
 });
 
-test('--no-deny and --no-hook each leave their part out', async () => {
+test('--no-deny and --no-hook each leave their part out; --deny is refused at user scope', async () => {
+  const repo = join(tmp, `repo-${n++}`);
+  mkdirSync(repo);
+  const local = join(repo, '.claude', 'settings.local.json');
   const a = home();
-  const r1 = await run(['install', '--no-deny', '--no-snippet'], { HOME: a.home });
+  const git = fakeGit({ toplevel: repo, ignored: [local] });
+  const r1 = await run(['install', '--scope', 'project', '--no-deny', '--no-snippet'], { HOME: a.home }, { git });
   assert.equal(r1.exitCode, 0, r1.stdout);
   assert.deepEqual(r1.json.denyRules, []);
-  assert.equal(json(a.settings).permissions, undefined);
-  assert.equal(json(a.settings).hooks.PreToolUse.length, 1);
-  const b = home();
-  const r2 = await run(['install', '--no-hook', '--no-snippet'], { HOME: b.home });
+  assert.equal(json(local).permissions, undefined);
+  assert.equal(json(local).hooks.PreToolUse.length, 1);
+  rmSync(join(repo, '.claude'), { recursive: true });
+  const r2 = await run(['install', '--scope', 'project', '--no-hook', '--no-snippet'], { HOME: a.home }, { git });
   assert.equal(r2.exitCode, 0, r2.stdout);
   assert.equal(r2.json.hookCommand, null);
-  assert.equal(json(b.settings).hooks, undefined);
-  assert.deepEqual(json(b.settings).permissions.deny, GHX_DENY_RULES);
-  assert.ok(!existsSync(b.claudeMd), '--no-snippet');
+  assert.equal(json(local).hooks, undefined);
+  assert.deepEqual(json(local).permissions.deny, GHX_DENY_RULES);
+  assert.ok(!existsSync(join(repo, 'CLAUDE.md')), '--no-snippet');
+  // User scope: --no-hook alone has nothing to put in settings; --deny is refused before anything is read.
+  const b = home();
+  const r3 = await run(['install', '--no-hook', '--no-snippet'], { HOME: b.home });
+  assert.equal(r3.exitCode, 0, r3.stdout);
+  assert.ok(!existsSync(b.settings));
+  const r4 = await run(['install', '--deny'], { HOME: b.home });
+  assert.equal(r4.exitCode, EXIT.USAGE);
+  assert.equal(r4.json.error.code, 'VALIDATION');
+  assert.match(r4.json.error.hint, /--scope project/);
+  assert.ok(!existsSync(b.claudeMd));
+});
+
+test('a user-scope re-install removes the deny rules an earlier ghx install added, and only those', async () => {
+  // The legacy state: a user rule identical to a ghx one, then a pre-manifest ghx install (backup sibling).
+  const mine = { permissions: { deny: ['Bash(gh pr merge:*)', 'Bash(rm:*)'] } };
+  const pre = `${JSON.stringify(mine, null, 2)}\n`;
+  const old = {
+    permissions: { deny: [...mine.permissions.deny, ...GHX_DENY_RULES.filter((r) => r !== 'Bash(gh pr merge:*)')] },
+    hooks: {
+      PreToolUse: [
+        { matcher: 'Bash|Monitor', hooks: [{ type: 'command', command: "'/n' '/g' hook claude-pretooluse" }] },
+      ],
+    },
+  };
+  const h = home({
+    'settings.json': `${JSON.stringify(old, null, 2)}\n`,
+    'settings.json.bak-ghx-20261001T000000Z': pre,
+  });
+  const r = await run(['install', '--no-snippet'], { HOME: h.home });
+  assert.equal(r.exitCode, 0, r.stdout);
+  assert.deepEqual(json(h.settings).permissions.deny, ['Bash(gh pr merge:*)', 'Bash(rm:*)']);
+  assert.ok(r.json.warnings.some((w: { code: string }) => w.code === 'INSTALL_DENY_REMOVED'));
+  assert.deepEqual(r.json.denyRules, []);
+  // Hand-written ghx-identical rules with no ghx install behind them are not ghx's to remove.
+  const hand = home({
+    'settings.json': `${JSON.stringify({ permissions: { deny: [...GHX_DENY_RULES] } }, null, 2)}\n`,
+  });
+  const r2 = await run(['install', '--no-snippet'], { HOME: hand.home });
+  assert.equal(r2.exitCode, 0, r2.stdout);
+  assert.deepEqual(json(hand.settings).permissions.deny, GHX_DENY_RULES);
+  assert.ok(!(r2.json.warnings ?? []).some((w: { code: string }) => w.code === 'INSTALL_DENY_REMOVED'));
 });
 
 test('project scope: .claude/settings.local.json and CLAUDE.md at the git toplevel; warns unless git ignores it', async () => {
@@ -285,17 +331,25 @@ test('a bin link that collides with a foreign file is refused: INSTALL_BIN_CONFL
   assert.ok(lstatSync(join(bin, 'other')).isSymbolicLink());
 });
 
-test('the hook command it writes runs without PATH and denies a raw gh write', async () => {
+test('the hook command it writes runs without PATH, denies a raw gh write in a configured repo, and is silent elsewhere', async () => {
   const h = home();
   const r = await run(['install', '--no-snippet'], { HOME: h.home });
   const command = json(h.settings).hooks.PreToolUse[0].hooks[0].command;
   assert.equal(command, r.json.hookCommand);
-  const payload = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'gh -R o/r pr merge 12' } });
-  const out = spawnSync('/bin/sh', ['-c', command], {
-    input: payload,
-    env: { PATH: '/nonexistent' },
-    encoding: 'utf8',
-  });
+  const repo = join(tmp, `repo-${n++}`);
+  mkdirSync(join(repo, '.git'), { recursive: true });
+  const send = (cwd: string) =>
+    spawnSync('/bin/sh', ['-c', command], {
+      input: JSON.stringify({ cwd, tool_name: 'Bash', tool_input: { command: 'gh -R o/r pr merge 12' } }),
+      env: { PATH: '/nonexistent' },
+      encoding: 'utf8',
+    });
+  const quiet = send(repo);
+  assert.equal(quiet.status, 0, quiet.stderr);
+  assert.equal(quiet.stdout, '', 'no .github/ghx.json: no enforcement');
+  mkdirSync(join(repo, '.github'));
+  writeFileSync(join(repo, '.github', 'ghx.json'), '{}\n');
+  const out = send(repo);
   assert.equal(out.status, 0, out.stderr);
   const reply = JSON.parse(out.stdout);
   assert.equal(reply.hookSpecificOutput.permissionDecision, 'deny');
@@ -318,7 +372,7 @@ test('uninstall restores the original byte for byte when ghx was the only change
   assert.equal(read(h.claudeMd), md);
   assert.ok(!existsSync(join(bin, 'ghx')));
   assert.equal(r.json.binLink.action, 'removed');
-  assert.deepEqual(r.json.denyRules, GHX_DENY_RULES);
+  assert.deepEqual(r.json.denyRules, []);
   assert.match(r.json.hookCommand, /hook claude-pretooluse$/);
   assert.ok(r.json.files.every((f: { action: string; backup: string | null }) => f.action === 'updated' && f.backup));
   // Idempotent: a second uninstall changes nothing and makes no new backups.
@@ -416,7 +470,7 @@ test('doctor reports the install per scope, informationally, and flags a hook wh
   assert.equal(u.status, 'ok');
   assert.equal(u.hook.installed, true);
   assert.deepEqual(u.hook.missingPaths, []);
-  assert.deepEqual(u.deny, { present: GHX_DENY_RULES.length, total: GHX_DENY_RULES.length, missing: [] });
+  assert.equal(u.deny.present, 0, 'user scope has no deny rules');
   assert.equal(u.claudeMd.block, true);
   assert.equal(after.json.install.project.hook.installed, false);
 
@@ -437,7 +491,7 @@ test('doctor reports the install per scope, informationally, and flags a hook wh
   assert.equal(shared.status, 'ok');
   assert.equal(shared.hook.installed, true);
   assert.deepEqual(shared.hook.missingPaths, ['/gone/node']);
-  assert.equal(shared.deny.present, GHX_DENY_RULES.length);
+  assert.equal(shared.deny.present, 0);
   assert.equal(hand.json.install.project.hook.installed, false, 'settings.local.json is reported separately');
   assert.ok(
     hand.json.warnings.some(

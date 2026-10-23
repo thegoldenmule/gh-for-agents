@@ -1,13 +1,14 @@
-## GitHub: use `ghx`, not `gh`
+## GitHub: use `ghx` in repos that have `.github/ghx.json`
 
-- Use `ghx` for PRs and CI, not raw `gh`. Run it as one plain command: no pipes, `--jq`, `head`, `sleep` or `timeout`. It bounds its own output and its own time.
+- In a repo with `.github/ghx.json`, use `ghx` for PRs and CI, not raw `gh`. Elsewhere `ghx` reads still work but aren't required.
+- Run `ghx` as one plain command: no pipes, `--jq`, `head`, `sleep` or `timeout`. It bounds its own output and its own time.
 - Discover with `ghx --help`, `ghx <cmd> --help` and `ghx <cmd> --schema`. Check setup with `ghx doctor`.
 - One call per question:
   - PR state, mergeability, CI for the head SHA and feedback: `ghx pr status <pr>`.
   - All review and comment threads: `ghx pr feedback <pr>`.
   - Why CI failed: `ghx ci why <pr>`.
 - Other gh reads (`pr diff`, `pr list`, `issue view`, `run list`, `api` GETs, …) run through ghx: `ghx pr diff 12` returns gh's output in a bounded JSON envelope.
-- Writes go through ghx, never raw `gh pr create|edit|merge|comment|review|close|ready` or `gh run rerun`. The ghx verbs check repo policy and pin the head SHA.
+- In those repos, writes go through ghx, never raw `gh pr create|edit|merge|comment|review|close|ready` or `gh run rerun`. The ghx verbs check repo policy and pin the head SHA.
 
 ### JSON input
 

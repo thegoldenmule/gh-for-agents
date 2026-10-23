@@ -11,7 +11,7 @@ Every command prints one JSON document (or a spill result). Errors are `{"error"
 - [`ghx doctor`](#ghx-doctor) (read): Check the setup: gh version and features, auth, git, the target repo and its config.
 - [`ghx hook claude-pretooluse`](#ghx-hook-claude-pretooluse) (read): Claude Code PreToolUse hook: background ghx ci wait, steer raw gh to ghx (stdin protocol)
 - [`ghx init`](#ghx-init) (write): Write a starter .github/ghx.json (components inferred from the workspace).
-- [`ghx install`](#ghx-install) (write): Install the Claude Code hook, gh write deny rules and CLAUDE.md block (try --dry-run).
+- [`ghx install`](#ghx-install) (write): Install the Claude Code hook and CLAUDE.md block, plus deny rules at project scope (try --dry-run).
 - [`ghx pr comment`](#ghx-pr-comment) (write): Post a typed coordination comment: note, merge precondition, status or supersede
 - [`ghx pr create`](#ghx-pr-create) (write): Open a PR from validated JSON: compact body, hidden ghx block, exact read-back
 - [`ghx pr edit`](#ghx-pr-edit) (write): Patch a ghx PR: re-validated, block rev+1, retarget or draft toggle, exact read-back
@@ -177,7 +177,7 @@ Claude Code PreToolUse hook: background ghx ci wait, steer raw gh to ghx (stdin 
 
 read, single document, timeout 1m (max 5m).
 
-Reads the PreToolUse event JSON on stdin (the one command that does; Claude Code delivers it there) and prints a hook reply or nothing. A raw gh write ghx wraps (gh pr merge, gh -R o/r pr create, …) gets permissionDecision deny in every mode, naming the ghx replacement. A Bash `ghx ci wait` without run_in_background gets updatedInput with run_in_background: true and no permission decision. A gh CI polling loop (Bash or Monitor) or a gh read ghx wraps gets permissionDecision ask (GHX_HOOK_MODE=deny|ask|off; default ask) naming the ghx replacement. Fails open: any error or unparseable stdin exits 0 with no output. No gh calls. Register it with matcher Bash|Monitor (docs/agents/hooks.md).
+Reads the PreToolUse event JSON on stdin (the one command that does; Claude Code delivers it there) and prints a hook reply or nothing. A Bash `ghx ci wait` without run_in_background gets updatedInput with run_in_background: true and no permission decision, in any repo. The rest applies only when the event's cwd is in a checkout with .github/ghx.json (found by walking up to .git; no gh or git spawn): a raw gh write ghx wraps (gh pr merge, gh -R o/r pr create, …) gets permissionDecision deny in every mode, and a gh CI polling loop (Bash or Monitor) or a gh read ghx wraps gets permissionDecision ask (GHX_HOOK_MODE=deny|ask|off; default ask), each naming the ghx replacement. Elsewhere gh calls get no output. Fails open: any error, unparseable stdin or a missing cwd exits 0 with no output. No gh calls. Register it with matcher Bash|Monitor (docs/agents/hooks.md).
 
 Input: Flags and positionals only; --input file.json is also accepted.
 
@@ -213,18 +213,18 @@ Schema: `ghx init --schema`.
 
 ## ghx install
 
-Install the Claude Code hook, gh write deny rules and CLAUDE.md block (try --dry-run).
+Install the Claude Code hook and CLAUDE.md block, plus deny rules at project scope (try --dry-run).
 
 `ghx install [flags]`
 
 write, single document, timeout 1m (max 5m).
 
-User scope edits $CLAUDE_CONFIG_DIR (else ~/.claude)/settings.json and CLAUDE.md; project scope edits .claude/settings.local.json (per machine, uncommitted) and CLAUDE.md at the git toplevel. Warns SETTINGS_LOCAL_NOT_IGNORED when git would not ignore that file. Keeps every other setting, backs up each changed file to <file>.bak-ghx-<time>, and writes atomically. The hook runs this checkout by absolute path. Re-running updates in place; --dry-run returns unified diffs and writes nothing. Undo: ghx uninstall.
+User scope edits $CLAUDE_CONFIG_DIR (else ~/.claude)/settings.json and CLAUDE.md, adding the hook and the block but no deny rules: deny rules cannot be conditional, and the hook enforces only in repos with .github/ghx.json. A user-scope re-install removes deny rules an earlier ghx install added (warning INSTALL_DENY_REMOVED) and never the ones you added. Project scope edits .claude/settings.local.json (per machine, uncommitted) and CLAUDE.md at the git toplevel, and also merges the gh write deny rules (--no-deny skips them). Warns SETTINGS_LOCAL_NOT_IGNORED when git would not ignore that file. Keeps every other setting, backs up each changed file to <file>.bak-ghx-<time>, and writes atomically. The hook runs this checkout by absolute path. Re-running updates in place; --dry-run returns unified diffs and writes nothing. Undo: ghx uninstall.
 
 Flags:
 
 - `--scope <user|project>` (default `"user"`): user (~/.claude) or project (repo .claude/settings.local.json)
-- `--deny` (default `true`): Merge the gh write deny rules; --no-deny skips them
+- `--deny`: Project scope: merge the gh write deny rules (default); --no-deny skips them. User scope never adds them
 - `--hook` (default `true`): Register the PreToolUse hook; --no-hook skips it
 - `--snippet` (default `true`): Add the CLAUDE.md block; --no-snippet skips it
 - `--bin-dir <string>`: Also symlink <dir>/ghx to bin/ghx.js

@@ -5,8 +5,11 @@
 // (pnpm docs:gen), so both follow the specs. No gh calls; runHook() never throws (fail open).
 // A raw gh write that ghx wraps is denied in every mode, wherever -R/--repo sits (04 final review):
 // permissions.deny prefix rules cannot match `gh -R o/r pr merge 1`. GHX_HOOK_MODE governs the rest.
+// All of that enforcement applies only in a repo with .github/ghx.json (04 "enforcement scope"); elsewhere
+// the hook only moves `ghx ci wait` to the background.
 import { decide, firstPositional, normalizeGhArgv, takeRepoFlag, WRAPPED_WRITES } from '../passthrough/policy.ts';
 import REPLACES from './replaces.generated.json' with { type: 'json' };
+import { ghxConfigured } from './repo.ts';
 import { type Invocation, isCiWait, isGh, isGhx, scanShell, startsWithCiWait } from './shell.ts';
 
 export type HookMode = 'ask' | 'deny' | 'off';
@@ -200,14 +203,23 @@ function nudge(mode: 'ask' | 'deny', reason: string): HookOutput {
   };
 }
 
-/** The hook's reply to one PreToolUse event, or null for no output. */
-export function decideHook(event: unknown, mode: HookMode): HookOutput | null {
+/**
+ * The hook's reply to one PreToolUse event, or null for no output. `enforce` is whether the event's
+ * repo opted into ghx (.github/ghx.json): without it, only the `ghx ci wait` rewrite applies.
+ */
+export function decideHook(event: unknown, mode: HookMode, enforce = true): HookOutput | null {
   if (!isObject(event)) return null;
   const tool = event.tool_name;
   const input = event.tool_input;
   if ((tool !== 'Bash' && tool !== 'Monitor') || !isObject(input)) return null;
   const command = input.command;
   if (typeof command !== 'string') return null;
+
+  if (!enforce) {
+    if (mode === 'off' || tool !== 'Bash' || !startsWithCiWait(command) || input.run_in_background === true)
+      return null;
+    return { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...input, run_in_background: true } } };
+  }
 
   const scan = scanShell(command);
   const invocations = scan.invocations.map(normalized);
@@ -246,7 +258,8 @@ export function decideHook(event: unknown, mode: HookMode): HookOutput | null {
 /** The protocol entry point: raw stdin in, raw stdout out (or null). Never throws. */
 export function runHook(stdin: string, env: Readonly<Record<string, string | undefined>>): string | null {
   try {
-    const out = decideHook(JSON.parse(stdin), hookMode(env));
+    const event: unknown = JSON.parse(stdin);
+    const out = decideHook(event, hookMode(env), isObject(event) && ghxConfigured(event.cwd));
     return out === null ? null : JSON.stringify(out);
   } catch {
     return null;

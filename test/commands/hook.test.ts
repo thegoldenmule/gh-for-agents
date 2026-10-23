@@ -1,9 +1,10 @@
 // ghx hook claude-pretooluse (03 M12.2): the run_in_background rewrite, CI polling loops, wrapped gh
 // commands, modes, and fail-open, against PreToolUse events in the spike §3.6 shape.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { fsRegistry } from '../../src/cli/registry.ts';
 import { decideHook, type HookOutput, matchesPattern, REPLACES_TABLE } from '../../src/hook/rules.ts';
 import { runInProcess, SRC_COMMANDS } from '../helpers/harness.ts';
@@ -12,7 +13,33 @@ const FIX = join(import.meta.dirname, '..', 'fixtures', 'hook');
 const fixture = (name: string): string => readFileSync(join(FIX, name), 'utf8');
 const event = (name: string): Record<string, any> => JSON.parse(fixture(name));
 
-async function hook(stdin: string, env: Record<string, string> = {}) {
+const tmp = mkdtempSync(join(tmpdir(), 'ghx-hook-'));
+after(() => rmSync(tmp, { recursive: true, force: true }));
+
+/** A checkout under tmp: `.git` as a dir (or a worktree's file), optionally with .github/ghx.json. */
+function checkout(name: string, o: { configured: boolean; gitFile?: boolean }): string {
+  const root = join(tmp, name);
+  mkdirSync(join(root, 'src', 'deep'), { recursive: true });
+  if (o.gitFile) writeFileSync(join(root, '.git'), 'gitdir: /elsewhere/.git/worktrees/x\n');
+  else mkdirSync(join(root, '.git'));
+  if (o.configured) {
+    mkdirSync(join(root, '.github'));
+    writeFileSync(join(root, '.github', 'ghx.json'), '{}\n');
+  }
+  return root;
+}
+
+/** The repo the fixture events run in: configured, so the hook enforces. */
+const CONFIGURED = checkout('configured', { configured: true });
+
+/** Run the hook binary in process. A JSON-object event gets `cwd` set to CONFIGURED unless it names one. */
+async function hook(stdin: string, env: Record<string, string> = {}, cwd: string = CONFIGURED) {
+  try {
+    const ev = JSON.parse(stdin);
+    if (ev && typeof ev === 'object' && !Array.isArray(ev)) stdin = JSON.stringify({ ...ev, cwd });
+  } catch {
+    // not JSON: sent as is
+  }
   const r = await runInProcess(['hook', 'claude-pretooluse'], { stdin, env });
   assert.equal(r.exitCode, 0);
   assert.deepEqual(r.calls, [], 'no gh or git calls');
@@ -285,4 +312,86 @@ test('wrapped reads and pr reopen follow GHX_HOOK_MODE, with a leading -R too', 
   assert.match(reason(decideHook(bash('gh -R o/r pr view 1'), 'ask')), /ghx pr status 1 -R o\/r/);
   const loop = decideHook(bash('while true; do gh -R o/r pr checks 7; sleep 30; done'), 'ask');
   assert.match(reason(loop), /ghx ci wait 7 -R o\/r/);
+});
+
+// --- enforcement only in repos with .github/ghx.json (04 "enforcement scope") ---
+
+const raw = async (ev: Record<string, unknown>, env: Record<string, string> = {}) => {
+  const r = await runInProcess(['hook', 'claude-pretooluse'], { stdin: JSON.stringify(ev), env });
+  assert.equal(r.exitCode, 0);
+  assert.deepEqual(r.calls, [], 'no gh or git calls');
+  return r.stdout === '' ? null : (JSON.parse(r.stdout) as HookOutput);
+};
+const at = (cwd: string | undefined, command: string, extra: Record<string, unknown> = {}) => ({
+  ...bash(command, extra),
+  ...(cwd === undefined ? {} : { cwd }),
+});
+
+test('a configured repo enforces: wrapped writes denied, reads suggested', async () => {
+  assert.equal((await raw(at(CONFIGURED, 'gh pr merge 12')))?.hookSpecificOutput.permissionDecision, 'deny');
+  assert.equal((await raw(at(CONFIGURED, 'gh pr view 12')))?.hookSpecificOutput.permissionDecision, 'ask');
+});
+
+test('an unconfigured repo is silent for gh reads and writes, in every mode', async () => {
+  const plain = checkout('plain', { configured: false });
+  for (const mode of ['ask', 'deny', 'off']) {
+    for (const c of [
+      'gh pr merge 12',
+      'gh -R o/r pr merge 1',
+      'gh pr view 12',
+      'while true; do gh pr checks 1; sleep 9; done',
+    ]) {
+      assert.equal(await raw(at(plain, c), { GHX_HOOK_MODE: mode }), null, `${mode}: ${c}`);
+    }
+  }
+});
+
+test('a worktree (.git file) and a subdirectory cwd find the configured root', async () => {
+  const wt = checkout('worktree', { configured: true, gitFile: true });
+  assert.equal((await raw(at(wt, 'gh pr merge 1')))?.hookSpecificOutput.permissionDecision, 'deny');
+  assert.equal(
+    (await raw(at(join(wt, 'src', 'deep'), 'gh pr merge 1')))?.hookSpecificOutput.permissionDecision,
+    'deny',
+  );
+  assert.equal(
+    (await raw(at(join(CONFIGURED, 'src', 'deep'), 'gh pr view 1')))?.hookSpecificOutput.permissionDecision,
+    'ask',
+  );
+  // The nearest .git wins: an unconfigured checkout nested in a configured one is silent.
+  const nested = join(CONFIGURED, 'src', 'vendored');
+  mkdirSync(join(nested, '.git'), { recursive: true });
+  assert.equal(await raw(at(nested, 'gh pr merge 1')), null);
+});
+
+test('missing cwd, a cwd that does not exist, or no checkout above it: fail open, silent for gh', async () => {
+  for (const cwd of [undefined, '', join(tmp, 'nope', 'gone'), tmpdir()]) {
+    assert.equal(await raw(at(cwd, 'gh pr merge 12')), null, String(cwd));
+    assert.equal(await raw(at(cwd, 'gh pr view 12')), null, String(cwd));
+  }
+  assert.equal(await raw({ ...bash('gh pr merge 1'), cwd: 42 }), null);
+});
+
+test('the ghx ci wait rewrite applies everywhere (but not under GHX_HOOK_MODE=off)', async () => {
+  const plain = checkout('plain-rewrite', { configured: false });
+  for (const cwd of [undefined, plain, CONFIGURED]) {
+    const out = await raw(at(cwd, 'ghx ci wait 12', { description: 'Wait' }));
+    assert.deepEqual(out, {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        updatedInput: { command: 'ghx ci wait 12', description: 'Wait', run_in_background: true },
+      },
+    });
+  }
+  assert.equal(await raw(at(plain, 'ghx ci wait 12'), { GHX_HOOK_MODE: 'off' }), null);
+  assert.equal(await raw(at(plain, 'ghx ci wait 12', { run_in_background: true })), null);
+  assert.equal(decideHook(monitor('ghx ci wait 12'), 'ask', false), null, 'Monitor nudges are enforcement too');
+});
+
+test('the repo walk is fast: 200 events from a deep cwd well under 100 ms each', async () => {
+  const deep = join(CONFIGURED, 'a', 'b', 'c', 'd', 'e', 'f', 'g');
+  mkdirSync(deep, { recursive: true });
+  const { ghxConfigured } = await import('../../src/hook/repo.ts');
+  const t0 = performance.now();
+  for (let i = 0; i < 200; i++) assert.equal(ghxConfigured(deep), true);
+  assert.ok((performance.now() - t0) / 200 < 10, 'under 10 ms per walk');
 });

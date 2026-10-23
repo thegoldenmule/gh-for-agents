@@ -1,11 +1,14 @@
 // ghx install: put the steering kit (docs/agents/hooks.md, claude-md-snippet.md) into Claude Code's
-// settings without an LLM in the loop. Merges the deny rules and one ghx PreToolUse hook into
-// settings.json, adds the marked CLAUDE.md block, and optionally links ghx onto PATH. Idempotent;
-// every changed file is backed up first and written atomically.
+// settings without an LLM in the loop. Merges one ghx PreToolUse hook into the settings (plus, at
+// project scope, the gh write deny rules), adds the marked CLAUDE.md block, and optionally links ghx
+// onto PATH. Idempotent; every changed file is backed up first and written atomically.
+// User scope adds no deny rules (04 "enforcement scope"): they can't be conditional, and the hook
+// enforces only in repos with .github/ghx.json. A user-scope re-install removes ones ghx added earlier.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { defineCommand } from '../core/command.ts';
+import { GhxError } from '../core/errors.ts';
 import { installBlock } from '../install/claude-md.ts';
 import {
   type FileChange,
@@ -15,15 +18,26 @@ import {
   resolveTargets,
   SNIPPET_PATH,
 } from '../install/files.ts';
+import { legacyOwned } from '../install/owned.ts';
 import { finish, InstallOutput } from '../install/report.ts';
-import { GHX_DENY_RULES, installSettings, parseSettings, serializeSettings } from '../install/settings.ts';
+import {
+  GHX_DENY_RULES,
+  installSettings,
+  parseSettings,
+  removeDenyRules,
+  serializeSettings,
+} from '../install/settings.ts';
 
 export default defineCommand({
   name: ['install'],
-  summary: 'Install the Claude Code hook, gh write deny rules and CLAUDE.md block (try --dry-run).',
+  summary: 'Install the Claude Code hook and CLAUDE.md block, plus deny rules at project scope (try --dry-run).',
   description:
-    'User scope edits $CLAUDE_CONFIG_DIR (else ~/.claude)/settings.json and CLAUDE.md; project scope edits ' +
-    '.claude/settings.local.json (per machine, uncommitted) and CLAUDE.md at the git toplevel. Warns ' +
+    'User scope edits $CLAUDE_CONFIG_DIR (else ~/.claude)/settings.json and CLAUDE.md, adding the hook and ' +
+    'the block but no deny rules: deny rules cannot be conditional, and the hook enforces only in repos with ' +
+    '.github/ghx.json. A user-scope re-install removes deny rules an earlier ghx install added (warning ' +
+    'INSTALL_DENY_REMOVED) and never the ones you added. Project scope edits .claude/settings.local.json ' +
+    '(per machine, uncommitted) and CLAUDE.md at the git toplevel, and also merges the gh write deny rules ' +
+    '(--no-deny skips them). Warns ' +
     'SETTINGS_LOCAL_NOT_IGNORED when git would not ignore that file. Keeps every other setting, backs up each changed ' +
     'file to <file>.bak-ghx-<time>, and writes atomically. The hook runs this checkout by absolute path. ' +
     'Re-running updates in place; --dry-run returns unified diffs and writes nothing. Undo: ghx uninstall.',
@@ -34,7 +48,12 @@ export default defineCommand({
       .enum(['user', 'project'])
       .default('user')
       .describe('user (~/.claude) or project (repo .claude/settings.local.json)'),
-    deny: z.boolean().default(true).describe('Merge the gh write deny rules; --no-deny skips them'),
+    deny: z
+      .boolean()
+      .optional()
+      .describe(
+        'Project scope: merge the gh write deny rules (default); --no-deny skips them. User scope never adds them',
+      ),
     hook: z.boolean().default(true).describe('Register the PreToolUse hook; --no-hook skips it'),
     snippet: z.boolean().default(true).describe('Add the CLAUDE.md block; --no-snippet skips it'),
     binDir: z.string().min(1).optional().describe('Also symlink <dir>/ghx to bin/ghx.js'),
@@ -50,16 +69,32 @@ export default defineCommand({
     { argv: 'ghx install --scope project --no-snippet' },
   ],
   async run(input, ctx) {
+    if (input.scope === 'user' && input.deny === true) {
+      throw new GhxError('VALIDATION', '--deny is for --scope project: user scope adds no deny rules.', {
+        hint: 'Deny rules apply in every repo and cannot be conditional; at user scope the hook enforces only in repos with .github/ghx.json. Use --scope project for deny rules in one repo.',
+        details: { issues: [{ path: 'deny', code: 'scope', message: '--deny needs --scope project' }] },
+      });
+    }
+    const deny = input.scope === 'project' && input.deny !== false;
     const targets = await resolveTargets(input.scope, ctx.env, ctx.git);
     const command = input.hook ? hookCommand() : null;
     const changes: FileChange[] = [];
 
     // Plan and validate everything before writing anything.
-    if (input.deny || input.hook || input.hookMode) {
-      const before = readOrNull(targets.settings);
-      const parsed = parseSettings(before, targets.settings);
-      const next = installSettings(parsed, { deny: input.deny, hookCommand: command, hookMode: input.hookMode });
+    const before = readOrNull(targets.settings);
+    const parsed = parseSettings(before, targets.settings);
+    // User scope: drop the deny rules an earlier ghx install added there, and only those.
+    const owned = input.scope === 'user' ? legacyOwned(targets.settings, parsed) : { deny: [], containers: [] };
+    if (deny || input.hook || input.hookMode || owned.deny.length > 0) {
+      const cleaned = removeDenyRules(parsed, owned.deny, owned.containers);
+      const next = installSettings(cleaned, { deny, hookCommand: command, hookMode: input.hookMode });
       const same = JSON.stringify(next) === JSON.stringify(parsed);
+      if (owned.deny.length > 0) {
+        ctx.warn({
+          code: 'INSTALL_DENY_REMOVED',
+          message: `Removed ${owned.deny.length} gh write deny rule(s) an earlier ghx install added to ${targets.settings}. User scope relies on the hook, which enforces only in repos with .github/ghx.json; use --scope project for deny rules in one repo.`,
+        });
+      }
       changes.push({
         path: targets.settings,
         kind: 'settings',
@@ -89,7 +124,7 @@ export default defineCommand({
     const next = ['Start a new Claude Code session so it loads the settings.', 'Check the install: ghx doctor'];
     if (binLink && !binLink.onPath) next.push(`Add ${resolve(binLink.path, '..')} to PATH to run ghx by name.`);
     return finish(
-      { scope: targets.scope, changes, hookCommand: command, denyRules: input.deny ? GHX_DENY_RULES : [], binLink },
+      { scope: targets.scope, changes, hookCommand: command, denyRules: deny ? GHX_DENY_RULES : [], binLink },
       { dryRun: ctx.dryRun, clock: ctx.clock, next },
     );
   },
