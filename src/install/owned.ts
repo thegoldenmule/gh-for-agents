@@ -3,6 +3,8 @@
 // backups in the user config dir (Targets.stateDir), never in the settings file or the repo.
 // An install from before the manifest left only `<file>.bak-ghx-*` siblings: the newest one without a
 // ghx hook is the file as it was before ghx, and ghx added what is there now that it lacks.
+import { createHash } from 'node:crypto';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { backupsOf, readOrNull, type Targets } from './files.ts';
 import { type Added, CONTAINERS, containerOf, inspectSettings, parseSettings } from './settings.ts';
@@ -14,10 +16,67 @@ export interface Owned extends Added {
   created: boolean | null;
 }
 
+/**
+ * A byte-for-byte restore point: the sha256 of the file before ghx first changed it (null: it did not
+ * exist) and of what ghx last wrote. While the file still hashes to `written`, nobody else has touched
+ * it, so uninstall puts the original bytes back (found among the backups by hash) instead of editing.
+ */
+export interface Restore {
+  original: string | null;
+  written: string;
+}
+
 export interface Manifest {
   version: 1;
-  settings: ({ path: string } & Owned) | null;
-  claudeMd: { path: string; created: boolean } | null;
+  settings: ({ path: string; restore: Restore | null } & Owned) | null;
+  claudeMd: { path: string; created: boolean; restore: Restore | null } | null;
+}
+
+export const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
+
+/**
+ * The restore point after an install run. With an earlier record, it carries on only while the file is
+ * still what ghx wrote; without one, it starts here, but only from a file with nothing of ghx's in it.
+ */
+export function nextRestore(
+  prior: { restore: Restore | null } | null,
+  before: string | null,
+  after: string | null,
+  ghxFree: boolean,
+): Restore | null {
+  if (after === null) return null;
+  if (prior) {
+    const r = prior.restore;
+    return r && before !== null && sha256(before) === r.written
+      ? { original: r.original, written: sha256(after) }
+      : null;
+  }
+  return ghxFree ? { original: before === null ? null : sha256(before), written: sha256(after) } : null;
+}
+
+/**
+ * The file's original content if the restore point still holds: `{content: null}` means delete it.
+ * Undefined when it doesn't hold (edited since, or the backup is gone), so uninstall edits instead.
+ */
+export function restored(
+  r: Restore | null | undefined,
+  current: string | null,
+  backupDir: string,
+): { content: string | null } | undefined {
+  if (!r || current === null || sha256(current) !== r.written) return undefined;
+  if (r.original === null) return { content: null };
+  if (r.original === r.written) return { content: current };
+  let names: string[] = [];
+  try {
+    names = readdirSync(backupDir).sort().reverse();
+  } catch {
+    return undefined;
+  }
+  for (const f of names) {
+    const text = readOrNull(join(backupDir, f));
+    if (text !== null && sha256(text) === r.original) return { content: text };
+  }
+  return undefined;
 }
 
 export const NOTHING: Owned = { deny: [], containers: [], hookMode: null, created: null };
@@ -41,6 +100,10 @@ export function readManifest(t: Targets): Manifest | null {
   const s = v.settings;
   const m = v.claudeMd;
   const mode = isObj(s) && isObj(s.hookMode) ? s.hookMode : null;
+  const restore = (v: unknown): Restore | null =>
+    isObj(v) && typeof v.written === 'string' && (typeof v.original === 'string' || v.original === null)
+      ? { original: v.original, written: v.written }
+      : null;
   return {
     version: 1,
     settings:
@@ -54,9 +117,13 @@ export function readManifest(t: Targets): Manifest | null {
                 ? { set: mode.set, prev: typeof mode.prev === 'string' ? mode.prev : null }
                 : null,
             created: typeof s.created === 'boolean' ? s.created : null,
+            restore: restore(s.restore),
           }
         : null,
-    claudeMd: isObj(m) && m.path === t.claudeMd ? { path: t.claudeMd, created: m.created === true } : null,
+    claudeMd:
+      isObj(m) && m.path === t.claudeMd
+        ? { path: t.claudeMd, created: m.created === true, restore: restore(m.restore) }
+        : null,
   };
 }
 

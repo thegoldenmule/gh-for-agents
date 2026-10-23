@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { defineCommand } from '../core/command.ts';
 import { GhxError } from '../core/errors.ts';
-import { installBlock, removeBlock } from '../install/claude-md.ts';
+import { findBlock, installBlock, removeBlock } from '../install/claude-md.ts';
 import {
   backupsOf,
   type FileChange,
@@ -19,10 +19,18 @@ import {
   resolveTargets,
   SNIPPET_PATH,
 } from '../install/files.ts';
-import { type Manifest, manifestPath, ownedSettings, readManifest, serializeManifest } from '../install/owned.ts';
+import {
+  type Manifest,
+  manifestPath,
+  nextRestore,
+  ownedSettings,
+  readManifest,
+  serializeManifest,
+} from '../install/owned.ts';
 import { finish, InstallOutput } from '../install/report.ts';
 import {
   GHX_DENY_RULES,
+  inspectSettings,
   installSettings,
   parseSettings,
   recordAdded,
@@ -107,10 +115,13 @@ export default defineCommand({
         before,
         after: same ? before : serializeSettings(next, before),
       });
+      const after = same ? before : serializeSettings(next, before);
+      const ghxFree = inspectSettings(parsed).hookCommands.length === 0 && owned.deny.length === 0;
       settingsRecord = {
         path: targets.settings,
         ...recordAdded(owned, parsed, next),
         created: owned.created ?? before === null,
+        restore: nextRestore(manifest?.settings ?? null, before, after, ghxFree),
       };
     }
     let claudeMdRecord: Manifest['claudeMd'] = manifest?.claudeMd ?? null;
@@ -120,13 +131,14 @@ export default defineCommand({
       // A block already there with no record is a legacy install's: it created the file if no backup exists.
       const legacy =
         before !== null && removeBlock(before, targets.claudeMd) === '' && backupsOf(targets.claudeMd).length === 0;
-      claudeMdRecord ??= { path: targets.claudeMd, created: before === null || legacy };
-      changes.push({
+      const after = installBlock(before, snippet, targets.claudeMd);
+      const ghxFree = before === null || findBlock(before, targets.claudeMd) === null;
+      claudeMdRecord = {
         path: targets.claudeMd,
-        kind: 'claude-md',
-        before,
-        after: installBlock(before, snippet, targets.claudeMd),
-      });
+        created: claudeMdRecord?.created ?? (before === null || legacy),
+        restore: nextRestore(claudeMdRecord, before, after, ghxFree),
+      };
+      changes.push({ path: targets.claudeMd, kind: 'claude-md', before, after });
     }
     const binLink = input.binDir ? planBinLink(resolve(ctx.cwd, input.binDir), ctx.env) : null;
 

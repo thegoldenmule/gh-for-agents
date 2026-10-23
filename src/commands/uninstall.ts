@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { defineCommand } from '../core/command.ts';
 import { removeBlock } from '../install/claude-md.ts';
 import { backupsOf, type FileChange, planBinUnlink, readOrNull, resolveTargets } from '../install/files.ts';
-import { manifestPath, ownedSettings, readManifest } from '../install/owned.ts';
+import { manifestPath, ownedSettings, readManifest, restored } from '../install/owned.ts';
 import { finish, InstallOutput } from '../install/report.ts';
 import { inspectSettings, parseSettings, serializeSettings, uninstallSettings } from '../install/settings.ts';
 
@@ -23,7 +23,8 @@ export default defineCommand({
     'Removes only what ghx install added, as its install record (kept beside its backups in the user config ' +
     'dir) shows: the ghx PreToolUse hook, the deny rules it added (never your identical ones), the ' +
     'GHX_HOOK_MODE it set (restoring any earlier value), containers it created once empty, the marked ' +
-    'CLAUDE.md block, and with --bin-dir a ghx link into this checkout. Every other setting stays. An ' +
+    'CLAUDE.md block, and with --bin-dir a ghx link into this checkout. Every other setting stays. A file ' +
+    'still exactly as ghx last wrote it gets its original bytes back from the backup. An ' +
     'install from before the record is judged from its <file>.bak-ghx-* backups. Backs up each changed ' +
     'file; a file ghx created and leaves empty is removed. --dry-run returns unified diffs and writes nothing.',
   kind: 'write',
@@ -50,8 +51,13 @@ export default defineCommand({
     const found = inspectSettings(parsed);
     const owned = ownedSettings(targets, manifest, parsed);
     const kept = uninstallSettings(parsed, owned);
+    const backupDir = join(targets.stateDir, 'backups');
     let sAfter = sBefore;
-    if (JSON.stringify(kept) !== JSON.stringify(parsed)) {
+    const sRestored = restored(manifest?.settings?.restore, sBefore, backupDir);
+    if (sRestored) {
+      // Untouched since ghx wrote it: put the original bytes back (or remove the file ghx created).
+      sAfter = sRestored.content;
+    } else if (JSON.stringify(kept) !== JSON.stringify(parsed)) {
       const text = serializeSettings(kept, sBefore);
       const empty = Object.keys(kept).length === 0;
       const remove = owned.created ?? legacyRemoved(targets.settings, text, serializeSettings({}, sBefore));
@@ -62,7 +68,10 @@ export default defineCommand({
     const mBefore = readOrNull(targets.claudeMd);
     const stripped = mBefore === null ? null : removeBlock(mBefore, targets.claudeMd);
     let mAfter = mBefore;
-    if (stripped !== null && stripped !== mBefore) {
+    const mRestored = restored(manifest?.claudeMd?.restore, mBefore, backupDir);
+    if (mRestored) {
+      mAfter = mRestored.content;
+    } else if (stripped !== null && stripped !== mBefore) {
       const created = manifest?.claudeMd?.created ?? legacyRemoved(targets.claudeMd, stripped, '');
       mAfter = stripped === '' && created ? null : stripped;
     }
@@ -78,7 +87,7 @@ export default defineCommand({
     return finish(
       {
         scope: targets.scope,
-        backupDir: join(targets.stateDir, 'backups'),
+        backupDir,
         changes,
         hookCommand: found.hookCommands[0] ?? null,
         denyRules: found.denyPresent,

@@ -444,6 +444,68 @@ test('uninstall restores the original byte for byte when ghx was the only change
   assert.equal(backups(h.dir).length, count);
 });
 
+/** The shape of a real user settings file (fake values): permissions without deny, an empty PreToolUse, env, statusLine. */
+const REAL_SHAPE = {
+  env: { FAKE_FLAG: '1', OTHER: 'x' },
+  permissions: { allow: ['Bash(ls:*)', 'Read(/tmp/**)'], defaultMode: 'auto' },
+  model: 'fake-model',
+  hooks: {
+    PreToolUse: [],
+    PostToolUse: [{ matcher: 'Edit', hooks: [{ type: 'command', command: '/fake/post.sh' }] }],
+    Stop: [{ hooks: [{ type: 'command', command: '/fake/stop.sh' }] }],
+  },
+  statusLine: { type: 'command', command: '/fake/status.sh' },
+};
+
+test('install then uninstall restores a real-shaped settings file byte for byte, at both scopes, whatever its formatting', async () => {
+  const standard = `${JSON.stringify(REAL_SHAPE, null, 2)}\n`;
+  // Hand formatting JSON.stringify can't reproduce: inline arrays and objects.
+  const inline = `{
+  "env": { "FAKE_FLAG": "1", "OTHER": "x" },
+  "permissions": { "allow": ["Bash(ls:*)", "Read(/tmp/**)"], "defaultMode": "auto" },
+  "model": "fake-model",
+  "hooks": {
+    "PreToolUse": [],
+    "PostToolUse": [{ "matcher": "Edit", "hooks": [{ "type": "command", "command": "/fake/post.sh" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "/fake/stop.sh" }] }]
+  },
+  "statusLine": { "type": "command", "command": "/fake/status.sh" }
+}
+`;
+  assert.deepEqual(JSON.parse(inline), REAL_SHAPE);
+  for (const original of [standard, inline]) {
+    // User scope (hook and mode, no deny rules).
+    const h = home({ 'settings.json': original, 'CLAUDE.md': '# Mine\n' });
+    assert.equal((await run(['install', '--hook-mode', 'deny'], { HOME: h.home })).exitCode, 0);
+    assert.notEqual(read(h.settings), original);
+    assert.equal((await run(['uninstall'], { HOME: h.home })).exitCode, 0);
+    assert.equal(read(h.settings), original, 'user scope');
+    assert.equal(read(h.claudeMd), '# Mine\n');
+    // Project scope (deny rules too, so permissions.deny is created and must go again).
+    const repo = join(tmp, `repo-${n++}`);
+    const local = join(repo, '.claude', 'settings.local.json');
+    mkdirSync(join(repo, '.claude'), { recursive: true });
+    writeFileSync(local, original);
+    const git = fakeGit({ toplevel: repo, ignored: [local] });
+    assert.equal((await run(['install', '--scope', 'project', '--no-snippet'], { HOME: h.home }, { git })).exitCode, 0);
+    assert.ok(json(local).permissions.deny);
+    // A second install with nothing new, then uninstall: still the original bytes.
+    assert.equal((await run(['install', '--scope', 'project', '--no-snippet'], { HOME: h.home }, { git })).exitCode, 0);
+    assert.equal((await run(['uninstall', '--scope', 'project'], { HOME: h.home }, { git })).exitCode, 0);
+    assert.equal(read(local), original, 'project scope');
+  }
+});
+
+test('after a hand edit, uninstall falls back to removing what ghx added and keeps the edit', async () => {
+  const h = home({ 'settings.json': `${JSON.stringify(REAL_SHAPE, null, 2)}\n` });
+  await run(['install', '--no-snippet'], { HOME: h.home });
+  const s = json(h.settings);
+  s.model = 'edited';
+  writeFileSync(h.settings, `${JSON.stringify(s, null, 2)}\n`);
+  assert.equal((await run(['uninstall'], { HOME: h.home })).exitCode, 0);
+  assert.deepEqual(json(h.settings), { ...REAL_SHAPE, model: 'edited' });
+});
+
 test('uninstall after a fresh install removes the files ghx created, and drops containers it created', async () => {
   const h = home();
   assert.equal((await run(['install'], { HOME: h.home })).exitCode, 0);
