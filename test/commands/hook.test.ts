@@ -158,6 +158,9 @@ test('bash-gh-pr-view.json: ask, quoting the exact replacement', async () => {
   assert.match(reason(out), /Use: ghx pr status 3266/);
 });
 
+/** The wrapped gh writes (hooks.md deny list) and gh api writes to a wrapped endpoint. */
+const WRITE = /gh (pr (create|edit|ready|merge|comment|review|close)|run rerun|api -X PUT)\b/;
+
 test('wrapped gh commands, including piped and chained ones, name their replacement', () => {
   const cases: [string, RegExp][] = [
     ["gh pr checks 3198 | awk '{print $2}'", /ghx ci wait 3198/],
@@ -175,7 +178,8 @@ test('wrapped gh commands, including piped and chained ones, name their replacem
   ];
   for (const [c, re] of cases) {
     const out = decideHook(bash(c), 'ask');
-    assert.equal(out?.hookSpecificOutput.permissionDecision, 'ask', c);
+    // Wrapped writes are denied in every mode; reads follow the mode.
+    assert.equal(out?.hookSpecificOutput.permissionDecision, WRITE.test(c) ? 'deny' : 'ask', c);
     assert.match(reason(out), re, c);
   }
 });
@@ -212,7 +216,7 @@ test('every spec replaces entry matches its own example; bare allowlisted reads 
       assert.ok(decideHook(bash(`while true; do ${concrete}; sleep 9; done`), 'ask'), 'gh run list in a loop');
       continue;
     }
-    assert.equal(out?.hookSpecificOutput.permissionDecision, 'ask', pattern);
+    assert.equal(out?.hookSpecificOutput.permissionDecision, WRITE.test(concrete) ? 'deny' : 'ask', pattern);
     assert.match(reason(out), /ghx /, pattern);
   }
 });
@@ -240,4 +244,45 @@ test('--help and --schema still describe the hook as JSON', async () => {
   assert.match(help.json.description, /stdin/);
   const schema = await runInProcess(['hook', 'claude-pretooluse', '--schema']);
   assert.ok(schema.json.output.properties.hookSpecificOutput);
+});
+
+// --- wrapped writes are always denied ---
+
+test('wrapped gh writes are denied in every mode, wherever -R/--repo sits', async () => {
+  const writes: [string, RegExp][] = [
+    ['gh -R o/r pr merge 1', /ghx pr merge 1 -R o\/r/],
+    ['gh --repo=o/r pr create --title x', /ghx pr create --input pr\.json -R o\/r/],
+    ['gh pr merge -R o/r 1', /ghx pr merge 1 -R o\/r/],
+    ['gh --repo o/r pr comment 3 --body hi', /ghx pr comment 3/],
+    ['cd repo && gh pr merge 12 --merge', /ghx pr merge 12/],
+    ['gh run rerun 99 --failed', /ghx ci rerun/],
+    ['gh api -X PUT repos/o/r/pulls/12/merge', /ghx pr merge/],
+  ];
+  for (const mode of ['ask', 'deny', 'off'] as const) {
+    for (const [c, re] of writes) {
+      for (const make of [bash, monitor]) {
+        const out = decideHook(make(c), mode);
+        assert.equal(out?.hookSpecificOutput.permissionDecision, 'deny', `${mode}: ${c}`);
+        assert.match(reason(out), re, `${mode}: ${c}`);
+      }
+    }
+  }
+  const { out } = await hook(JSON.stringify(bash('gh -R o/r pr merge 1')), { GHX_HOOK_MODE: 'off' });
+  assert.equal(out?.hookSpecificOutput.permissionDecision, 'deny');
+});
+
+test('a foreground ghx ci wait chained with a raw write is denied, not rewritten', () => {
+  const out = decideHook(bash('ghx ci wait 1 && gh pr merge 1'), 'ask');
+  assert.equal(out?.hookSpecificOutput.permissionDecision, 'deny');
+});
+
+test('wrapped reads and pr reopen follow GHX_HOOK_MODE, with a leading -R too', () => {
+  for (const c of ['gh -R o/r pr view 1', 'gh pr reopen 1', 'gh -R o/r pr checks 1']) {
+    assert.equal(decideHook(bash(c), 'ask')?.hookSpecificOutput.permissionDecision, 'ask', c);
+    assert.equal(decideHook(bash(c), 'deny')?.hookSpecificOutput.permissionDecision, 'deny', c);
+    assert.equal(decideHook(bash(c), 'off'), null, c);
+  }
+  assert.match(reason(decideHook(bash('gh -R o/r pr view 1'), 'ask')), /ghx pr status 1 -R o\/r/);
+  const loop = decideHook(bash('while true; do gh -R o/r pr checks 7; sleep 30; done'), 'ask');
+  assert.match(reason(loop), /ghx ci wait 7 -R o\/r/);
 });

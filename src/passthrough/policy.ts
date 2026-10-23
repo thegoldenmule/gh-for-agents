@@ -221,7 +221,8 @@ export interface PassthroughPlan {
 
 export type Decision =
   | { kind: 'run'; plan: PassthroughPlan; globals: Partial<GlobalOptions> }
-  | { kind: 'refuse'; error: GhxError }
+  /** `wrapped` names the wrapped gh command ('pr merge') when the refusal is one; the hook reads it. */
+  | { kind: 'refuse'; error: GhxError; wrapped?: string }
   /** Not a gh command passthrough knows; `ghKnown` is true for a real gh command that is not allowlisted. */
   | { kind: 'unknown'; words: string[]; ghKnown: boolean };
 
@@ -290,6 +291,50 @@ export function takeRepoFlag(args: readonly string[]): { rest: string[]; repo?: 
   }
   return repo !== undefined ? { rest, repo } : { rest };
 }
+
+/**
+ * gh takes -R/--repo anywhere, including before the command words (`gh -R o/r pr merge 1`). Move every
+ * spelling of it behind the command words (before any --), so classifying never sees a leading flag. api
+ * and search keep it where gh reads it: api refuses -R, and search's -R is a filter.
+ */
+export function normalizeGhArgv(args: readonly string[]): string[] {
+  const lead: string[] = [];
+  let i = 0;
+  for (; i < args.length; i++) {
+    const t = args[i] as string;
+    if ((t === '-R' || t === '--repo') && args[i + 1] !== undefined) {
+      lead.push(t, args[i + 1] as string);
+      i++;
+    } else if (t.startsWith('--repo=') || (t.startsWith('-R') && t.length > 2)) {
+      lead.push(t);
+    } else {
+      break;
+    }
+  }
+  const top = args[i];
+  if (top === undefined) return [...args];
+  const rest = args.slice(i + 1);
+  if (top === 'api') return [top, ...lead, ...rest];
+  if (top === 'search') return rest.length > 0 ? [top, rest[0] as string, ...lead, ...rest.slice(1)] : [...args];
+  const taken = takeRepoFlag([...lead, ...rest]);
+  if (taken.repo === undefined) return [top, ...taken.rest];
+  const dd = taken.rest.indexOf('--');
+  const words = dd === -1 ? taken.rest : taken.rest.slice(0, dd);
+  const tail = dd === -1 ? [] : taken.rest.slice(dd);
+  return [top, ...words, '-R', taken.repo, ...tail];
+}
+
+/** gh writes ghx wraps with a validated command: the hook denies them in every mode (hooks.md). */
+export const WRAPPED_WRITES: ReadonlySet<string> = new Set([
+  'pr create',
+  'pr edit',
+  'pr ready',
+  'pr merge',
+  'pr comment',
+  'pr review',
+  'pr close',
+  'run rerun',
+]);
 
 /** The first positional of a verb's argv (after the verb), skipping flag values. */
 export function firstPositional(args: readonly string[]): string | undefined {
@@ -484,7 +529,7 @@ function guarded(plan: PassthroughPlan, g: Globals): Decision {
 /** Decide what to do with an argv that names no ghx command. */
 export function decide(tokens: readonly string[]): Decision {
   const g = takeGhxGlobals(tokens);
-  let argv = g.rest;
+  let argv = normalizeGhArgv(g.rest);
   const first = argv[0];
   if (first === undefined || first.startsWith('-')) return { kind: 'unknown', words: [], ghKnown: false };
   const expanded = TOP_ALIASES[first];
@@ -501,7 +546,7 @@ export function decide(tokens: readonly string[]): Decision {
   const sub = VERB_ALIASES[top]?.[rawSub] ?? rawSub;
 
   const w = wrapped(top, sub, args, repo);
-  if (w) return { kind: 'refuse', error: wrappedError(top, sub, w) };
+  if (w) return { kind: 'refuse', error: wrappedError(top, sub, w), wrapped: `${top} ${sub}` };
 
   if (ALLOWED_READS[top]?.includes(sub)) {
     const globals: Partial<GlobalOptions> = { ...g.globals, ...(repo !== undefined ? { repo } : {}) };

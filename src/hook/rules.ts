@@ -3,7 +3,9 @@
 // permission rules still apply to the rewritten call (03 §3.6). Replacement argv comes from the
 // passthrough refusal table; spec `replaces` entries it doesn't cover come from replaces.generated.json
 // (pnpm docs:gen), so both follow the specs. No gh calls; runHook() never throws (fail open).
-import { decide, firstPositional, takeRepoFlag } from '../passthrough/policy.ts';
+// A raw gh write that ghx wraps is denied in every mode, wherever -R/--repo sits (04 final review):
+// permissions.deny prefix rules cannot match `gh -R o/r pr merge 1`. GHX_HOOK_MODE governs the rest.
+import { decide, firstPositional, normalizeGhArgv, takeRepoFlag, WRAPPED_WRITES } from '../passthrough/policy.ts';
 import REPLACES from './replaces.generated.json' with { type: 'json' };
 import { type Invocation, isCiWait, isGh, isGhx, scanShell, startsWithCiWait } from './shell.ts';
 
@@ -37,7 +39,24 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 const PR_SELECTOR = /^(#?\d+|[\w.-]+\/[\w.-]+#\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+\S*)$/;
 
 /** Flags whose value is a separate word, for picking positionals out of a gh argv. */
-const VALUE_FLAGS = new Set(['-X', '--method', '--json', '-q', '--jq', '-H', '--header', '-t', '--template']);
+const VALUE_FLAGS = new Set([
+  '-X',
+  '--method',
+  '--json',
+  '-q',
+  '--jq',
+  '-H',
+  '--header',
+  '-t',
+  '--template',
+  '-R',
+  '--repo',
+]);
+
+/** A gh invocation with -R/--repo moved behind the command words, so argv[1] and argv[2] are the verb. */
+function normalized(inv: Invocation): Invocation {
+  return isGh(inv) ? { ...inv, argv: [inv.argv[0] as string, ...normalizeGhArgv(inv.argv.slice(1))] } : inv;
+}
 
 /** gh invocations that read CI state, i.e. what a polling loop polls. */
 function pollsCi(inv: Invocation): boolean {
@@ -147,6 +166,22 @@ function replacementReason(inv: Invocation): string | undefined {
   return undefined;
 }
 
+/** Is it a raw gh write that ghx wraps: a wrapped verb (pr merge, …) or a gh api write to a wrapped endpoint? */
+function isWrappedWrite(inv: Invocation): boolean {
+  const raw = inv.argv.slice(1);
+  const d = decide(raw);
+  if (d.kind !== 'refuse') return false;
+  if (d.wrapped !== undefined) return WRAPPED_WRITES.has(d.wrapped);
+  return (
+    d.error.code === 'PASSTHROUGH_WRITE_REFUSED' &&
+    raw[0] === 'api' &&
+    REPLACES_TABLE.some((e) => !e.pattern.includes('&&') && matchesPattern(e.pattern, inv.argv))
+  );
+}
+
+const WRITE_DENIED =
+  ' Raw gh writes that ghx wraps are always denied: the ghx command checks policy, validates input and pins the head SHA.';
+
 /** Compound `replaces` entries (gh pr close <n> && gh pr reopen <n>): every part matches some invocation. */
 function compoundReason(gh: readonly Invocation[]): string | undefined {
   for (const e of REPLACES_TABLE) {
@@ -167,12 +202,21 @@ function nudge(mode: 'ask' | 'deny', reason: string): HookOutput {
 
 /** The hook's reply to one PreToolUse event, or null for no output. */
 export function decideHook(event: unknown, mode: HookMode): HookOutput | null {
-  if (mode === 'off' || !isObject(event)) return null;
+  if (!isObject(event)) return null;
   const tool = event.tool_name;
   const input = event.tool_input;
   if ((tool !== 'Bash' && tool !== 'Monitor') || !isObject(input)) return null;
   const command = input.command;
   if (typeof command !== 'string') return null;
+
+  const scan = scanShell(command);
+  const invocations = scan.invocations.map(normalized);
+  const gh = invocations.filter(isGh);
+  const compound = compoundReason(gh);
+  // Wrapped writes first and in every mode, so neither the rewrite nor GHX_HOOK_MODE=off lets one through.
+  const write = gh.find(isWrappedWrite);
+  if (write) return nudge('deny', `${compound ?? replacementReason(write) ?? ''}${WRITE_DENIED}`.trim());
+  if (mode === 'off') return null;
 
   if (tool === 'Bash' && startsWithCiWait(command) && input.run_in_background !== true) {
     return {
@@ -180,8 +224,7 @@ export function decideHook(event: unknown, mode: HookMode): HookOutput | null {
     };
   }
 
-  const scan = scanShell(command);
-  const waits = scan.invocations.filter(isCiWait);
+  const waits = invocations.filter(isCiWait);
   if (tool === 'Monitor' && waits.length > 0) {
     return nudge(
       mode,
@@ -189,11 +232,9 @@ export function decideHook(event: unknown, mode: HookMode): HookOutput | null {
     );
   }
 
-  const polls = scan.invocations.filter(pollsCi);
+  const polls = invocations.filter(pollsCi);
   if (polls.length > 0 && (scan.loop || scan.sleep)) return nudge(mode, loopReason(ciWaitCommand(polls)));
 
-  const gh = scan.invocations.filter(isGh);
-  const compound = compoundReason(gh);
   if (compound) return nudge(mode, compound);
   for (const inv of gh) {
     const reason = replacementReason(inv);
@@ -205,9 +246,7 @@ export function decideHook(event: unknown, mode: HookMode): HookOutput | null {
 /** The protocol entry point: raw stdin in, raw stdout out (or null). Never throws. */
 export function runHook(stdin: string, env: Readonly<Record<string, string | undefined>>): string | null {
   try {
-    const mode = hookMode(env);
-    if (mode === 'off') return null;
-    const out = decideHook(JSON.parse(stdin), mode);
+    const out = decideHook(JSON.parse(stdin), hookMode(env));
     return out === null ? null : JSON.stringify(out);
   } catch {
     return null;

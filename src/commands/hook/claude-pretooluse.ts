@@ -23,10 +23,12 @@ export default defineCommand({
   summary: 'Claude Code PreToolUse hook: background ghx ci wait, steer raw gh to ghx (stdin protocol)',
   description:
     'Reads the PreToolUse event JSON on stdin (the one command that does; Claude Code delivers it there) and ' +
-    'prints a hook reply or nothing. A Bash `ghx ci wait` without run_in_background gets updatedInput with ' +
-    'run_in_background: true and no permission decision. A gh CI polling loop (Bash or Monitor) or a gh ' +
-    'command ghx wraps gets permissionDecision ask (GHX_HOOK_MODE=deny|ask|off; default ask) naming the ' +
-    'ghx replacement. Fails open: any error or unparseable stdin exits 0 with no output. No gh calls. ' +
+    'prints a hook reply or nothing. A raw gh write ghx wraps (gh pr merge, gh -R o/r pr create, …) gets ' +
+    'permissionDecision deny in every mode, naming the ghx replacement. A Bash `ghx ci wait` without ' +
+    'run_in_background gets updatedInput with run_in_background: true and no permission decision. A gh CI ' +
+    'polling loop (Bash or Monitor) or a gh read ghx wraps gets permissionDecision ask (GHX_HOOK_MODE=' +
+    'deny|ask|off; default ask) naming the ghx replacement. Fails open: any error or unparseable stdin exits ' +
+    '0 with no output. No gh calls. ' +
     'Register it with matcher Bash|Monitor (docs/agents/hooks.md).',
   kind: 'read',
   needs: { repo: 'none', config: 'none' },

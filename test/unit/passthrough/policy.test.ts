@@ -467,3 +467,27 @@ describe('refused argv never reaches gh (through runCli)', () => {
     });
   }
 });
+
+describe('a leading -R/--repo is stripped before classifying (gh accepts it before the command words)', () => {
+  test('wrapped commands are refused with the repo carried into the suggestion', () => {
+    for (const argv of [
+      ['-R', 'o/r', 'pr', 'merge', '1'],
+      ['--repo=o/r', 'pr', 'merge', '1'],
+      ['-Ro/r', 'pr', 'merge', '1'],
+      ['pr', 'merge', '-R', 'o/r', '1'],
+    ]) {
+      const e = refused(decide(argv));
+      assert.equal(e.code, 'USAGE_UNKNOWN_COMMAND', argv.join(' '));
+      assert.deepEqual(e.details?.suggestion, ['ghx', 'pr', 'merge', '1', '-R', 'o/r'], argv.join(' '));
+    }
+  });
+
+  test('reads run with the repo, writes are refused, api still has no -R', () => {
+    const r = run(decide(['-R', 'o/r', 'pr', 'diff', '1']));
+    assert.deepEqual([r.plan.args, r.globals.repo], [['pr', 'diff', '1'], 'o/r']);
+    assert.equal(refused(decide(['--repo', 'o/r', 'issue', 'close', '1'])).code, 'PASSTHROUGH_WRITE_REFUSED');
+    assert.equal(refused(decide(['-R', 'o/r', 'api', 'repos/{owner}/{repo}'])).code, 'USAGE_UNKNOWN_FLAG');
+    const s = run(decide(['-R', 'o/r', 'search', 'prs', 'x']));
+    assert.deepEqual(s.plan.args, ['search', 'prs', '-R', 'o/r', 'x']);
+  });
+});
