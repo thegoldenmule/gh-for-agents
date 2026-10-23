@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -165,6 +166,40 @@ test('invalid JSON settings are refused untouched: INSTALL_SETTINGS_INVALID, no 
   assert.equal(read(h.settings), bad);
   assert.ok(!existsSync(h.claudeMd), 'nothing is written when any file is refused');
   assert.deepEqual(backups(h.dir), []);
+});
+
+const asRoot = process.getuid?.() === 0;
+
+test('a read-only settings file or config dir is refused before anything is written: INSTALL_NOT_WRITABLE', {
+  skip: asRoot,
+}, async () => {
+  const h = home({ 'settings.json': EXISTING });
+  chmodSync(h.settings, 0o444);
+  const r = await run(['install'], { HOME: h.home });
+  assert.equal(r.exitCode, EXIT.ENV, r.stdout);
+  assert.equal(r.json.error.code, 'INSTALL_NOT_WRITABLE');
+  assert.equal(r.json.error.details.path, h.settings);
+  assert.equal(read(h.settings), EXISTING, 'r1: refused, not overwritten');
+  assert.ok(!existsSync(h.claudeMd), 'no other file was written either');
+  assert.deepEqual(backups(h.dir), []);
+  const dry = await run(['install', '--dry-run'], { HOME: h.home });
+  assert.equal(dry.json.error.code, 'INSTALL_NOT_WRITABLE', 'the preview fails the way the real run would');
+  chmodSync(h.settings, 0o644);
+
+  // A directory that won't take the new CLAUDE.md: the settings file isn't touched first.
+  const d = home({ 'settings.json': EXISTING });
+  chmodSync(d.dir, 0o555);
+  try {
+    const r2 = await run(['install'], { HOME: d.home });
+    assert.equal(r2.exitCode, EXIT.ENV, r2.stdout);
+    assert.equal(r2.json.error.code, 'INSTALL_NOT_WRITABLE');
+    assert.match(r2.json.error.hint, /writable/);
+    assert.equal(read(d.settings), EXISTING);
+    assert.ok(!existsSync(d.claudeMd));
+  } finally {
+    chmodSync(d.dir, 0o755);
+  }
+  assert.deepEqual(backups(d.dir), []);
 });
 
 test('an existing CLAUDE.md is preserved, and its ghx block is replaced in place on re-install', async () => {

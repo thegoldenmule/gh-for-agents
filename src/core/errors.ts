@@ -58,6 +58,7 @@ export const ERROR_CODES = {
   INSTALL_CLAUDE_MD_INVALID: { exit: ExitCode.ENV, hint: 'Fix the ghx marker lines by hand, then run it again.' },
   INSTALL_BIN_CONFLICT: { exit: ExitCode.ENV, hint: 'Move the existing file, or pass a different --bin-dir.' },
   INSTALL_HOME_UNKNOWN: { exit: ExitCode.ENV, hint: 'Set HOME or CLAUDE_CONFIG_DIR, or use --scope project.' },
+  INSTALL_NOT_WRITABLE: { exit: ExitCode.ENV, hint: 'Make the file or its directory writable, then run it again.' },
 
   // ── 5 NOT_FOUND ──────────────────────────────────────────────────────────
   PR_NOT_FOUND: { exit: ExitCode.NOT_FOUND },

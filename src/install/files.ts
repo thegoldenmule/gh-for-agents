@@ -4,6 +4,8 @@
 
 import { createHash } from 'node:crypto';
 import {
+  accessSync,
+  constants,
   copyFileSync,
   existsSync,
   lstatSync,
@@ -170,6 +172,56 @@ export function backupsOf(path: string): string[] {
   }
 }
 
+const DENIED = new Set(['EACCES', 'EPERM', 'EROFS']);
+
+/** An EACCES/EPERM/EROFS as INSTALL_NOT_WRITABLE (anything else is rethrown as is). */
+export function notWritable(e: unknown, path: string): GhxError {
+  const code = (e as NodeJS.ErrnoException).code;
+  if (!code || !DENIED.has(code)) throw e;
+  return new GhxError('INSTALL_NOT_WRITABLE', `${path} is not writable (${code}).`, {
+    hint:
+      code === 'EROFS'
+        ? 'It is on a read-only file system; install to another scope or directory.'
+        : 'Make it (or its directory) writable by you, or fix its owner, then run the command again. ghx changed nothing.',
+    details: { path, code },
+  });
+}
+
+/** The nearest existing directory at or above `dir`, which a recursive mkdir would create under. */
+function existingAncestor(dir: string): string {
+  let d = resolve(dir);
+  while (!existsSync(d) && dirname(d) !== d) d = dirname(d);
+  return d;
+}
+
+/** Throw INSTALL_NOT_WRITABLE unless `dir` (or the ancestor it would be created under) takes new entries. */
+export function assertDirWritable(dir: string): void {
+  const d = existingAncestor(dir);
+  try {
+    accessSync(d, constants.W_OK | constants.X_OK);
+  } catch (e) {
+    throw notWritable(e, d);
+  }
+}
+
+/**
+ * Throw INSTALL_NOT_WRITABLE unless the change can be applied: the file itself (followed through a
+ * symlink) is writable when it exists, and its real directory takes new entries for the temp file and
+ * rename. A read-only file is refused rather than replaced by the rename.
+ */
+export function assertWritable(path: string): void {
+  const linked = existsSync(path) && lstatSync(path).isSymbolicLink();
+  const target = linked ? realpathSync(path) : path;
+  if (existsSync(target)) {
+    try {
+      accessSync(target, constants.W_OK);
+    } catch (e) {
+      throw notWritable(e, target);
+    }
+  }
+  assertDirWritable(dirname(target));
+}
+
 /** Write via a temp file and rename. A symlinked file is written through to its target. */
 export function atomicWrite(path: string, content: string): void {
   const target = existsSync(path) ? realpathSync(path) : path;
@@ -195,21 +247,29 @@ export function commitChanges(changes: readonly FileChange[], clock: Clock, back
   return changes.map((c) => {
     const action = actionOf(c);
     if (action === 'unchanged') return { path: c.path, kind: c.kind, action, backup: null };
-    let backup: string | null = null;
-    if (c.before !== null) {
-      mkdirSync(backupDir, { recursive: true });
-      backup = backupPath(backupDir, c.path, ts);
-      copyFileSync(c.path, backup);
+    try {
+      return commitOne(c, action, ts, backupDir);
+    } catch (e) {
+      throw notWritable(e, c.path);
     }
-    if (c.after === null) {
-      // A symlinked file is emptied rather than unlinked, so a dotfiles link survives.
-      if (lstatSync(c.path).isSymbolicLink()) atomicWrite(c.path, '');
-      else unlinkSync(c.path);
-    } else {
-      atomicWrite(c.path, c.after);
-    }
-    return { path: c.path, kind: c.kind, action, backup };
   });
+}
+
+function commitOne(c: FileChange, action: FileAction, ts: string, backupDir: string): FileResult {
+  let backup: string | null = null;
+  if (c.before !== null) {
+    mkdirSync(backupDir, { recursive: true });
+    backup = backupPath(backupDir, c.path, ts);
+    copyFileSync(c.path, backup);
+  }
+  if (c.after === null) {
+    // A symlinked file is emptied rather than unlinked, so a dotfiles link survives.
+    if (lstatSync(c.path).isSymbolicLink()) atomicWrite(c.path, '');
+    else unlinkSync(c.path);
+  } else {
+    atomicWrite(c.path, c.after);
+  }
+  return { path: c.path, kind: c.kind, action, backup };
 }
 
 export interface BinLink {

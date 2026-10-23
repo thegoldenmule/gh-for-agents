@@ -2,10 +2,13 @@
 // --dry-run nothing is written and each planned change comes back as a unified diff in `wouldRun`.
 
 import { rmSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { z } from 'zod';
 import type { Clock } from '../core/clock.ts';
 import {
   actionOf,
+  assertDirWritable,
+  assertWritable,
   atomicWrite,
   type BinLink,
   commitBinLink,
@@ -13,6 +16,7 @@ import {
   diffOf,
   type FileChange,
   type FileResult,
+  notWritable,
   type Scope,
 } from './files.ts';
 
@@ -66,6 +70,13 @@ export interface Plan {
 /** Apply a validated plan (or describe it, under dry-run) and build the output document. */
 export function finish(plan: Plan, o: { dryRun: boolean; clock: Clock; next: string[] }): InstallOutput {
   const changedFiles = plan.changes.filter((c) => c.before !== c.after);
+  // Check every write before making any, so a permission problem is a clean refusal, not a half install
+  // (under --dry-run too: the preview should fail the way the real run would).
+  for (const c of changedFiles) assertWritable(c.path);
+  if (changedFiles.some((c) => c.before !== null)) assertDirWritable(plan.backupDir);
+  if (plan.manifest) assertDirWritable(dirname(plan.manifest.path));
+  if (plan.binLink?.action === 'created' || plan.binLink?.action === 'removed')
+    assertDirWritable(dirname(plan.binLink.path));
   const linkChanges = plan.binLink && (plan.binLink.action === 'created' || plan.binLink.action === 'removed');
   const changed = [...changedFiles.map((c) => c.path), ...(linkChanges && plan.binLink ? [plan.binLink.path] : [])];
   let files: FileResult[];
@@ -84,8 +95,13 @@ export function finish(plan: Plan, o: { dryRun: boolean; clock: Clock; next: str
   } else {
     files = commitChanges(plan.changes, o.clock, plan.backupDir);
     if (plan.binLink) commitBinLink(plan.binLink);
-    if (plan.manifest?.content === null) rmSync(plan.manifest.path, { force: true });
-    else if (plan.manifest) atomicWrite(plan.manifest.path, plan.manifest.content);
+    const m = plan.manifest;
+    try {
+      if (m?.content === null) rmSync(m.path, { force: true });
+      else if (m) atomicWrite(m.path, m.content);
+    } catch (e) {
+      throw notWritable(e, m?.path ?? '');
+    }
   }
   return {
     scope: plan.scope,
