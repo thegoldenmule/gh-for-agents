@@ -36,6 +36,11 @@ export interface FeedbackInput {
   viewerLogin: string;
   headSha: string;
   config: { trust: TrustConfig; bots: BotsConfig };
+  /**
+   * merge.blockOnSeverity: an addressed finding at or above it whose commit is unverified is in openFindings,
+   * as merge policy counts it (04). Absent, every unverified one is (fails closed).
+   */
+  blockOnSeverity?: Severity | undefined;
 }
 
 /** A condition only the network can evaluate. `manual` waits for `pr resolve`; unknown types stay unknown. */
@@ -62,6 +67,20 @@ export interface FoldResult {
   warnings: Warning[];
   /** Facts this fold lacked. Resolve them (resolveFacts) and fold again. */
   needs: FactNeeds;
+}
+
+/**
+ * Is the finding in openFindings? openFindings means "blocks merge" (04 final review), as merge policy's
+ * FINDINGS_OPEN reads it: open at any severity (below merge.blockOnSeverity policy warns), or addressed at or
+ * above the threshold with an unverified commit. pr status and pr feedback both use this.
+ */
+export function isOpenFinding(f: Finding, threshold?: Severity): boolean {
+  if (f.status === 'open') return true;
+  return (
+    f.status === 'addressed' &&
+    f.statusEvent?.verified == null &&
+    severityRank(f.severity) >= severityRank(threshold ?? 'low')
+  );
 }
 
 export const conditionKey = (c: NetworkCondition): string => `${c.type}:${c.ref}`;
@@ -432,7 +451,7 @@ export function foldFeedback(input: FeedbackInput, facts: FoldFacts = {}): FoldR
     return !t.isResolved && (p?.as === 'unstructured' || p?.as === 'comment');
   }).length;
 
-  const openFindings = outFindings.filter((f) => f.status === 'open').map((f) => f.id);
+  const openFindings = outFindings.filter((f) => isOpenFinding(f, input.blockOnSeverity)).map((f) => f.id);
   return {
     feedback: {
       reviews: reviews.map((r) => r.review),

@@ -455,3 +455,31 @@ test('a comment reads every block: a trailing invalid block does not discard a v
   assert.equal(r.feedback.comments[0]?.structured, true);
   assert.ok(r.warnings.some((w) => w.code === 'BLOCK_INVALID'));
 });
+
+test('openFindings means "blocks merge": open at any severity, plus addressed-unverified at or above the threshold', async () => {
+  const inp = loadInput('worked-example-3301.input.json');
+  const unverified = await loadFeedback({ ...inp, blockOnSeverity: 'high' }, resolver({ [HEAD]: null }));
+  assert.deepEqual(unverified.openFindings, ['f_h4x8pz', 'f_n2c6rv']);
+  assert.equal(unverified.feedback.counts.findingsOpen, 2);
+  const failClosed = await loadFeedback(inp, resolver({ [HEAD]: null }));
+  assert.deepEqual(failClosed.openFindings, ['f_h4x8pz', 'f_n2c6rv'], 'no threshold: every unverified one');
+  const verified = await loadFeedback({ ...inp, blockOnSeverity: 'high' }, resolver({ [HEAD]: true }));
+  assert.deepEqual(verified.openFindings, ['f_n2c6rv']);
+
+  const resolve = encode({
+    t: 'comment',
+    id: 'c_dddddd',
+    gen: 'ghx/0.1.0',
+    kind: 'resolve',
+    targets: [{ id: 'f_aaaaaa', status: 'addressed', commit: HEAD }],
+  });
+  const low = input({
+    reviews: [review(`${reviewBlock(['f_aaaaaa'])}\n${encode(finding({ severity: 'low' }))}`)],
+    issueComments: [issue(resolve)],
+    blockOnSeverity: 'high',
+  });
+  const below = await loadFeedback(low, resolver({ [HEAD]: null }));
+  assert.equal(below.feedback.findings[0]?.status, 'addressed');
+  assert.deepEqual(below.openFindings, [], 'below merge.blockOnSeverity it does not block');
+  assert.equal(below.feedback.counts.findingsOpen, 0);
+});

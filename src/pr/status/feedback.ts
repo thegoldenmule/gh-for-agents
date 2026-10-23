@@ -1,12 +1,12 @@
-// `pr feedback` filters (02 §5; 03 M6.7), pure. `--open` keeps open findings (with merge policy: an addressed
-// one whose commit is unverified counts as open), unresolved human thread comments, unmet preconditions and
+// `pr feedback` filters (02 §5; 03 M6.7), pure. `--open` keeps open findings (isOpenFinding, as in
+// openFindings: an addressed one at blocking severity whose commit is unverified counts as open), unresolved human thread comments, unmet preconditions and
 // each reviewer's latest standing change request (GitHub's CHANGES_REQUESTED, or a ghx request-changes verdict
 // downgraded to COMMENTED on the author's own PR; a later dismissed review clears it, as in merge policy). Outdated findings are dropped only
 // under --open, unless --include-outdated. Items are filtered, never altered; counts follow the kept lists,
 // except unresolvedHumanThreads, which describes the PR.
-import type { FoldResult } from '../../feedback/fold.ts';
+import { type FoldResult, isOpenFinding } from '../../feedback/fold.ts';
 import type { Feedback, Finding, Precondition, Review } from '../../feedback/schemas.ts';
-import { type Severity, severityRank } from '../../schemas/pr.ts';
+import type { Severity } from '../../schemas/pr.ts';
 
 export type FeedbackSource = 'ghx' | 'human' | 'bot';
 
@@ -48,16 +48,6 @@ function standingChangeRequests(reviews: readonly Review[]): Set<string> {
 
 const unmet = (p: Precondition): boolean => p.status !== 'met' && p.status !== 'withdrawn';
 
-/** Open for merge policy (04): open, or addressed with an unverified commit at or above the threshold. */
-function stillOpen(x: Finding, threshold: Severity | undefined): boolean {
-  if (x.status === 'open') return true;
-  return (
-    x.status === 'addressed' &&
-    x.statusEvent?.verified == null &&
-    severityRank(x.severity) >= severityRank(threshold ?? 'low')
-  );
-}
-
 export function filterFeedback(v: FeedbackView, f: FeedbackFilter): FeedbackView {
   const fb = v.feedback;
   const newer = (at: string | null | undefined): boolean =>
@@ -73,7 +63,7 @@ export function filterFeedback(v: FeedbackView, f: FeedbackFilter): FeedbackView
     (x: Finding) =>
       wants('ghx') &&
       (newer(reviewAt.get(x.reviewId)) || newer(x.statusEvent?.at)) &&
-      (!f.open || (stillOpen(x, f.blockOnSeverity) && (f.includeOutdated || !x.outdated))),
+      (!f.open || (isOpenFinding(x, f.blockOnSeverity) && (f.includeOutdated || !x.outdated))),
   );
   const comments = fb.comments.filter(
     (c) =>
@@ -95,7 +85,7 @@ export function filterFeedback(v: FeedbackView, f: FeedbackFilter): FeedbackView
       ...fb.counts,
       reviews: reviews.length,
       findingsTotal: findings.length,
-      findingsOpen: findings.filter((x) => (f.open ? stillOpen(x, f.blockOnSeverity) : x.status === 'open')).length,
+      findingsOpen: findings.filter((x) => isOpenFinding(x, f.blockOnSeverity)).length,
       comments: comments.length,
       bots: bots.length,
     },

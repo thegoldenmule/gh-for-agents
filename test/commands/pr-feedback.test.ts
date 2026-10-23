@@ -8,7 +8,7 @@ import { PrFeedbackOutput } from '../../src/pr/status/schema.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 import { readJson } from '../unit/feedback/_fixture.ts';
-import { HEAD } from '../unit/pr/snapshot-fixture.ts';
+import { HEAD, isPrCommits } from '../unit/pr/snapshot-fixture.ts';
 import { okJson } from './ci-why-world.ts';
 import { at, install, REF, run, workedPr } from './pr-status-world.ts';
 
@@ -165,4 +165,26 @@ test('the smoke scenario (test/fixtures/gh/smoke/pr-feedback) replays the worked
   );
   assert.equal(r.exitCode, EXIT.OK, r.stdout);
   assert.deepEqual(r.json.openFindings, ['f_n2c6rv']);
+});
+
+test('openFindings means "blocks merge": pr status and pr feedback both list an unverified addressed high finding', async () => {
+  // The PR's commit list cannot be read, so f_h4x8pz's addressed commit stays verified:null.
+  const unverified = () => {
+    const fake = install();
+    fake.on(isPrCommits, { exitCode: 1, stdout: '', stderr: 'gh: Forbidden (HTTP 403)\n' });
+    return fake;
+  };
+  const status = await run(['pr', 'status', REF], unverified());
+  assert.equal(status.exitCode, EXIT.OK, status.stdout.slice(0, 500));
+  const blocker = status.json.merge.blockers.find((b: { code: string }) => b.code === 'FINDINGS_OPEN');
+  assert.match(blocker?.message ?? '', /f_h4x8pz/, 'the policy engine blocks on it');
+  assert.deepEqual(status.json.openFindings, ['f_h4x8pz', 'f_n2c6rv']);
+  assert.equal(status.json.feedback.counts.findingsOpen, 2);
+  // f_h4x8pz is outdated, which --open drops unless --include-outdated (pre-existing --open rule).
+  for (const args of [[], ['--open', '--include-outdated']]) {
+    const fb = await run(['pr', 'feedback', REF, ...args], unverified());
+    assert.equal(fb.exitCode, EXIT.OK, fb.stdout.slice(0, 500));
+    assert.deepEqual(fb.json.openFindings, ['f_h4x8pz', 'f_n2c6rv'], args.join(' '));
+    assert.equal(fb.json.feedback.counts.findingsOpen, 2, args.join(' '));
+  }
 });

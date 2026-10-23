@@ -121,6 +121,7 @@ export async function loadSnapshotFeedback(
   resolver: Parameters<typeof resolveFacts>[1],
   blockOnSeverity: Severity,
 ): Promise<FoldResult> {
+  input = { ...input, blockOnSeverity };
   const first = foldFeedback(input);
   if (first.needs.commits.length === 0 && first.needs.conditions.length === 0) return first;
   const threshold = severityRank(blockOnSeverity);
