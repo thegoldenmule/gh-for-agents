@@ -491,3 +491,37 @@ describe('a leading -R/--repo is stripped before classifying (gh accepts it befo
     assert.deepEqual(s.plan.args, ['search', 'prs', '-R', 'o/r', 'x']);
   });
 });
+
+describe('passthrough edge cases (final review)', () => {
+  test('run download --name -D 123: -D is the value of --name, so -D <dir> is still missing', () => {
+    for (const argv of [
+      ['run', 'download', '--name', '-D', '123'],
+      ['run', 'download', '-n', '-D', '123'],
+      ['run', 'download', '123', '--name', '--dir'],
+    ]) {
+      assert.equal(refused(decide(argv)).code, 'VALIDATION', argv.join(' '));
+    }
+    run(decide(['run', 'download', '123', '--name', 'logs', '-D', 'out']));
+    run(decide(['run', 'download', '123', '-Dout']));
+  });
+
+  test('-cw and -vw are --web in a short-flag cluster; a value flag ends the cluster', () => {
+    for (const argv of [
+      ['issue', 'view', '1', '-cw'],
+      ['run', 'view', '1', '-vw'],
+      ['pr', 'list', '-w'],
+    ]) {
+      assert.equal(refused(decide(argv)).code, 'USAGE_UNKNOWN_FLAG', argv.join(' '));
+    }
+    // -L takes the rest of the cluster as its value; run list's -w is --workflow.
+    run(decide(['pr', 'list', '-Lw']));
+    run(decide(['run', 'list', '-w', 'ci.yml']));
+    run(decide(['issue', 'list', '-S', '-w']));
+  });
+
+  test('pr co is pr checkout: a refused write', () => {
+    const e = refused(decide(['pr', 'co', '12']));
+    assert.equal(e.code, 'PASSTHROUGH_WRITE_REFUSED');
+    assert.equal(e.details?.command, 'gh pr checkout');
+  });
+});

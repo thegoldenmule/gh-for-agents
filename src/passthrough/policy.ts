@@ -31,7 +31,7 @@ export const ALLOWED_NAMES: readonly string[] = [
 
 /** gh's built-in verb aliases (gh 2.86 `ALIASES` sections), canonicalised before any decision. */
 const VERB_ALIASES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  pr: { ls: 'list', new: 'create' },
+  pr: { ls: 'list', new: 'create', co: 'checkout' },
   issue: { ls: 'list', new: 'create' },
   run: { ls: 'list' },
   workflow: { ls: 'list' },
@@ -551,7 +551,7 @@ export function decide(tokens: readonly string[]): Decision {
   if (ALLOWED_READS[top]?.includes(sub)) {
     const globals: Partial<GlobalOptions> = { ...g.globals, ...(repo !== undefined ? { repo } : {}) };
     const gg: Globals = { ...g, globals };
-    if (has(args, '--web') || (args.includes('-w') && `${top} ${sub}` !== 'run list')) {
+    if (wantsWeb(args, `${top} ${sub}` === 'run list')) {
       return {
         kind: 'refuse',
         error: new GhxError('USAGE_UNKNOWN_FLAG', `'ghx ${top} ${sub}' has no flag '--web'.`, {
@@ -589,11 +589,53 @@ export function decide(tokens: readonly string[]): Decision {
   return { kind: 'unknown', words: [top, sub], ghKnown: OTHER_READS[top]?.includes(sub) === true };
 }
 
+/**
+ * The flag tokens of a verb's argv, as pflag reads them: a value flag's value is skipped, and a short
+ * cluster (-cw) is split until a value flag takes the rest of it (-Dout). `wFlagTakesValue` for run list,
+ * whose -w is --workflow.
+ */
+function flagNames(args: readonly string[], wFlagTakesValue = false): string[] {
+  const out: string[] = [];
+  const takesValue = (f: string) => VALUE_FLAGS.has(f) || (wFlagTakesValue && f === '-w');
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i] as string;
+    if (t === '--') break;
+    if (t.startsWith('--')) {
+      const name = t.split('=')[0] as string;
+      out.push(name);
+      if (!t.includes('=') && takesValue(name)) i++;
+    } else if (/^-[A-Za-z]/.test(t)) {
+      for (let j = 1; j < t.length; j++) {
+        const f = `-${t[j]}`;
+        out.push(f);
+        if (takesValue(f)) {
+          if (j === t.length - 1) i++;
+          break;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function wantsWeb(args: readonly string[], wFlagTakesValue: boolean): boolean {
+  return flagNames(args, wFlagTakesValue).some((f) => f === '--web' || (f === '-w' && !wFlagTakesValue));
+}
+
+/** -D/--dir with a value, where -D is a flag and not the value of another one (--name -D). */
 function hasDir(args: readonly string[]): boolean {
   for (let i = 0; i < args.length; i++) {
     const t = args[i] as string;
-    if ((t === '-D' || t === '--dir') && args[i + 1] !== undefined && args[i + 1] !== '') return true;
-    if (/^--dir=./.test(t) || /^-D.+/.test(t)) return true;
+    if (t === '--') return false;
+    if (t === '-D' || t === '--dir') {
+      const v = args[i + 1];
+      if (v !== undefined && v !== '' && !v.startsWith('-')) return true;
+      i++;
+    } else if (/^--dir=./.test(t) || /^-D.+/.test(t)) {
+      return true;
+    } else if (t.startsWith('-') && !t.includes('=') && VALUE_FLAGS.has(t)) {
+      i++;
+    }
   }
   return false;
 }
