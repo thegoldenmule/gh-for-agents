@@ -181,3 +181,14 @@ Filled in by the wave 1 bootstrap agent (commits `f29f2eb`..`3cd7603`).
   - `--scope project` keeps adding the deny rules (`settings.local.json`).
   - The snippet says to use ghx in repos with a ghx config.
   - Uninstall removes exactly what install added: it keeps a manifest or uses backup matching, and never removes the user's own identical rules.
+- **2026-10-23, distribution (user decisions plus research).**
+  - **Package:** `@thegoldenmule/ghx`. The command stays `ghx`. License: MIT.
+  - **Publishing:** compiled `dist/` via `tsc -p tsconfig.build.json`, because Node refuses type stripping under `node_modules`.
+  - **Entry point:** `bin/ghx.js` runs `src/main.ts` when it exists (dev checkout) and `dist/main.js` otherwise. It checks the Node major version first.
+  - **Install paths:**
+    - `npm i -g @thegoldenmule/ghx && ghx install`.
+    - `npx @thegoldenmule/ghx install` detects that it's running from the `_npx` cache, runs `npm i -g @thegoldenmule/ghx@<VERSION>`, then hands off to the global bin's `install`.
+    - The hook never points into `_npx`, and never uses `npx`/`dlx`: measured at 0.5 s per call, and 71 s offline.
+  - **Install record:** stores the bin dir, so `uninstall` removes the link without `--bin-dir`.
+  - **`doctor`:** flags a version or node mismatch between the hook and the running ghx.
+  - **Releases:** a tag-triggered GitHub Actions workflow with npm trusted publishing (provenance, no stored token). The first `npm publish --access public` is manual, by the user, and the user then links the trusted publisher on npmjs.com.
