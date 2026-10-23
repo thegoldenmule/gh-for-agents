@@ -4,6 +4,7 @@
 import { GhxError } from '../core/errors.ts';
 import { WRAPPED_WRITES } from '../passthrough/policy.ts';
 import { parseJsonWithPosition } from '../util/json.ts';
+import { styleOf, toPlain, withStyle } from './text.ts';
 
 type Json = Record<string, unknown>;
 
@@ -40,8 +41,8 @@ function invalid(path: string, message: string, details: Json = {}): GhxError {
 
 /** Parse a settings file. Missing or whitespace-only is `{}`; anything ghx can't merge into safely throws. */
 export function parseSettings(text: string | null, path: string): Json {
-  if (text === null || text.trim() === '') return {};
-  const r = parseJsonWithPosition(text);
+  if (text === null || toPlain(text).trim() === '') return {};
+  const r = parseJsonWithPosition(toPlain(text));
   if (!r.ok) throw invalid(path, `not valid JSON: ${r.message}`, { line: r.line, column: r.column });
   const v = r.value;
   if (!isObj(v)) throw invalid(path, 'the top level is not a JSON object.');
@@ -63,11 +64,17 @@ function indentOf(text: string | null): string {
   return m?.[1] ?? '  ';
 }
 
-/** Serialise like the original: its indentation, and a trailing newline unless it had none. */
+/** Serialise like the original: its indentation, BOM and line endings, and a trailing newline unless it had none. */
 export function serializeSettings(value: Json, original: string | null): string {
-  const body = JSON.stringify(value, null, indentOf(original));
-  const newline = original === null || original === '' || original.endsWith('\n');
-  return newline ? `${body}\n` : body;
+  const plain = original === null ? null : toPlain(original);
+  const body = JSON.stringify(value, null, indentOf(plain));
+  const newline = plain === null || plain === '' || plain.endsWith('\n');
+  return withStyle(newline ? `${body}\n` : body, styleOf(original));
+}
+
+/** Whether ghx can rewrite this file without changing more than its own edits (no hand formatting). */
+export function keepsFormatting(original: string, parsed: Json): boolean {
+  return serializeSettings(parsed, original) === original;
 }
 
 export function isGhxHook(h: unknown): boolean {

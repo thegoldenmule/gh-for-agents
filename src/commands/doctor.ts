@@ -282,6 +282,21 @@ export default defineCommand({
           message: `The ${scope} ghx hook runs ${s.hook.missingPaths.join(', ')}, which no longer exists; it fails open. Re-run ghx install${scope === 'project' ? ' --scope project' : ''}.`,
         });
       }
+      const flag = scope === 'project' ? ' --scope project' : '';
+      for (const f of [s, s?.shared]) {
+        if (f?.problem) {
+          ctx.warn({
+            code: 'INSTALL_SETTINGS_INVALID',
+            message: `${f.problem} Claude Code may ignore this file, and ghx install${flag} refuses it until it parses.`,
+          });
+        }
+      }
+      if (s?.claudeMd.problem) {
+        ctx.warn({
+          code: 'INSTALL_CLAUDE_MD_INVALID',
+          message: `${s.claudeMd.problem} ghx install${flag} and ghx uninstall${flag} refuse it until the markers are fixed.`,
+        });
+      }
       const shared = s?.shared;
       if (shared?.hook.installed && shared.hook.missingPaths.length > 0) {
         ctx.warn({

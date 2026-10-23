@@ -481,6 +481,7 @@ Flags:
 
 - `--scope <user|project>` (default `"user"`): user (~/.claude) or project (repo .claude/settings.local.json)
 - `--bin-dir <string>`: Also remove <dir>/ghx if it links to this checkout
+- `--snippet` (default `true`): Remove the CLAUDE.md block; --no-snippet leaves it
 
 Input: Flags and positionals only; --input file.json is also accepted.
 

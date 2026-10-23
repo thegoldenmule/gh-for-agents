@@ -32,11 +32,13 @@ import {
   GHX_DENY_RULES,
   inspectSettings,
   installSettings,
+  keepsFormatting,
   parseSettings,
   recordAdded,
   removeDenyRules,
   serializeSettings,
 } from '../install/settings.ts';
+import { reformattedWarning, styleKeepsBytes, toPlain } from '../install/text.ts';
 
 export default defineCommand({
   name: ['install'],
@@ -116,6 +118,7 @@ export default defineCommand({
         after: same ? before : serializeSettings(next, before),
       });
       const after = same ? before : serializeSettings(next, before);
+      if (!same && before !== null && !keepsFormatting(before, parsed)) ctx.warn(reformattedWarning(targets.settings));
       const ghxFree = inspectSettings(parsed).hookCommands.length === 0 && owned.deny.length === 0;
       settingsRecord = {
         path: targets.settings,
@@ -132,7 +135,9 @@ export default defineCommand({
       const legacy =
         before !== null && removeBlock(before, targets.claudeMd) === '' && backupsOf(targets.claudeMd).length === 0;
       const after = installBlock(before, snippet, targets.claudeMd);
-      const ghxFree = before === null || findBlock(before, targets.claudeMd) === null;
+      const ghxFree = before === null || findBlock(toPlain(before), targets.claudeMd) === null;
+      if (before !== null && after !== before && !styleKeepsBytes(before))
+        ctx.warn(reformattedWarning(targets.claudeMd));
       claudeMdRecord = {
         path: targets.claudeMd,
         created: claudeMdRecord?.created ?? (before === null || legacy),

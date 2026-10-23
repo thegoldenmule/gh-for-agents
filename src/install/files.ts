@@ -210,7 +210,20 @@ export function assertDirWritable(dir: string): void {
  * rename. A read-only file is refused rather than replaced by the rename.
  */
 export function assertWritable(path: string): void {
-  const linked = existsSync(path) && lstatSync(path).isSymbolicLink();
+  let isLink = false;
+  try {
+    isLink = lstatSync(path).isSymbolicLink();
+  } catch {
+    // absent: created
+  }
+  if (isLink && !existsSync(path)) {
+    const to = readlinkSync(path);
+    throw new GhxError('INSTALL_NOT_WRITABLE', `${path} is a symlink to ${to}, which does not exist.`, {
+      hint: "Create the file it points to, or fix or remove the link, then run the command again. ghx won't replace a link with a regular file, and changed nothing.",
+      details: { path, code: 'DANGLING_SYMLINK', target: to },
+    });
+  }
+  const linked = isLink;
   const target = linked ? realpathSync(path) : path;
   if (existsSync(target)) {
     try {

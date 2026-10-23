@@ -605,6 +605,64 @@ test('uninstall refuses invalid settings JSON untouched', async () => {
   assert.equal(read(h.settings), '{,}');
 });
 
+// ── lows: symlinks, --no-snippet, BOM/CRLF ─────────────────────────────────────
+
+test('a dangling settings symlink is refused, not replaced with a regular file', async () => {
+  const h = home();
+  symlinkSync(join(h.home, 'dotfiles', 'settings.json'), h.settings);
+  const r = await run(['install'], { HOME: h.home });
+  assert.equal(r.exitCode, EXIT.ENV, r.stdout);
+  assert.equal(r.json.error.code, 'INSTALL_NOT_WRITABLE');
+  assert.equal(r.json.error.details.code, 'DANGLING_SYMLINK');
+  assert.ok(lstatSync(h.settings).isSymbolicLink(), 'still a link');
+  assert.ok(!existsSync(join(h.home, 'dotfiles')) && !existsSync(h.claudeMd), 'nothing written');
+  // A live link is written through, and stays a link.
+  mkdirSync(join(h.home, 'dotfiles'));
+  writeFileSync(join(h.home, 'dotfiles', 'settings.json'), '{}\n');
+  assert.equal((await run(['install', '--no-snippet'], { HOME: h.home })).exitCode, 0);
+  assert.ok(lstatSync(h.settings).isSymbolicLink());
+  assert.ok(json(join(h.home, 'dotfiles', 'settings.json')).hooks);
+});
+
+test('uninstall --no-snippet leaves the CLAUDE.md block, and a later uninstall still removes it', async () => {
+  const h = home({ 'CLAUDE.md': '# Mine\n' });
+  await run(['install'], { HOME: h.home });
+  const r = await run(['uninstall', '--no-snippet'], { HOME: h.home });
+  assert.equal(r.exitCode, 0, r.stdout);
+  assert.deepEqual(r.json.changed, [h.settings]);
+  assert.ok(!existsSync(h.settings));
+  assert.ok(read(h.claudeMd).includes(BEGIN));
+  const again = await run(['uninstall'], { HOME: h.home });
+  assert.deepEqual(again.json.changed, [h.claudeMd]);
+  assert.equal(read(h.claudeMd), '# Mine\n');
+});
+
+test('a BOM and CRLF line endings are kept; formatting ghx cannot keep warns INSTALL_REFORMATTED', async () => {
+  const crlf = (t: string) => `\uFEFF${t.replaceAll('\n', '\r\n')}`;
+  const settings = crlf('{\n  "model": "opus"\n}\n');
+  const md = crlf('# Mine\n');
+  const h = home({ 'settings.json': settings, 'CLAUDE.md': md });
+  const r = await run(['install'], { HOME: h.home });
+  assert.equal(r.exitCode, 0, r.stdout);
+  for (const p of [h.settings, h.claudeMd]) {
+    const t = read(p);
+    assert.ok(t.startsWith('\uFEFF'), `${p} keeps its BOM`);
+    assert.ok(!/[^\r]\n/.test(t), `${p} is all CRLF`);
+  }
+  assert.ok(!(r.json.warnings ?? []).some((w: { code: string }) => w.code === 'INSTALL_REFORMATTED'));
+  assert.equal((await run(['uninstall'], { HOME: h.home })).exitCode, 0);
+  assert.equal(read(h.settings), settings);
+  assert.equal(read(h.claudeMd), md);
+  const inline = home({ 'settings.json': '{ "model": "opus", "permissions": { "allow": ["Read"] } }\n' });
+  const w = await run(['install', '--no-snippet'], { HOME: inline.home });
+  assert.equal(w.exitCode, 0, w.stdout);
+  assert.ok(
+    w.json.warnings.some(
+      (x: { code: string; message: string }) => x.code === 'INSTALL_REFORMATTED' && x.message.includes(inline.settings),
+    ),
+  );
+});
+
 // ── ghx doctor's install check ─────────────────────────────────────────────────
 
 test('doctor reports the install per scope, informationally, and flags a hook whose paths are gone', async () => {
@@ -657,6 +715,17 @@ test('doctor reports the install per scope, informationally, and flags a hook wh
         w.code === 'INSTALL_HOOK_STALE' && w.message.includes(join(repo, '.claude', 'settings.json')),
     ),
   );
+
+  // Broken settings and stray markers are warnings, still not failures.
+  writeFileSync(h.settings, '{ "model": ');
+  writeFileSync(h.claudeMd, `${BEGIN}\nno end marker\n`);
+  const broken = await run(['doctor'], { HOME: h.home }, { git });
+  assert.equal(broken.exitCode, before.exitCode);
+  assert.equal(broken.json.install.user.status, 'invalid');
+  assert.match(broken.json.install.user.problem, /not valid JSON/);
+  assert.match(broken.json.install.user.claudeMd.problem, /ghx:begin/);
+  const codes = broken.json.warnings.map((w: { code: string }) => w.code);
+  assert.ok(codes.includes('INSTALL_SETTINGS_INVALID') && codes.includes('INSTALL_CLAUDE_MD_INVALID'), codes.join());
 
   const none = await run(['doctor'], {});
   assert.deepEqual(none.json.install, { user: null, project: null });

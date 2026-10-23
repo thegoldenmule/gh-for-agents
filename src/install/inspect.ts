@@ -10,12 +10,14 @@ import { scanShell } from '../hook/shell.ts';
 import { findBlock } from './claude-md.ts';
 import { readOrNull, resolveTargets, type Scope, type Targets } from './files.ts';
 import { GHX_DENY_RULES, inspectSettings, parseSettings } from './settings.ts';
+import { toPlain } from './text.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
 const SettingsInstall = z.object({
   settings: z.string(),
   status: z.enum(['missing', 'invalid', 'ok']).describe('Of the settings file'),
+  problem: z.string().optional().describe('Why the settings file is invalid (status invalid only)'),
   hook: z.object({
     installed: z.boolean(),
     command: z.string().nullable(),
@@ -27,7 +29,11 @@ const SettingsInstall = z.object({
 type SettingsInstall = z.input<typeof SettingsInstall>;
 
 export const ScopeInstall = SettingsInstall.extend({
-  claudeMd: z.object({ path: z.string(), block: z.boolean() }),
+  claudeMd: z.object({
+    path: z.string(),
+    block: z.boolean(),
+    problem: z.string().optional().describe('Why the ghx marker lines are broken, when they are'),
+  }),
   shared: SettingsInstall.nullable()
     .optional()
     .describe('Project scope: .claude/settings.json, which ghx never writes, read in case of a hand install'),
@@ -64,15 +70,18 @@ function inspectSettingsFile(settingsPath: string, env: Env): SettingsInstall {
   const text = readOrNull(settingsPath);
   let status: SettingsInstall['status'] = text === null ? 'missing' : 'ok';
   let found = inspectSettings({});
+  let problem: string | undefined;
   try {
     found = inspectSettings(parseSettings(text, settingsPath));
-  } catch {
+  } catch (e) {
     status = 'invalid';
+    problem = e instanceof Error ? e.message : String(e);
   }
   const command = found.hookCommands[0] ?? null;
   return {
     settings: settingsPath,
     status,
+    ...(problem ? { problem } : {}),
     hook: { installed: command !== null, command, missingPaths: command ? missingPaths(command, env) : [] },
     deny: { present: found.denyPresent.length, total: GHX_DENY_RULES.length, missing: found.denyMissing },
     hookMode: found.hookMode,
@@ -82,14 +91,15 @@ function inspectSettingsFile(settingsPath: string, env: Env): SettingsInstall {
 function inspectScope(t: Targets, env: Env): ScopeInstall {
   const md = readOrNull(t.claudeMd);
   let block = false;
+  let problem: string | undefined;
   try {
-    block = md !== null && findBlock(md, t.claudeMd) !== null;
-  } catch {
-    block = false;
+    block = md !== null && findBlock(toPlain(md), t.claudeMd) !== null;
+  } catch (e) {
+    problem = e instanceof Error ? e.message : String(e);
   }
   return {
     ...inspectSettingsFile(t.settings, env),
-    claudeMd: { path: t.claudeMd, block },
+    claudeMd: { path: t.claudeMd, block, ...(problem ? { problem } : {}) },
     ...(t.sharedSettings ? { shared: inspectSettingsFile(t.sharedSettings, env) } : {}),
   };
 }
