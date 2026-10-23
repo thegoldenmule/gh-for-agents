@@ -4,6 +4,8 @@
 // Per 03 §3.6 tool_use.input is the pre-hook command, so "in the background" comes from the tool_result
 // and toolUseResult.backgroundTaskId. Notifications are counted from queue-operation enqueues: each is
 // enqueued once, then delivered as a user turn or absorbed mid-turn as an attachment.
+// Final review decisions (04): the end-to-end call count is informational and never fails a session; a
+// metric with nothing to measure reports pass: null; raw gh CI polling fails the CI-wait metric.
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { type Invocation, isCiWait, isGh, isGhx, scanShell } from '../../src/hook/shell.ts';
@@ -44,7 +46,10 @@ export interface WaitReport {
 interface Metric<T> {
   value: T;
   threshold: string;
+  /** null: nothing to measure in this session, or an informational metric. */
   pass: boolean | null;
+  /** Reported, never part of the session's pass. */
+  informational?: true;
   examples?: string[];
 }
 
@@ -53,7 +58,7 @@ export interface SessionReport {
   pass: boolean;
   waits: WaitReport[];
   metrics: {
-    ciWaits: Metric<number>;
+    ciWaits: Metric<number> & { rawPolling: number };
     githubCallsToDiagnose: Metric<number | null>;
     githubCallsEndToEnd: Metric<number>;
     rawGh: Metric<number>;
@@ -173,6 +178,53 @@ function isDiscovery(inv: Invocation): boolean {
     ['help', 'schema', 'version', 'hook'].includes(a[0] as string) ||
     a.some((t) => t === '--help' || t === '-h' || t === '--schema' || t === '--version')
   );
+}
+
+/** gh's subcommand path with leading -R/--repo/--hostname options skipped: `gh -R o/r pr checks 7` → [pr, checks]. */
+function ghCommand(inv: Invocation): string[] {
+  const out: string[] = [];
+  const a = inv.argv.slice(1);
+  for (let i = 0; i < a.length && out.length < 2; i++) {
+    const t = a[i] as string;
+    if (t === '-R' || t === '--repo' || t === '--hostname') i++;
+    else if (!t.startsWith('-')) out.push(t);
+  }
+  return out;
+}
+
+/**
+ * Raw gh used to wait on CI: `gh pr checks` and `gh run watch` in any form, and `gh run view`/`gh run list`
+ * run under Monitor, in a loop, beside sleep or timeout, or repeated with the same arguments (log
+ * fetches excepted: reading a failed log twice is diagnosis, not polling).
+ */
+function rawCiPolls(shell: readonly { u: ToolUse; scan: ReturnType<typeof scanShell> }[]): { u: ToolUse }[] {
+  const seen = new Map<string, number>();
+  const statusReads = (scan: ReturnType<typeof scanShell>) =>
+    scan.invocations.filter((inv) => {
+      const [group, verb] = ghCommand(inv);
+      return (
+        isGh(inv) && group === 'run' && (verb === 'view' || verb === 'list') && !inv.argv.some((t) => /^--log/.test(t))
+      );
+    });
+  for (const { scan } of shell) {
+    for (const inv of statusReads(scan)) seen.set(inv.argv.join(' '), (seen.get(inv.argv.join(' ')) ?? 0) + 1);
+  }
+  return shell.filter(({ u, scan }) => {
+    const always = scan.invocations.some((inv) => {
+      const [group, verb] = ghCommand(inv);
+      return isGh(inv) && ((group === 'pr' && verb === 'checks') || (group === 'run' && verb === 'watch'));
+    });
+    if (always) return true;
+    const reads = statusReads(scan);
+    if (reads.length === 0) return false;
+    return (
+      u.name === 'Monitor' ||
+      scan.loop ||
+      scan.sleep ||
+      scan.timeout ||
+      reads.some((inv) => (seen.get(inv.argv.join(' ')) ?? 0) > 1)
+    );
+  });
 }
 
 const touchesGitHub = (inv: Invocation): boolean => isGh(inv) || (isGhx(inv) && !isDiscovery(inv));
@@ -300,22 +352,33 @@ export function scoreSession(path: string, jsonl: string): SessionReport {
     .filter(({ u }) => isShell(u) && scanShell(commandOf(u)).invocations.some(touchesGitHub))
     .map(({ i }) => i);
   const editAt = firstSourceEdit(p.uses);
-  const diagnose = editAt === undefined ? null : githubIdx.filter((i) => i < editAt).length;
+  // Nothing to measure without a source edit, or when the edit came before any GitHub call.
+  const before = editAt === undefined ? 0 : githubIdx.filter((i) => i < editAt).length;
+  const diagnose = before === 0 ? null : before;
+  const polls = rawCiPolls(shell);
   const endToEnd = shell.filter(({ scan }) => scan.invocations.some((x) => touchesGitHub(x) || isGitRemote(x))).length;
 
   const examples = (xs: { u: ToolUse }[]): string[] => xs.slice(0, 5).map(({ u }) => clip(commandOf(u)));
   const metrics: SessionReport['metrics'] = {
     ciWaits: {
       value: waits.length,
-      threshold: 'every wait: 1 background ghx ci wait call, 1 notification, no Monitor/Read/sleep',
-      pass: waits.every((w) => w.pass),
+      rawPolling: polls.length,
+      threshold:
+        'every wait: 1 background ghx ci wait call, 1 notification, no Monitor/Read/sleep; no raw gh CI polling',
+      pass: polls.length > 0 ? false : waits.length === 0 ? null : waits.every((w) => w.pass),
+      ...(polls.length > 0 ? { examples: examples(polls) } : {}),
     },
     githubCallsToDiagnose: {
       value: diagnose,
       threshold: '<= 1 from the first GitHub call to the first source edit',
       pass: diagnose === null ? null : diagnose <= 1,
     },
-    githubCallsEndToEnd: { value: endToEnd, threshold: '<= 5', pass: endToEnd <= 5 },
+    githubCallsEndToEnd: {
+      value: endToEnd,
+      threshold: '<= 5 (informational)',
+      pass: null,
+      informational: true,
+    },
     rawGh: { value: gh.length, threshold: '0', pass: gh.length === 0, examples: examples(gh) },
     wrappedGhx: {
       value: wrapped.length,

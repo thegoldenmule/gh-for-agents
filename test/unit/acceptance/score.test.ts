@@ -22,6 +22,9 @@ test('pass-session.jsonl: two background waits, one diagnosis call, five GitHub 
   );
   assert.equal(s.metrics.githubCallsToDiagnose.value, 1);
   assert.equal(s.metrics.githubCallsEndToEnd.value, 5);
+  assert.equal(s.metrics.githubCallsEndToEnd.pass, null, 'informational');
+  assert.equal(s.metrics.ciWaits.pass, true);
+  assert.equal(s.metrics.ciWaits.rawPolling, 0);
   assert.equal(s.metrics.rawGh.value, 0);
   assert.equal(s.metrics.wrappedGhx.value, 0);
   assert.equal(s.metrics.harnessRefusals.value, 0);
@@ -46,6 +49,12 @@ test('fail-session.jsonl: every failing metric is reported', () => {
   assert.match(v, /sleep during the wait: sleep 120/);
   assert.equal(s.metrics.githubCallsToDiagnose.value, 4);
   assert.equal(s.metrics.githubCallsToDiagnose.pass, false);
+  assert.equal(s.metrics.ciWaits.pass, false);
+  assert.equal(s.metrics.ciWaits.rawPolling, 2);
+  assert.deepEqual(s.metrics.ciWaits.examples, [
+    'gh pr checks 3266 -R octo/demo',
+    'while true; do gh pr checks 3266 -R octo/demo; sleep 30; done',
+  ]);
   assert.equal(s.metrics.rawGh.value, 3);
   assert.deepEqual(s.metrics.wrappedGhx.examples, ['ghx pr status 3266 -R octo/demo | jq .ci']);
   assert.equal(s.metrics.harnessRefusals.value, 1);
@@ -145,6 +154,62 @@ test('raw gh counts every gh call, including wrapped and chained ones; discovery
   );
   assert.equal(s.metrics.rawGh.value, 2);
   assert.equal(s.metrics.githubCallsEndToEnd.value, 2);
+});
+
+const shellSession = (cmds: string[], name = 'Bash') =>
+  scoreSession('inline', cmds.map((c, i) => use(`t${i}`, name, { command: c })).join('\n'));
+
+test('raw gh CI polling fails the CI-wait metric, even with no ghx ci wait at all', () => {
+  const polls = [
+    'gh pr checks 7 --watch',
+    'gh -R o/r pr checks 7',
+    'gh run watch 5 --exit-status',
+    'until gh run view 5 --json status | grep -q completed; do sleep 20; done',
+    'timeout 600 gh run list --branch feat/x --json status',
+  ];
+  for (const c of polls) {
+    const s = shellSession([c]);
+    assert.equal(s.metrics.ciWaits.pass, false, c);
+    assert.equal(s.metrics.ciWaits.rawPolling, 1, c);
+    assert.equal(s.pass, false, c);
+  }
+  const monitored = shellSession(['gh run view 5 --json status,conclusion'], 'Monitor');
+  assert.equal(monitored.metrics.ciWaits.pass, false);
+  const repeated = shellSession(['gh run list --branch feat/x -L 1', 'git status', 'gh run list --branch feat/x -L 1']);
+  assert.equal(repeated.metrics.ciWaits.rawPolling, 2);
+});
+
+test('one-off run reads and log fetches are not polling: no waits and no polling is null, not pass', () => {
+  const s = shellSession([
+    'gh run view 5',
+    'gh run view 5 --log-failed',
+    'gh run view 5 --log-failed',
+    'gh run list --workflow ci.yml -L 3',
+  ]);
+  assert.equal(s.metrics.ciWaits.rawPolling, 0);
+  assert.equal(s.metrics.ciWaits.value, 0);
+  assert.equal(s.metrics.ciWaits.pass, null);
+  assert.equal(s.metrics.ciWaits.examples, undefined);
+});
+
+test('the end-to-end call count is informational: 8 GitHub calls do not fail a session', () => {
+  const s = shellSession(Array.from({ length: 8 }, (_, i) => `ghx pr status ${i}`));
+  assert.equal(s.metrics.githubCallsEndToEnd.value, 8);
+  assert.equal(s.metrics.githubCallsEndToEnd.pass, null);
+  assert.equal(s.metrics.githubCallsEndToEnd.informational, true);
+  assert.equal(s.pass, true);
+});
+
+test('diagnosis is null when the first source edit precedes every GitHub call', () => {
+  const s = scoreSession(
+    'inline',
+    [
+      use('t1', 'Edit', { file_path: '/repo/src/sum.ts', old_string: 'a', new_string: 'b' }),
+      use('t2', 'Bash', { command: 'ghx ci wait 7' }),
+    ].join('\n'),
+  );
+  assert.equal(s.metrics.githubCallsToDiagnose.value, null);
+  assert.equal(s.metrics.githubCallsToDiagnose.pass, null);
 });
 
 test('a Write of a ghx --input file is not the first source edit', () => {
