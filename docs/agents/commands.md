@@ -310,7 +310,7 @@ Flags:
 - `--open` (default `false`): Only what is still open: open findings, unresolved human threads, unmet preconditions, change requests
 - `--source <ghx|human|bot>`: Only ghx (structured), human or bot items
 - `--since <string>`: Only items newer than an ISO time or a commit SHA's date
-- `--include-outdated` (default `false`): With --open, keep findings on outdated lines too
+- `--include-outdated` (default `false`): With --open, keep findings on outdated lines too (one that blocks merge is always kept)
 
 Input: Flags and positionals only; --input file.json is also accepted.
 

@@ -47,11 +47,15 @@ test('--open: open findings, standing change requests; resolved threads, issue c
   assert.deepEqual([fb.counts.findingsTotal, fb.counts.comments, fb.counts.bots], [1, 0, 0]);
 });
 
-test('--open drops outdated open findings unless --include-outdated; a later approval clears a change request', () => {
+test('--open drops outdated non-blocking findings unless --include-outdated; a later approval clears a change request', () => {
+  // f_n2c6rv is low: below merge.blockOnSeverity high it does not block, so outdated it goes.
   const findings = GOLDEN.feedback.findings.map((f) => (f.id === 'f_n2c6rv' ? { ...f, outdated: true } : f));
   const v = { ...GOLDEN, feedback: { ...GOLDEN.feedback, findings } };
-  assert.deepEqual(ids(filterFeedback(v, { open: true }).feedback.findings), []);
-  assert.deepEqual(ids(filterFeedback(v, { open: true, includeOutdated: true }).feedback.findings), ['f_n2c6rv']);
+  const high = { blockOnSeverity: 'high' as const };
+  assert.deepEqual(ids(filterFeedback(v, { open: true, ...high }).feedback.findings), []);
+  assert.deepEqual(ids(filterFeedback(v, { open: true, includeOutdated: true, ...high }).feedback.findings), [
+    'f_n2c6rv',
+  ]);
   assert.deepEqual(ids(filterFeedback(v, {}).feedback.findings), ['f_h4x8pz', 'f_n2c6rv'], 'kept without --open');
 
   const r0 = GOLDEN.feedback.reviews[0] as Feedback['reviews'][number];
@@ -62,6 +66,31 @@ test('--open drops outdated open findings unless --include-outdated; a later app
   ];
   const w = { ...GOLDEN, feedback: { ...GOLDEN.feedback, reviews } };
   assert.deepEqual(ids(filterFeedback(w, { open: true }).feedback.reviews), []);
+});
+
+test('--open never drops a blocking finding for being outdated, with or without --include-outdated', () => {
+  const at = (severity: 'low' | 'high') =>
+    GOLDEN.feedback.findings.map((f) => (f.id === 'f_n2c6rv' ? { ...f, severity, outdated: true } : f));
+  const v = { ...GOLDEN, feedback: { ...GOLDEN.feedback, findings: at('high') } };
+  for (const includeOutdated of [false, true]) {
+    const open = filterFeedback(v, { open: true, includeOutdated, blockOnSeverity: 'high' });
+    assert.deepEqual(ids(open.feedback.findings), ['f_n2c6rv'], `includeOutdated=${includeOutdated}`);
+    assert.deepEqual(open.openFindings, ['f_n2c6rv']);
+  }
+  // Absent a threshold every open finding blocks (fails closed), so even a low one stays.
+  const low = { ...GOLDEN, feedback: { ...GOLDEN.feedback, findings: at('low') } };
+  assert.deepEqual(ids(filterFeedback(low, { open: true }).feedback.findings), ['f_n2c6rv']);
+  // An unverified addressed high finding blocks too, so outdated it stays.
+  const addressed = GOLDEN.feedback.findings.map((f) =>
+    f.id === 'f_h4x8pz' && f.statusEvent
+      ? { ...f, outdated: true, statusEvent: { ...f.statusEvent, verified: null } }
+      : f,
+  );
+  const w = { ...GOLDEN, feedback: { ...GOLDEN.feedback, findings: addressed } };
+  assert.deepEqual(ids(filterFeedback(w, { open: true, blockOnSeverity: 'high' }).feedback.findings), [
+    'f_h4x8pz',
+    'f_n2c6rv',
+  ]);
 });
 
 test("--open agrees with merge policy: a dismissed latest review clears that reviewer's change request", () => {
@@ -180,8 +209,8 @@ test('openFindings means "blocks merge": pr status and pr feedback both list an 
   assert.match(blocker?.message ?? '', /f_h4x8pz/, 'the policy engine blocks on it');
   assert.deepEqual(status.json.openFindings, ['f_h4x8pz', 'f_n2c6rv']);
   assert.equal(status.json.feedback.counts.findingsOpen, 2);
-  // f_h4x8pz is outdated, which --open drops unless --include-outdated (pre-existing --open rule).
-  for (const args of [[], ['--open', '--include-outdated']]) {
+  // f_h4x8pz is outdated, but it blocks merge, so --open keeps it with or without --include-outdated.
+  for (const args of [[], ['--open'], ['--open', '--include-outdated']]) {
     const fb = await run(['pr', 'feedback', REF, ...args], unverified());
     assert.equal(fb.exitCode, EXIT.OK, fb.stdout.slice(0, 500));
     assert.deepEqual(fb.json.openFindings, ['f_h4x8pz', 'f_n2c6rv'], args.join(' '));

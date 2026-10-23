@@ -24,7 +24,10 @@ const Input = z.strictObject({
     .describe('Only what is still open: open findings, unresolved human threads, unmet preconditions, change requests'),
   source: z.enum(['ghx', 'human', 'bot']).optional().describe('Only ghx (structured), human or bot items'),
   since: z.string().min(1).optional().describe("Only items newer than an ISO time or a commit SHA's date"),
-  includeOutdated: z.boolean().default(false).describe('With --open, keep findings on outdated lines too'),
+  includeOutdated: z
+    .boolean()
+    .default(false)
+    .describe('With --open, keep findings on outdated lines too (one that blocks merge is always kept)'),
 });
 
 const CommitDate = z.object({

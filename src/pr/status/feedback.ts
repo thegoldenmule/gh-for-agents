@@ -1,12 +1,14 @@
 // `pr feedback` filters (02 §5; 03 M6.7), pure. `--open` keeps open findings (isOpenFinding, as in
 // openFindings: an addressed one at blocking severity whose commit is unverified counts as open), unresolved human thread comments, unmet preconditions and
 // each reviewer's latest standing change request (GitHub's CHANGES_REQUESTED, or a ghx request-changes verdict
-// downgraded to COMMENTED on the author's own PR; a later dismissed review clears it, as in merge policy). Outdated findings are dropped only
-// under --open, unless --include-outdated. Items are filtered, never altered; counts follow the kept lists,
+// downgraded to COMMENTED on the author's own PR; a later dismissed review clears it, as in merge policy). Under --open,
+// outdated findings that do not block merge are dropped unless --include-outdated; one that blocks merge (open at or
+// above merge.blockOnSeverity, or addressed there with an unverified commit) is never dropped for being outdated (04).
+// Items are filtered, never altered; counts follow the kept lists,
 // except unresolvedHumanThreads, which describes the PR.
 import { type FoldResult, isOpenFinding } from '../../feedback/fold.ts';
 import type { Feedback, Finding, Precondition, Review } from '../../feedback/schemas.ts';
-import type { Severity } from '../../schemas/pr.ts';
+import { type Severity, severityRank } from '../../schemas/pr.ts';
 
 export type FeedbackSource = 'ghx' | 'human' | 'bot';
 
@@ -46,6 +48,10 @@ function standingChangeRequests(reviews: readonly Review[]): Set<string> {
   return new Set([...latest.values()].filter(requestsChanges).map((r) => r.id));
 }
 
+/** Blocks merge, as merge policy's blockingFindings reads it: open or unverified, at or above the threshold. */
+const blocksMerge = (x: Finding, threshold: Severity | undefined): boolean =>
+  isOpenFinding(x, threshold) && severityRank(x.severity) >= severityRank(threshold ?? 'low');
+
 const unmet = (p: Precondition): boolean => p.status !== 'met' && p.status !== 'withdrawn';
 
 export function filterFeedback(v: FeedbackView, f: FeedbackFilter): FeedbackView {
@@ -63,7 +69,9 @@ export function filterFeedback(v: FeedbackView, f: FeedbackFilter): FeedbackView
     (x: Finding) =>
       wants('ghx') &&
       (newer(reviewAt.get(x.reviewId)) || newer(x.statusEvent?.at)) &&
-      (!f.open || (isOpenFinding(x, f.blockOnSeverity) && (f.includeOutdated || !x.outdated))),
+      (!f.open ||
+        (isOpenFinding(x, f.blockOnSeverity) &&
+          (f.includeOutdated || !x.outdated || blocksMerge(x, f.blockOnSeverity)))),
   );
   const comments = fb.comments.filter(
     (c) =>

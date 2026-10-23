@@ -165,5 +165,6 @@ Filled in by the wave 1 bootstrap agent (commits `f29f2eb`..`3cd7603`).
   - **`ci retrigger`.** Once a close may have landed, the reopen runs on a gh client detached from the runner's abort signal, inside the shutdown grace window. If it still fails, the result is `REOPEN_FAILED` with `closedAt`.
   - **`pr comment --close`** gets an overridable `AUTHOR_NOT_VIEWER` guard, matching `ci retrigger`.
   - **`openFindings`** in `pr status` and `pr feedback` means "blocks merge". That includes unverified addressed findings at blocking severity, so it matches the policy engine.
+  - **`pr feedback --open` never drops a blocking finding for being outdated**, with or without `--include-outdated`. "Blocks merge" is `openFindings`' definition: open at or above `merge.blockOnSeverity`, or addressed there with an unverified commit. `--include-outdated` governs only outdated findings that don't block.
   - **Acceptance scorer.** "≤5 GitHub calls end to end" is informational. A metric with nothing to measure reports `null`, not pass. Raw gh CI polling fails the CI-wait metric.
   - **`--schema` output** is exempt from spill, because it's documentation.
