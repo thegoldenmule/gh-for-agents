@@ -166,6 +166,8 @@ test('raw gh CI polling fails the CI-wait metric, even with no ghx ci wait at al
     'gh run watch 5 --exit-status',
     'until gh run view 5 --json status | grep -q completed; do sleep 20; done',
     'timeout 600 gh run list --branch feat/x --json status',
+    'while :; do gh pr view 7 --json statusCheckRollup; sleep 30; done',
+    'for i in 1 2 3; do gh api repos/o/r/commits/abc/check-runs; sleep 60; done',
   ];
   for (const c of polls) {
     const s = shellSession([c]);
@@ -185,6 +187,8 @@ test('one-off run reads and log fetches are not polling: no waits and no polling
     'gh run view 5 --log-failed',
     'gh run view 5 --log-failed',
     'gh run list --workflow ci.yml -L 3',
+    'gh pr view 7 --json statusCheckRollup',
+    'while :; do gh pr view 7 --json reviewDecision; sleep 30; done',
   ]);
   assert.equal(s.metrics.ciWaits.rawPolling, 0);
   assert.equal(s.metrics.ciWaits.value, 0);

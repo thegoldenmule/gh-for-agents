@@ -195,16 +195,18 @@ function ghCommand(inv: Invocation): string[] {
 /**
  * Raw gh used to wait on CI: `gh pr checks` and `gh run watch` in any form, and `gh run view`/`gh run list`
  * run under Monitor, in a loop, beside sleep or timeout, or repeated with the same arguments (log
- * fetches excepted: reading a failed log twice is diagnosis, not polling).
+ * fetches excepted: reading a failed log twice is diagnosis, not polling). The same CI status read through
+ * `gh pr view --json statusCheckRollup` or `gh api …/check-runs|check-suites|status|actions/runs` counts too.
  */
 function rawCiPolls(shell: readonly { u: ToolUse; scan: ReturnType<typeof scanShell> }[]): { u: ToolUse }[] {
   const seen = new Map<string, number>();
   const statusReads = (scan: ReturnType<typeof scanShell>) =>
     scan.invocations.filter((inv) => {
       const [group, verb] = ghCommand(inv);
-      return (
-        isGh(inv) && group === 'run' && (verb === 'view' || verb === 'list') && !inv.argv.some((t) => /^--log/.test(t))
-      );
+      if (!isGh(inv) || inv.argv.some((t) => /^--log/.test(t))) return false;
+      if (group === 'run') return verb === 'view' || verb === 'list';
+      if (group === 'pr') return verb === 'view' && inv.argv.some((t) => t.includes('statusCheckRollup'));
+      return group === 'api' && /\/(check-runs|check-suites|status|actions\/runs)\b/.test(verb ?? '');
     });
   for (const { scan } of shell) {
     for (const inv of statusReads(scan)) seen.set(inv.argv.join(' '), (seen.get(inv.argv.join(' ')) ?? 0) + 1);
