@@ -297,16 +297,19 @@ function onPath(dir: string, env: Env): boolean {
   return (env.PATH ?? '').split(delimiter).some((d) => d !== '' && resolve(d) === want);
 }
 
-/** Whether `link` is a symlink that resolves to bin/ghx.js. */
-function pointsAtGhx(link: string): boolean {
+/** Whether `link` is a symlink that resolves to `target`. */
+function pointsAt(link: string, target: string): boolean {
   try {
     if (!lstatSync(link).isSymbolicLink()) return false;
-    if (resolve(dirname(link), readlinkSync(link)) === GHX_BIN) return true;
-    return realpathSync(link) === realpathSync(GHX_BIN);
+    if (resolve(dirname(link), readlinkSync(link)) === target) return true;
+    return realpathSync(link) === realpathSync(target);
   } catch {
     return false;
   }
 }
+
+/** Whether `link` is a symlink that resolves to bin/ghx.js. */
+const pointsAtGhx = (link: string): boolean => pointsAt(link, GHX_BIN);
 
 export function planBinLink(dir: string, env: Env): BinLink {
   const abs = resolve(dir);
@@ -335,12 +338,16 @@ export function planBinLink(dir: string, env: Env): BinLink {
   return { ...base, action: 'created' };
 }
 
-/** 'removed' only for a link into this checkout; anything else at the path is left alone ('unchanged'). */
-export function planBinUnlink(dir: string, env: Env): BinLink {
+/**
+ * 'removed' only for a link to this ghx's bin/ghx.js, or to `recorded` (the target the install record
+ * names, which may be another copy of ghx); anything else at the path is left alone ('unchanged').
+ */
+export function planBinUnlink(dir: string, env: Env, recorded?: string): BinLink {
   const abs = resolve(dir);
   const path = join(abs, 'ghx');
   const base = { path, target: GHX_BIN, onPath: onPath(abs, env) };
   if (pointsAtGhx(path)) return { ...base, action: 'removed' };
+  if (recorded && pointsAt(path, recorded)) return { ...base, target: recorded, action: 'removed' };
   try {
     lstatSync(path);
     return { ...base, action: 'unchanged' };

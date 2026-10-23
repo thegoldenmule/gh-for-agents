@@ -69,7 +69,11 @@ export default defineCommand({
       ),
     hook: z.boolean().default(true).describe('Register the PreToolUse hook; --no-hook skips it'),
     snippet: z.boolean().default(true).describe('Add the CLAUDE.md block; --no-snippet skips it'),
-    binDir: z.string().min(1).optional().describe('Also symlink <dir>/ghx to bin/ghx.js'),
+    binDir: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Also symlink <dir>/ghx to bin/ghx.js (recorded, so uninstall removes it without the flag)'),
     hookMode: z
       .enum(['ask', 'deny'])
       .optional()
@@ -156,11 +160,20 @@ export default defineCommand({
     }
     const next = ['Start a new Claude Code session so it loads the settings.', 'Check the install: ghx doctor'];
     if (binLink && !binLink.onPath) next.push(`Add ${resolve(binLink.path, '..')} to PATH to run ghx by name.`);
-    // The record changes only alongside a file change, so a no-op re-install writes nothing.
-    const record = serializeManifest({ version: 1, settings: settingsRecord, claudeMd: claudeMdRecord });
-    const manifestChange = changes.some((c) => c.before !== c.after)
-      ? { path: manifestPath(targets), content: record }
-      : undefined;
+    // The bin link is recorded so uninstall finds it without --bin-dir; without --bin-dir the old record stays.
+    const binRecord = binLink ? { path: binLink.path, target: binLink.target } : (manifest?.binLink ?? null);
+    const binRecordChanged = JSON.stringify(binRecord) !== JSON.stringify(manifest?.binLink ?? null);
+    // The record changes only alongside a change, so a no-op re-install writes nothing.
+    const record = serializeManifest({
+      version: 1,
+      settings: settingsRecord,
+      claudeMd: claudeMdRecord,
+      binLink: binRecord,
+    });
+    const manifestChange =
+      changes.some((c) => c.before !== c.after) || binLink?.action === 'created' || binRecordChanged
+        ? { path: manifestPath(targets), content: record }
+        : undefined;
     return finish(
       {
         scope: targets.scope,

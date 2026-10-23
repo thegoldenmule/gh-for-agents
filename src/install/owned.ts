@@ -30,6 +30,13 @@ export interface Manifest {
   version: 1;
   settings: ({ path: string; restore: Restore | null } & Owned) | null;
   claudeMd: { path: string; created: boolean; restore: Restore | null } | null;
+  /** The `<dir>/ghx` link a --bin-dir install made, so uninstall removes it without the flag. */
+  binLink?: BinLinkRecord | null;
+}
+
+export interface BinLinkRecord {
+  path: string;
+  target: string;
 }
 
 export const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
@@ -104,8 +111,13 @@ export function readManifest(t: Targets): Manifest | null {
     isObj(v) && typeof v.written === 'string' && (typeof v.original === 'string' || v.original === null)
       ? { original: v.original, written: v.written }
       : null;
+  const link = v.binLink;
   return {
     version: 1,
+    binLink:
+      isObj(link) && typeof link.path === 'string' && typeof link.target === 'string'
+        ? { path: link.path, target: link.target }
+        : null,
     settings:
       isObj(s) && s.path === t.settings
         ? {

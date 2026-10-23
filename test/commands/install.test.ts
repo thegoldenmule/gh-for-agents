@@ -444,6 +444,47 @@ test('uninstall restores the original byte for byte when ghx was the only change
   assert.equal(backups(h.dir).length, count);
 });
 
+test('the install record keeps the bin link: uninstall removes it without --bin-dir, and a re-install keeps it', async () => {
+  const h = home();
+  const bin = join(tmp, `bin-${n++}`);
+  mkdirSync(bin);
+  const env = { HOME: h.home };
+  assert.equal((await run(['install', '--bin-dir', bin], env)).exitCode, 0);
+  const state = join(h.dir, 'ghx-install');
+  const [dir] = readdirSync(state);
+  const manifest = () => json(join(state, dir as string, 'manifest.json'));
+  assert.deepEqual(manifest().binLink, { path: join(bin, 'ghx'), target: GHX_BIN });
+  // A re-install without --bin-dir keeps the record (and changes nothing).
+  const again = await run(['install'], env);
+  assert.deepEqual(again.json.changed, []);
+  assert.deepEqual(manifest().binLink, { path: join(bin, 'ghx'), target: GHX_BIN });
+  const r = await run(['uninstall'], env);
+  assert.equal(r.exitCode, 0, r.stdout);
+  assert.equal(r.json.binLink.action, 'removed');
+  assert.ok(r.json.changed.includes(join(bin, 'ghx')));
+  assert.ok(!existsSync(join(bin, 'ghx')));
+  assert.ok(!existsSync(join(state, dir as string, 'manifest.json')));
+});
+
+test('a --bin-dir-only re-install records the link, and uninstall leaves a link it did not make', async () => {
+  const h = home();
+  const bin = join(tmp, `bin-${n++}`);
+  mkdirSync(bin);
+  const env = { HOME: h.home };
+  assert.equal((await run(['install'], env)).exitCode, 0);
+  const r = await run(['install', '--bin-dir', bin], env);
+  assert.deepEqual(r.json.changed, [join(bin, 'ghx')]);
+  const [dir] = readdirSync(join(h.dir, 'ghx-install'));
+  assert.equal(json(join(h.dir, 'ghx-install', dir as string, 'manifest.json')).binLink.path, join(bin, 'ghx'));
+  // Someone replaces the link with their own file: uninstall leaves it and says so.
+  rmSync(join(bin, 'ghx'));
+  writeFileSync(join(bin, 'ghx'), 'mine');
+  const u = await run(['uninstall'], env);
+  assert.equal(u.json.binLink.action, 'unchanged');
+  assert.ok(u.json.warnings.some((w: { code: string }) => w.code === 'INSTALL_BIN_FOREIGN'));
+  assert.equal(read(join(bin, 'ghx')), 'mine');
+});
+
 /** The shape of a real user settings file (fake values): permissions without deny, an empty PreToolUse, env, statusLine. */
 const REAL_SHAPE = {
   env: { FAKE_FLAG: '1', OTHER: 'x' },

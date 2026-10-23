@@ -2,7 +2,7 @@
 // (src/install/owned.ts): its PreToolUse hook, the deny rules it added, the GHX_HOOK_MODE it set, the
 // containers it created, the marked CLAUDE.md block, and a bin link into this checkout. The user's own
 // identical rules and everything else stay. Backed up, atomic and idempotent, like install.
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { defineCommand } from '../core/command.ts';
 import { removeBlock } from '../install/claude-md.ts';
@@ -30,7 +30,7 @@ export default defineCommand({
     'Removes only what ghx install added, as its install record (kept beside its backups in the user config ' +
     'dir) shows: the ghx PreToolUse hook, the deny rules it added (never your identical ones), the ' +
     'GHX_HOOK_MODE it set (restoring any earlier value), containers it created once empty, the marked ' +
-    'CLAUDE.md block, and with --bin-dir a ghx link into this checkout. Every other setting stays. A file ' +
+    'CLAUDE.md block, and the <dir>/ghx link install made (found from the record, or given with --bin-dir). Every other setting stays. A file ' +
     'still exactly as ghx last wrote it gets its original bytes back from the backup. An ' +
     'install from before the record is judged from its <file>.bak-ghx-* backups. Backs up each changed ' +
     'file; a file ghx created and leaves empty is removed. --dry-run returns unified diffs and writes nothing.',
@@ -41,7 +41,11 @@ export default defineCommand({
       .enum(['user', 'project'])
       .default('user')
       .describe('user (~/.claude) or project (repo .claude/settings.local.json)'),
-    binDir: z.string().min(1).optional().describe('Also remove <dir>/ghx if it links to this checkout'),
+    binDir: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Remove <dir>/ghx if it links to ghx (default: the link ghx install recorded, if any)'),
     snippet: z.boolean().default(true).describe('Remove the CLAUDE.md block; --no-snippet leaves it'),
   }),
   output: InstallOutput,
@@ -89,9 +93,11 @@ export default defineCommand({
       changes.push({ path: targets.claudeMd, kind: 'claude-md', before: mBefore, after: mAfter });
     }
     // --no-snippet keeps the block, so the record keeps its CLAUDE.md entry for a later uninstall.
-    const keptRecord = !input.snippet && manifest?.claudeMd ? { ...manifest, settings: null } : null;
+    const keptRecord = !input.snippet && manifest?.claudeMd ? { ...manifest, settings: null, binLink: null } : null;
 
-    const binLink = input.binDir ? planBinUnlink(resolve(ctx.cwd, input.binDir), ctx.env) : null;
+    const recorded = manifest?.binLink ?? null;
+    const binDir = input.binDir ? resolve(ctx.cwd, input.binDir) : recorded ? dirname(recorded.path) : null;
+    const binLink = binDir ? planBinUnlink(binDir, ctx.env, recorded?.target) : null;
     if (binLink?.action === 'unchanged') {
       ctx.warn({
         code: 'INSTALL_BIN_FOREIGN',

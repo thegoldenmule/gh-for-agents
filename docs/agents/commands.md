@@ -227,7 +227,7 @@ Flags:
 - `--deny`: Project scope: merge the gh write deny rules (default); --no-deny skips them. User scope never adds them
 - `--hook` (default `true`): Register the PreToolUse hook; --no-hook skips it
 - `--snippet` (default `true`): Add the CLAUDE.md block; --no-snippet skips it
-- `--bin-dir <string>`: Also symlink <dir>/ghx to bin/ghx.js
+- `--bin-dir <string>`: Also symlink <dir>/ghx to bin/ghx.js (recorded, so uninstall removes it without the flag)
 - `--hook-mode <ask|deny>`: deny sets env.GHX_HOOK_MODE=deny; ask removes it (the default mode)
 
 Input: Flags and positionals only; --input file.json is also accepted.
@@ -475,12 +475,12 @@ Remove what ghx install added to Claude Code settings and CLAUDE.md (try --dry-r
 
 write, single document, timeout 1m (max 5m).
 
-Removes only what ghx install added, as its install record (kept beside its backups in the user config dir) shows: the ghx PreToolUse hook, the deny rules it added (never your identical ones), the GHX_HOOK_MODE it set (restoring any earlier value), containers it created once empty, the marked CLAUDE.md block, and with --bin-dir a ghx link into this checkout. Every other setting stays. A file still exactly as ghx last wrote it gets its original bytes back from the backup. An install from before the record is judged from its <file>.bak-ghx-* backups. Backs up each changed file; a file ghx created and leaves empty is removed. --dry-run returns unified diffs and writes nothing.
+Removes only what ghx install added, as its install record (kept beside its backups in the user config dir) shows: the ghx PreToolUse hook, the deny rules it added (never your identical ones), the GHX_HOOK_MODE it set (restoring any earlier value), containers it created once empty, the marked CLAUDE.md block, and the <dir>/ghx link install made (found from the record, or given with --bin-dir). Every other setting stays. A file still exactly as ghx last wrote it gets its original bytes back from the backup. An install from before the record is judged from its <file>.bak-ghx-* backups. Backs up each changed file; a file ghx created and leaves empty is removed. --dry-run returns unified diffs and writes nothing.
 
 Flags:
 
 - `--scope <user|project>` (default `"user"`): user (~/.claude) or project (repo .claude/settings.local.json)
-- `--bin-dir <string>`: Also remove <dir>/ghx if it links to this checkout
+- `--bin-dir <string>`: Remove <dir>/ghx if it links to ghx (default: the link ghx install recorded, if any)
 - `--snippet` (default `true`): Remove the CLAUDE.md block; --no-snippet leaves it
 
 Input: Flags and positionals only; --input file.json is also accepted.
