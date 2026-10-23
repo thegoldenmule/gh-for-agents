@@ -51,9 +51,11 @@ test('pnpm workspace inference: one component per package dir, valid by construc
       codegen: { paths: ['packages/codegen/**'] },
       reactor: { paths: ['packages/reactor/**'] },
     },
+    merge: { method: 'merge' },
+    ci: { expected: [], keySteps: [], ignore: [] },
   });
   const path = join(dir, '.github', 'ghx.json');
-  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), r.json.config);
+  assert.equal(readFileSync(path, 'utf8'), `${JSON.stringify(r.json.config, null, 2)}\n`);
   const loaded = await loadConfig({
     target: undefined,
     git: fakeGit({ toplevel: dir }),

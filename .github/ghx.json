@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "components": {
+    "cli": {
+      "description": "Entry point, argument parsing, registry, help and the top-level commands",
+      "paths": ["bin/**", "src/main.ts", "src/version.ts", "src/cli/**", "src/commands/*.ts"]
+    },
+    "core": {
+      "description": "Command runner, envelopes, errors, exit codes, signals, process and shared utilities",
+      "paths": ["src/core/**", "src/proc/**", "src/util/**"]
+    },
+    "config": {
+      "description": ".github/ghx.json schema, sections, loading and the init starter",
+      "paths": ["src/config/**"]
+    },
+    "gh": {
+      "description": "The gh and git wrappers: exec, classify, retry, guard, REST and GraphQL",
+      "paths": ["src/gh/**", "src/git/**"]
+    },
+    "ci": {
+      "description": "ci why, ci wait, ci rerun and ci retrigger",
+      "paths": ["src/ci/**", "src/commands/ci/**"]
+    },
+    "pr": {
+      "description": "pr status, feedback, create, edit, comment, review, resolve and merge",
+      "paths": ["src/pr/**", "src/commands/pr/**"]
+    },
+    "policy": {
+      "description": "Merge policy engine and its rules",
+      "paths": ["src/policy/**"]
+    },
+    "meta": {
+      "description": "The hidden ghx block codec, ids and the public output schemas",
+      "paths": ["src/meta/**", "src/schemas/**"]
+    },
+    "feedback": {
+      "description": "Review feedback events, folding, trust and bots",
+      "paths": ["src/feedback/**"]
+    },
+    "render": {
+      "description": "PR body, comment and review rendering",
+      "paths": ["src/render/**"]
+    },
+    "hook": {
+      "description": "The Claude Code PreToolUse hook",
+      "paths": ["src/hook/**", "src/commands/hook/**"]
+    },
+    "passthrough": {
+      "description": "Allowlisted raw gh reads and write refusals",
+      "paths": ["src/passthrough/**"]
+    },
+    "docs": {
+      "description": "Agent docs, plans and the README",
+      "paths": ["docs/**", "README.md"]
+    },
+    "test": {
+      "description": "Tests, helpers and fixtures",
+      "paths": ["test/**"]
+    },
+    "build": {
+      "description": "CI, scripts, package and tool configuration",
+      "paths": [
+        ".github/**",
+        "scripts/**",
+        "package.json",
+        "pnpm-lock.yaml",
+        "biome.json",
+        "tsconfig.json",
+        "tsconfig.build.json",
+        ".node-version",
+        ".gitattributes",
+        ".gitignore"
+      ]
+    }
+  },
+  "merge": {
+    "method": "merge"
+  },
+  "ci": {
+    "expected": [
+      { "name": "check (ubuntu-latest)", "workflow": "ci" },
+      { "name": "check (macos-latest)", "workflow": "ci" }
+    ],
+    "keySteps": ["Unit, command, regression tests", "Contract tests (spawn bin with fake gh)"]
+  }
+}

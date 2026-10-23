@@ -1,5 +1,6 @@
 // Starter config for `ghx init` (01 §5): components from --component flags, else from the workspace
-// (package.json#workspaces, pnpm-workspace.yaml `packages:`), else from top-level directories.
+// (package.json#workspaces, pnpm-workspace.yaml `packages:`), else from top-level directories, plus the
+// merge method and an empty ci section to fill in.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { glob } from 'node:fs/promises';
 import { basename, join, sep } from 'node:path';
@@ -121,7 +122,14 @@ export async function buildStarter(toplevel: string, flagComponents: readonly st
       inferredFrom = 'directories';
     }
   }
-  const config: GhxConfigInput = { version: CONFIG_VERSION, components };
+  // merge and ci spell out the keys an adopter edits first (strict JSON has no comments): merge commits
+  // (the default, 02 §4.3) and empty CI lists, which cost nothing until filled.
+  const config: GhxConfigInput = {
+    version: CONFIG_VERSION,
+    components,
+    merge: { method: 'merge' },
+    ci: { expected: [], keySteps: [], ignore: [] },
+  };
   // Valid by construction: a starter that does not parse is a bug, surfaced here rather than on next use.
   ConfigSchema.parse(config);
   return { config, inferredFrom };
