@@ -28,4 +28,4 @@ jobs:
       - name: Coverage gate
         if: matrix.os == 'ubuntu-latest'
         run: pnpm test:coverage
-      - run: pnpm docs:check # skill/command index not stale (placeholder until M12)
+      - run: pnpm docs:check # docs/agents command reference and skill are not stale

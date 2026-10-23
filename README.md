@@ -35,6 +35,11 @@ These are the v1 commands, specified in [02-api](docs/plans/02-api.md).
 | `ci why` | Diagnoses a failing run in one call, including runs still in progress. |
 | `ci wait` | Waits for CI to finish, then prints one JSON summary. The caller never sets a duration. |
 | `ci rerun`, `ci retrigger` | Rerun failed jobs, or trigger CI again. |
+| `doctor` | Checks the setup: `gh` version and features, auth, git, the target repo and its config. |
+| `init` | Writes a starter `.github/ghx.json`, with components inferred from the workspace. |
+| `version` | Prints the `ghx` version, Node version and platform, with no `gh` calls. |
+| `help`, `schema` | JSON help, and the JSON Schema of any command's input and output or of the config. |
+| `hook claude-pretooluse` | The Claude Code PreToolUse hook: runs `ghx ci wait` in the background and steers raw `gh` to `ghx`. |
 
 Raw `gh` commands that `ghx` wraps are refused, and the error names the `ghx`
 command to use instead. A short list of read-only `gh` commands still runs, with
@@ -96,12 +101,17 @@ CLAUDE.md snippet, a skill, the command reference, and an opt-in settings block
 (deny rules for raw `gh` writes, plus a PreToolUse hook).
 
 To run it from source, you need Node 24, pnpm and `gh` 2.81.0 or later, logged
-in. There is no build step and no published package.
+in. There is no build step and no published package. Put `bin/ghx.js` on your
+`PATH` as `ghx`, then check the setup and write a config for your repo:
 
 ```sh
 pnpm install
-node bin/ghx.js doctor
+ln -s "$PWD/bin/ghx.js" ~/.local/bin/ghx   # any directory on PATH
+ghx doctor
+ghx init        # in the repo you work on: writes .github/ghx.json
 ```
+
+This repo's own config is [.github/ghx.json](.github/ghx.json).
 
 ## Design docs
 
@@ -111,3 +121,4 @@ node bin/ghx.js doctor
 - [02 API](docs/plans/02-api.md)
 - [03 Implementation and testing](docs/plans/03-implementation.md)
 - [04 Build coordination](docs/plans/04-build-coordination.md)
+- [05 Build handoff](docs/plans/05-handoff.md)
