@@ -308,6 +308,30 @@ test('branch:main pending: next pins the bound SHA, and running it resumes that 
   assert.equal(second.json.resumed, true);
 });
 
+test('branch:main re-run on an unchanged head: the stored answer returns from 304s (state under the pinned key)', async () => {
+  const clock = new FakeClock();
+  const build: SimJob = {
+    id: 81,
+    runId: 81,
+    name: 'build',
+    status: 'completed',
+    conclusion: 'success',
+    completedAt: 0,
+  };
+  const sim = new GitHubSim(clock, { pr: { state: 'open', head: H }, branches: { main: H }, checks: { [H]: [build] } });
+  const first = await wait(sim, ['branch:main', '-R', 'o/r']);
+  assert.equal(first.exitCode, EXIT.OK, first.stdout);
+  const n = sim.calls.length;
+  const second = await wait(sim, ['branch:main', '-R', 'o/r'], { artifacts: first.artifacts });
+  assert.equal(second.exitCode, EXIT.OK, second.stdout);
+  assert.equal(second.json.resumed, true);
+  const later = sim.calls.slice(n).filter((c) => !path(c).endsWith('/contents/.github/ghx.json'));
+  assert.ok(
+    later.every((c) => c.status === 304),
+    later.map((c) => `${path(c)} ${c.status}`).join('\n'),
+  );
+});
+
 test('a red stored under --no-compare-main is not the answer without it: the re-run compares with main', async () => {
   const { sim, a, b } = world();
   const t = 'src/a.test.ts > flaky on main';

@@ -65,7 +65,15 @@ import { createPoller, type Poller, TickFailed, type TickResult } from './poller
 import { detectStalls, settledAt, stallConfig } from './stall.ts';
 import { createWaitStore, type WaitState, type WaitStore } from './state.ts';
 import { aggregate, type CommandShape, compactTarget, fitDocument, identicalCommand, nextFor } from './summary.ts';
-import { type HeadPolicy, headPolicy, parseWaitTarget, targetKey, targetLabel, type WaitTarget } from './targets.ts';
+import {
+  boundKey,
+  type HeadPolicy,
+  headPolicy,
+  parseWaitTarget,
+  targetKey,
+  targetLabel,
+  type WaitTarget,
+} from './targets.ts';
 
 /** Unattended sessions self-return `pending` after this much waiting (02 §11.1). */
 export const UNATTENDED_RETURN_MS = 25 * 60_000;
@@ -247,7 +255,7 @@ export async function* runWait(
     // The latest binding's ETags make the first poll a 304 when nothing changed. Its state is not
     // resumed here: the first tick reads the current head, and bind() loads the state for that SHA.
     const latest = store.latest(key);
-    const prior = latest ? store.load(key, latest) : ({ kind: 'miss' } as const);
+    const prior = latest ? store.load(boundKey(target, latest), latest) : ({ kind: 'miss' } as const);
     const seed = prior.kind === 'hit' ? prior.state.poller : undefined;
     runs.push({
       target,
@@ -307,7 +315,8 @@ export async function* runWait(
     if (!r.st) return;
     r.st.savedAt = clock.now();
     r.st.poller = r.poller.state();
-    r.store.save(r.key, r.st);
+    // An unpinned branch's own index names its latest binding, so a re-run's first poll carries ETags.
+    r.store.save(r.key, r.st, targetKey(r.target));
   };
 
   /** The result for one target in this process (terminal, or pending/interrupted for an unfinished one). */
@@ -400,7 +409,7 @@ export async function* runWait(
   /** A fresh binding: the expected set (required, config, baseline), read once and stored. */
   async function bind(r: Run, sha: string, t: TickResult): Promise<WaitState> {
     // An unpinned branch target's state lives under its pinned key, the target its `next` names.
-    if (r.target.kind === 'branch' && r.target.sha === null) r.key = targetKey({ ...r.target, sha });
+    r.key = boundKey(r.target, sha);
     const loaded = r.store.load(r.key, sha);
     const first = !r.bound;
     r.bound = true;

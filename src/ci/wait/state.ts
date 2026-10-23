@@ -130,8 +130,11 @@ export interface WaitStore {
   /** The latest bound SHA for a target, if a previous run saved one. */
   latest(key: string): string | undefined;
   load(key: string, boundSha: string): LoadResult;
-  /** Atomic write of the state and the target's index. */
-  save(key: string, state: WaitState): void;
+  /**
+   * Atomic write of the state and the target's index. `alsoIndex` names further keys whose index points
+   * at this binding (an unpinned branch target, whose state lives under its pinned key).
+   */
+  save(key: string, state: WaitState, alsoIndex?: string): void;
   /** Run `fn` holding the target's lock (load and save take it themselves). */
   withLock<T>(key: string, fn: () => T): T;
 }
@@ -271,11 +274,14 @@ export async function createWaitStore(o: {
     load(key, boundSha) {
       return withLock(key, () => loadUnlocked(key, boundSha));
     },
-    save(key, state) {
+    save(key, state, alsoIndex) {
+      const index = { v: 1, boundSha: state.boundSha, savedAt: state.savedAt };
       withLock(key, () => {
         writeAtomic(statePath(key, state.boundSha), withReported(loadUnlocked(key, state.boundSha), state));
-        writeAtomic(indexPath(key), { v: 1, boundSha: state.boundSha, savedAt: state.savedAt });
+        writeAtomic(indexPath(key), index);
       });
+      if (alsoIndex !== undefined && alsoIndex !== key)
+        withLock(alsoIndex, () => writeAtomic(indexPath(alsoIndex), index));
     },
   };
 

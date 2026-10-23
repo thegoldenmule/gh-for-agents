@@ -42,6 +42,11 @@ export function targetKey(t: WaitTarget): string {
   return t.kind === 'pr' ? `pr-${t.number}` : `branch-${t.branch}${t.sha ? `@${t.sha}` : ''}`;
 }
 
+/** The state key of a target bound to `sha`: an unpinned branch is stored as `branch:<name>@<sha>`. */
+export function boundKey(t: WaitTarget, sha: string): string {
+  return targetKey(t.kind === 'branch' && t.sha === null ? { ...t, sha } : t);
+}
+
 /** The `target` every event and result carries. */
 export function targetLabel(t: WaitTarget, repo: RepoRef): string {
   return t.kind === 'pr' ? `${repo.owner}/${repo.name}#${t.number}` : t.raw;
