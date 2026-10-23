@@ -53,6 +53,11 @@ export const ERROR_CODES = {
   },
   ENV_GH_AUTH: { exit: ExitCode.ENV, hint: "Run 'gh auth login' (a human must do this)." },
   ENV_GIT_MISSING: { exit: ExitCode.ENV, hint: 'Install git.' },
+  // Printed by bin/ghx.js itself, before anything else loads.
+  ENV_NODE_UNSUPPORTED: {
+    exit: ExitCode.ENV,
+    hint: 'Install Node.js 24+ (for example with nvm or fnm) and run ghx with it.',
+  },
   // ghx install / uninstall refuse to touch a local file they can't edit safely; a human fixes it.
   INSTALL_SETTINGS_INVALID: { exit: ExitCode.ENV, hint: 'Fix the settings file by hand, then run it again.' },
   INSTALL_CLAUDE_MD_INVALID: { exit: ExitCode.ENV, hint: 'Fix the ghx marker lines by hand, then run it again.' },

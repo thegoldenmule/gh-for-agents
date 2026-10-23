@@ -1,7 +1,9 @@
 // Spawn the real bin (01 §9 commit 9): stdout is one complete JSON document ending in a newline.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { spawnGhx } from '../helpers/spawn.ts';
+import { pathToFileURL } from 'node:url';
+import { BIN, baseEnv, spawnGhx } from '../helpers/spawn.ts';
 import { EXIT } from './exit-table.ts';
 
 test('bin/ghx.js version: one JSON document, exit 0, complete final byte', async () => {
@@ -27,4 +29,15 @@ test('bin/ghx.js: unknown command is an error document with exit 2', async () =>
   const r = await spawnGhx(['nope']);
   assert.equal(r.exitCode, EXIT.USAGE);
   assert.deepEqual(Object.keys(JSON.parse(r.stdout).error), ['code', 'message', 'hint', 'details']);
+});
+
+test('bin/ghx.js on Node < 24: an ENV_NODE_UNSUPPORTED error document, exit 4, before anything loads', async () => {
+  const script = `Object.defineProperty(process.versions, 'node', { value: '22.11.0' }); await import(${JSON.stringify(pathToFileURL(BIN).href)});`;
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: baseEnv(), encoding: 'utf8' });
+  assert.equal(r.status, EXIT.ENV, r.stdout + r.stderr);
+  const doc = JSON.parse(r.stdout);
+  assert.equal(doc.error.code, 'ENV_NODE_UNSUPPORTED');
+  assert.match(doc.error.message, /Node\.js 24 or newer; this is Node\.js 22\.11\.0/);
+  assert.deepEqual(Object.keys(doc.error), ['code', 'message', 'hint', 'details']);
+  assert.equal(r.stderr, '');
 });
