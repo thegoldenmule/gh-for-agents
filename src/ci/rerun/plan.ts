@@ -4,8 +4,10 @@
 //
 // Targeting: a run is rerun with `rerun-failed-jobs`, except that one selected job (--job/--flaky) out of
 // several red ones goes through `jobs/{id}/rerun`. GitHub refuses a second job rerun while the run is going
-// again ("This workflow is already running"), so a selection of two or more jobs widens to the run's
-// failed jobs (RERUN_WIDENED).
+// again ("This workflow is already running"). A --job selection of two or more jobs widens to the run's
+// failed jobs (RERUN_WIDENED). --flaky never widens (04 final review): it reruns the run's failed jobs only
+// when every red job is a candidate; otherwise it reruns one candidate and defers the rest (DEFERRED), to
+// be rerun once the run completes.
 import { GhxError } from '../../core/errors.ts';
 import type { RepoRef } from '../../gh/types.ts';
 import type { Check, CiSummary, Flake } from '../../schemas/ci.ts';
@@ -15,7 +17,7 @@ import { isRed } from '../summary.ts';
 /** 02 §13.1: runs at this attempt or later are not rerun without an override. */
 export const DEFAULT_MAX_RERUN_ATTEMPTS = 3;
 
-export type SkipReason = 'RUN_IN_PROGRESS' | 'RERUN_LIMIT' | 'NOT_FLAKY' | 'REFUSED';
+export type SkipReason = 'RUN_IN_PROGRESS' | 'RERUN_LIMIT' | 'NOT_FLAKY' | 'DEFERRED' | 'REFUSED';
 
 export interface Skipped {
   runId: number;
@@ -23,8 +25,10 @@ export interface Skipped {
   reason: SkipReason;
   /** run_attempt when known. */
   attempt: number | null;
-  /** GitHub's refusal message (REFUSED, or a RUN_IN_PROGRESS race on the POST). */
+  /** GitHub's refusal message (REFUSED, or a RUN_IN_PROGRESS race on the POST); when to rerun (DEFERRED). */
   message?: string;
+  /** DEFERRED: the flaky candidates not rerun yet, because GitHub reruns one job per run at a time. */
+  jobs?: string[];
 }
 
 export type RedJob = Check & { runId: number; jobId: number };
@@ -223,9 +227,25 @@ export function selectJobs(groups: readonly RunGroup[], i: SelectInput): Selecti
     const base = { runId: g.runId, workflow: g.workflow, previousAttempt: g.attempt, url: g.url, flake: evidence };
     const filtered = i.byJob || flake !== null;
     const all = selected.length === g.red.length;
-    if (filtered && !all && selected.length === 1) {
-      const job = selected[0] as RedJob;
-      actions.push({ ...base, method: 'job', jobId: job.jobId, jobs: [job.name] });
+    if (filtered && !all && (selected.length === 1 || flake !== null)) {
+      const [job, ...rest] = selected as [RedJob, ...RedJob[]];
+      actions.push({
+        ...base,
+        method: 'job',
+        jobId: job.jobId,
+        jobs: [job.name],
+        flake: evidence?.slice(0, 1) ?? null,
+      });
+      if (rest.length > 0) {
+        skipped.push({
+          runId: g.runId,
+          workflow: g.workflow,
+          reason: 'DEFERRED',
+          attempt: g.attempt,
+          jobs: rest.map((c) => c.name),
+          message: `GitHub reruns one job per run at a time; rerun these once run ${g.runId} completes: ghx ci rerun ${i.ref} --flaky.`,
+        });
+      }
       continue;
     }
     if (filtered && !all) {

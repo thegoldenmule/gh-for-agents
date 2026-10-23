@@ -355,3 +355,37 @@ test('--flaky skips a run without candidates as NOT_FLAKY while another run is r
   assert.deepEqual(posts(fake), [`repos/${SLUG}/actions/runs/500/rerun-failed-jobs`]);
   assert.deepEqual(r.json.skipped, [{ runId: 600, workflow: 'Unit', reason: 'NOT_FLAKY', attempt: 1 }]);
 });
+
+test('--flaky never widens: 2 flaky jobs and 1 real failure in one run rerun one flaky job, defer the other', async () => {
+  const flaky = (id: number, name: string) =>
+    red(id, name, { log: { text: vitestLog([], { extra: ['Error: read ECONNRESET'] }) } });
+  const fake = scene(world([flaky(101, 'e2e'), flaky(103, 'e2e-2'), red(102, 'real')]));
+  const r = await rerun(fake, ['--flaky']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(posts(fake), [`repos/${SLUG}/actions/jobs/101/rerun`]);
+  fake.expectNoCall(isPost('/rerun-failed-jobs'));
+  assert.equal(r.json.rerun[0].method, 'job');
+  assert.deepEqual(r.json.rerun[0].jobs, ['e2e']);
+  assert.equal(
+    r.json.warnings?.some((w: { code: string }) => w.code === 'RERUN_WIDENED'),
+    undefined,
+  );
+  const [deferred] = r.json.skipped;
+  assert.equal(r.json.skipped.length, 1);
+  assert.deepEqual(
+    { runId: deferred.runId, reason: deferred.reason, jobs: deferred.jobs },
+    { runId: 500, reason: 'DEFERRED', jobs: ['e2e-2'] },
+  );
+  assert.match(deferred.message, /once run 500 completes/);
+  assert.deepEqual(r.json.next, ['ghx ci wait o/r#7', 'ghx ci rerun o/r#7 --flaky (after run 500 completes)']);
+});
+
+test('--flaky with every red job of the run a candidate reruns the run with rerun-failed-jobs', async () => {
+  const flaky = (id: number, name: string) =>
+    red(id, name, { log: { text: vitestLog([], { extra: ['Error: read ECONNRESET'] }) } });
+  const fake = scene(world([flaky(101, 'e2e'), flaky(103, 'e2e-2')]));
+  const r = await rerun(fake, ['--flaky']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(posts(fake), [`repos/${SLUG}/actions/runs/500/rerun-failed-jobs`]);
+  assert.deepEqual(r.json.skipped, []);
+});

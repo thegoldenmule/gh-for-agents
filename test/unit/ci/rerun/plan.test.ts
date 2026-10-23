@@ -159,7 +159,7 @@ test('targeting: no selection reruns the failed jobs of the run', () => {
   assert.deepEqual(s.widened, []);
 });
 
-test('targeting: --flaky with one candidate of two posts that job; two of three widens', () => {
+test('targeting: --flaky with one candidate of two posts that job; two of three never widens', () => {
   const [a, b, c] = [check(1, 10, 'fail'), check(2, 10, 'fail'), check(3, 10, 'fail')];
   const one = selectJobs([group([a, b] as Check[])], {
     ref: 'o/r#7',
@@ -184,8 +184,35 @@ test('targeting: --flaky with one candidate of two posts that job; two of three 
       [2, flake(true)],
     ]),
   });
-  assert.equal(two.actions[0]?.method, 'failed-jobs');
-  assert.deepEqual(two.widened, [{ runId: 10, selected: ['job1', 'job2'], extra: ['job3'] }]);
+  assert.deepEqual([two.actions[0]?.method, two.actions[0]?.jobId], ['job', 1]);
+  assert.deepEqual(two.widened, []);
+  assert.deepEqual(
+    two.skipped.map((s) => [s.reason, s.jobs]),
+    [['DEFERRED', ['job2']]],
+  );
+  const all = selectJobs([group([a, b] as Check[])], {
+    ref: 'o/r#7',
+    headSha: H,
+    byJob: false,
+    flake: new Map([
+      [1, flake(true)],
+      [2, flake(true)],
+    ]),
+  });
+  assert.equal(all.actions[0]?.method, 'failed-jobs');
+  assert.deepEqual([all.widened, all.skipped], [[], []]);
+});
+
+test('targeting: --job selecting two of three widens to the run (RERUN_WIDENED)', () => {
+  const [a, b, c] = [check(1, 10, 'fail'), check(2, 10, 'fail'), check(3, 10, 'fail')];
+  const s = selectJobs([group([a, b, c] as Check[], [a, b] as Check[])], {
+    ref: 'o/r#7',
+    headSha: H,
+    byJob: true,
+    flake: null,
+  });
+  assert.equal(s.actions[0]?.method, 'failed-jobs');
+  assert.deepEqual(s.widened, [{ runId: 10, selected: ['job1', 'job2'], extra: ['job3'] }]);
 });
 
 test('targeting: --flaky with no candidate anywhere is NO_FLAKY_CANDIDATES; an unassessed job is no candidate', () => {

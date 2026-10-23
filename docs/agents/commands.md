@@ -33,7 +33,7 @@ Rerun failed jobs of completed runs on the PR head (--flaky: only likely-flaky j
 
 write, single document, timeout 2m (max 5m).
 
-Reruns the failed jobs of completed Actions runs for the current head, skipping runs still in progress (RUN_IN_PROGRESS) and runs at ci.maxRerunAttempts (RERUN_LIMIT, default 3). --job reruns matching jobs; --flaky only jobs with flake evidence (NO_FLAKY_CANDIDATES if none). A rerun reuses the original merge ref: after a base change, use ghx ci retrigger.
+Reruns the failed jobs of completed Actions runs for the current head, skipping runs still in progress (RUN_IN_PROGRESS) and runs at ci.maxRerunAttempts (RERUN_LIMIT, default 3). --job reruns matching jobs; --flaky only jobs with flake evidence (NO_FLAKY_CANDIDATES if none), never widening to a real failure: one job per run at a time, the rest DEFERRED until that run completes. A rerun reuses the original merge ref: after a base change, use ghx ci retrigger.
 
 Flags:
 

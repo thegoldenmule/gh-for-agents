@@ -39,7 +39,7 @@ const Input = z.strictObject({
   reason: z.string().optional().describe('Why the override is allowed (who asked); required with --override'),
 });
 
-const SkipReason = z.enum(['RUN_IN_PROGRESS', 'RERUN_LIMIT', 'NOT_FLAKY', 'REFUSED']);
+const SkipReason = z.enum(['RUN_IN_PROGRESS', 'RERUN_LIMIT', 'NOT_FLAKY', 'DEFERRED', 'REFUSED']);
 
 const Output = z.object({
   ref: PrRef,
@@ -62,6 +62,7 @@ const Output = z.object({
       reason: SkipReason,
       attempt: z.number().int().nullable(),
       message: z.string().optional(),
+      jobs: z.array(z.string()).optional(),
     }),
   ),
   overrides: z.array(z.object({ code: z.literal('RERUN_LIMIT'), reason: z.string() })),
@@ -76,7 +77,8 @@ export default defineCommand({
   description:
     'Reruns the failed jobs of completed Actions runs for the current head, skipping runs still in progress ' +
     '(RUN_IN_PROGRESS) and runs at ci.maxRerunAttempts (RERUN_LIMIT, default 3). --job reruns matching jobs; ' +
-    '--flaky only jobs with flake evidence (NO_FLAKY_CANDIDATES if none). A rerun reuses the original merge ' +
+    '--flaky only jobs with flake evidence (NO_FLAKY_CANDIDATES if none), never widening to a real failure: ' +
+    'one job per run at a time, the rest DEFERRED until that run completes. A rerun reuses the original merge ' +
     'ref: after a base change, use ghx ci retrigger.',
   kind: 'write',
   input: Input,
@@ -200,6 +202,8 @@ export default defineCommand({
     }
     const allSkipped = [...skipped, ...selection.skipped, ...refused];
     if (done.length === 0) throw nothingRerunnable(classifyInput, allSkipped);
+    const rerunIds = new Set(done.map((a) => a.runId));
+    const deferred = selection.skipped.filter((s) => s.reason === 'DEFERRED' && rerunIds.has(s.runId));
     return {
       ref,
       headSha,
@@ -214,7 +218,10 @@ export default defineCommand({
       })),
       skipped: allSkipped,
       overrides: overrides ? [{ code: 'RERUN_LIMIT' as const, reason: overrides.reason }] : [],
-      next: [`ghx ci wait ${ref}`],
+      next: [
+        `ghx ci wait ${ref}`,
+        ...deferred.map((s) => `ghx ci rerun ${ref} --flaky (after run ${s.runId} completes)`),
+      ],
     };
   },
 });
