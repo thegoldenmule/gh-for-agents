@@ -68,17 +68,21 @@ function json(r: Ran, what: string): any {
   }
 }
 
+const say = (line: string): void => {
+  process.stdout.write(`${line}\n`);
+};
+
 let failed = false;
 function step(name: string, fn: () => string | undefined): void {
   if (failed) return;
   const t = Date.now();
   try {
     const note = fn();
-    console.log(`ok   ${name} (${Date.now() - t} ms)${note ? `: ${note}` : ''}`);
+    say(`ok   ${name} (${Date.now() - t} ms)${note ? `: ${note}` : ''}`);
   } catch (e) {
     failed = true;
-    console.log(`FAIL ${name}`);
-    console.log(e instanceof Error ? (e.stack ?? e.message) : String(e));
+    say(`FAIL ${name}`);
+    say(e instanceof Error ? (e.stack ?? e.message) : String(e));
   }
 }
 
@@ -220,7 +224,7 @@ step('ghx uninstall', () => {
   return undefined;
 });
 
-if (KEEP) console.log(`kept ${TMP}`);
+if (KEEP) say(`kept ${TMP}`);
 else rmSync(TMP, { recursive: true, force: true });
-console.log(failed ? 'pack:test FAILED' : 'pack:test passed');
+say(failed ? 'pack:test FAILED' : 'pack:test passed');
 process.exitCode = failed ? 1 : 0;
