@@ -96,20 +96,26 @@ Agent acceptance hasn't run yet: it means scoring the Claude Code sessions of
 three real PRs worked on with `ghx` (`scripts/acceptance/score.ts`). The build
 order is in [04-build-coordination](docs/plans/04-build-coordination.md).
 
-To steer Claude Code toward `ghx`, see [docs/agents](docs/agents/). It has a
-CLAUDE.md snippet, a skill, the command reference, and an opt-in settings block
-(deny rules for raw `gh` writes, plus a PreToolUse hook).
-
 To run it from source, you need Node 24, pnpm and `gh` 2.81.0 or later, logged
-in. There is no build step and no published package. Put `bin/ghx.js` on your
-`PATH` as `ghx`, then check the setup and write a config for your repo:
+in. There is no build step and no published package. `ghx install` sets up
+Claude Code: it adds deny rules for raw `gh` writes and the PreToolUse hook to
+`~/.claude/settings.json`, adds the CLAUDE.md snippet to `~/.claude/CLAUDE.md`,
+and with `--bin-dir` links `ghx` onto your `PATH`. Look at its diffs first, then
+apply them, check the setup, and write a config for your repo:
 
 ```sh
 pnpm install
-ln -s "$PWD/bin/ghx.js" ~/.local/bin/ghx   # any directory on PATH
+node bin/ghx.js install --bin-dir ~/.local/bin --dry-run   # shows the diffs; writes nothing
+node bin/ghx.js install --bin-dir ~/.local/bin             # any directory on PATH
 ghx doctor
 ghx init        # in the repo you work on: writes .github/ghx.json
 ```
+
+`ghx install` keeps your other settings and backs up each file it changes. It's
+safe to run again, and `ghx uninstall` removes only what it added. Use
+`--scope project` to install into a repo's `.claude/settings.json` instead.
+[docs/agents/hooks.md](docs/agents/hooks.md) describes what it writes. The
+[docs/agents](docs/agents/) folder also has the skill and the command reference.
 
 This repo's own config is [.github/ghx.json](.github/ghx.json).
 

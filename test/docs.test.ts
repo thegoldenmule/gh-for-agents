@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { generate, ROOT } from '../scripts/docs/gen.ts';
 import { PROTOCOL } from '../src/commands/ci/wait.ts';
 import { ExitCode } from '../src/core/exit.ts';
+import { GHX_DENY_RULES } from '../src/install/settings.ts';
 import { decide } from '../src/passthrough/policy.ts';
 
 const read = (p: string): string => readFileSync(join(ROOT, p), 'utf8');
@@ -59,16 +60,8 @@ test('hooks.md: the settings block parses, denies only wrapped gh writes, and re
     permissions: { deny: string[] };
     hooks: { PreToolUse: { matcher: string; hooks: { type: string; command: string }[] }[] };
   };
-  assert.deepEqual(settings.permissions.deny, [
-    'Bash(gh pr merge:*)',
-    'Bash(gh pr create:*)',
-    'Bash(gh pr edit:*)',
-    'Bash(gh pr review:*)',
-    'Bash(gh pr comment:*)',
-    'Bash(gh pr close:*)',
-    'Bash(gh pr ready:*)',
-    'Bash(gh run rerun:*)',
-  ]);
+  // The same list ghx install writes (one source: WRAPPED_WRITES).
+  assert.deepEqual(settings.permissions.deny, GHX_DENY_RULES);
   for (const rule of settings.permissions.deny) {
     const words = (/^Bash\(gh (.+):\*\)$/.exec(rule)?.[1] ?? '').split(' ');
     const d = decide(words);

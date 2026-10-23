@@ -10,23 +10,38 @@ The steering kit is opt-in. It has two parts that work separately or together:
 
    Read suggestions use ask mode by default. The hook fails open.
 
-Nothing here changes your settings for you. Copy the block you want into your own Claude Code settings file.
+## Install
+
+`ghx install` writes both parts, plus the [CLAUDE.md snippet](claude-md-snippet.md), into your Claude Code settings. Look at what it would change first:
+
+```sh
+ghx install --dry-run   # unified diffs of each file; writes nothing
+ghx install             # apply them
+ghx doctor              # the install field shows what is installed
+```
+
+- **Where.** The default `--scope user` edits `settings.json` and `CLAUDE.md` in `$CLAUDE_CONFIG_DIR`, or in `~/.claude` when that is unset. `--scope project` edits `.claude/settings.json` and `CLAUDE.md` at the repository root.
+- **What.** It merges the deny rules below into `permissions.deny`, skipping rules already there. It adds one PreToolUse entry for the hook, and replaces it on a re-install instead of adding another. It puts the snippet at the end of `CLAUDE.md` between `<!-- ghx:begin -->` and `<!-- ghx:end -->`, and replaces that block on a re-install. Every other setting stays as it was.
+- **The hook runs by absolute path.** Its command is this machine's `node` and this checkout's `bin/ghx.js`, both quoted, such as `'/usr/local/bin/node' '/src/gh-for-agents/bin/ghx.js' hook claude-pretooluse`. It doesn't depend on the `PATH` Claude Code gives hooks. If you move the checkout or remove that node, `ghx doctor` warns `INSTALL_HOOK_STALE`; run `ghx install` again. Because of those paths, think twice before committing a `--scope project` install for other contributors.
+- **Safe to re-run.** It refuses a `settings.json` that isn't valid JSON (`INSTALL_SETTINGS_INVALID`) and changes nothing. Before writing, it copies each file it changes to `<file>.bak-ghx-<time>`, then writes through a temp file and a rename. A second run with nothing to change reports `changed: []` and makes no backups.
+- **Options.** `--no-deny`, `--no-hook` and `--no-snippet` leave a part out. `--hook-mode deny` sets `GHX_HOOK_MODE` (see Modes below), and `--hook-mode ask` removes it again. `--bin-dir ~/.local/bin` also links `ghx` there; it refuses to replace a file that isn't that link (`INSTALL_BIN_CONFLICT`), and the output says whether the directory is on your `PATH`.
+- **Undo.** `ghx uninstall` (with the same `--scope`, and `--bin-dir` for the link) removes only what ghx added: its hook entry, those exact deny rules, `GHX_HOOK_MODE`, the marked block and the link. It also takes `--dry-run`.
 
 ## Settings
 
-Paste this into a Claude Code settings file. Use `.claude/settings.json` to share it with a repo's contributors, `.claude/settings.local.json` for yourself in one repo, or `~/.claude/settings.json` for every repo. Merge it with what is already there.
+This is what `ghx install` merges in, for reference or to install by hand. To install by hand, paste it into a Claude Code settings file. Use `.claude/settings.json` to share it with a repo's contributors, `.claude/settings.local.json` for yourself in one repo, or `~/.claude/settings.json` for every repo. Merge it with what is already there. `ghx install` writes the hook command with absolute paths instead of a bare `ghx`.
 
 ```json
 {
   "permissions": {
     "deny": [
-      "Bash(gh pr merge:*)",
       "Bash(gh pr create:*)",
       "Bash(gh pr edit:*)",
-      "Bash(gh pr review:*)",
-      "Bash(gh pr comment:*)",
-      "Bash(gh pr close:*)",
       "Bash(gh pr ready:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh pr comment:*)",
+      "Bash(gh pr review:*)",
+      "Bash(gh pr close:*)",
       "Bash(gh run rerun:*)"
     ]
   },
@@ -46,7 +61,7 @@ Paste this into a Claude Code settings file. Use `.claude/settings.json` to shar
 - **Why you need both.** `permissions.deny` rules match the command as typed, from the start. gh also takes `-R`/`--repo` before the command words, so `Bash(gh pr merge:*)` does not match `gh -R o/r pr merge 12` or `gh --repo=o/r pr create`. You also can't write a prefix rule for every repo. The hook parses the command, finds the gh command wherever the repo flag sits, and denies these writes. The deny rules still block the plain forms when the hook isn't running: when it isn't installed, when `ghx` isn't on the hook's `PATH`, or when it fails open on an internal error.
 - **Either part works alone**, but neither covers everything alone. Where both match, both deny.
 - **To deny read suggestions instead of asking**, set the mode in the same file: `"env": { "GHX_HOOK_MODE": "deny" }`. Use `"off"` to silence suggestions and the `run_in_background` rewrite. Wrapped writes are denied in every mode.
-- `ghx` has to be on the `PATH` that Claude Code runs hooks with. Otherwise use the absolute path to `bin/ghx.js`.
+- By hand, `ghx` has to be on the `PATH` that Claude Code runs hooks with. Otherwise use the absolute path to `bin/ghx.js`, as `ghx install` does.
 
 ## The hook
 
