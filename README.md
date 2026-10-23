@@ -96,31 +96,59 @@ Agent acceptance hasn't run yet: it means scoring the Claude Code sessions of
 three real PRs worked on with `ghx` (`scripts/acceptance/score.ts`). The build
 order is in [04-build-coordination](docs/plans/04-build-coordination.md).
 
-To run it from source, you need Node 24, pnpm and `gh` 2.81.0 or later, logged
-in. There is no build step and no published package. `ghx install` sets up
-Claude Code: it adds the PreToolUse hook to `~/.claude/settings.json`, adds the
-CLAUDE.md snippet to `~/.claude/CLAUDE.md`, and with `--bin-dir` links `ghx`
-onto your `PATH`. Enforcement is per repo: the hook blocks raw `gh` writes and
-suggests `ghx` reads only in repos that have `.github/ghx.json`, and stays
-silent elsewhere. Look at its diffs first, then apply them, check the setup,
-and write a config for your repo:
+## Install
+
+You need Node.js 24 or later and `gh` 2.81.0 or later, logged in
+(`gh auth login`). Install `ghx` and set up Claude Code in one step:
 
 ```sh
-pnpm install
-node bin/ghx.js install --bin-dir ~/.local/bin --dry-run   # shows the diffs; writes nothing
-node bin/ghx.js install --bin-dir ~/.local/bin             # any directory on PATH
-ghx doctor
-ghx init        # in the repo you work on: writes .github/ghx.json
+npx @thegoldenmule/ghx install
 ```
 
-`ghx install` keeps your other settings and backs up each file it changes. It's
-safe to run again, and `ghx uninstall` removes only what it added. Use
-`--scope project` to install into a repo's `.claude/settings.local.json` (per
-machine, not committed) instead; that scope also adds `permissions.deny` rules
-for raw `gh` writes. User scope doesn't, because deny rules can't be
-conditional: they would block `gh` in every repo, configured or not.
-[docs/agents/hooks.md](docs/agents/hooks.md) describes what it writes. The
-[docs/agents](docs/agents/) folder also has the skill and the command reference.
+Run from `npx`, `ghx install` first installs the same version globally
+(`npm i -g @thegoldenmule/ghx@<version>`) and hands the install to that copy,
+so the hook never points into npm's cache. To do it in two steps instead:
+
+```sh
+npm i -g @thegoldenmule/ghx
+ghx install --dry-run   # shows the diffs; writes nothing
+ghx install
+ghx doctor
+ghx init                # in the repo you work on: writes .github/ghx.json
+```
+
+If `npm i -g` fails with `EACCES`, your global npm prefix belongs to root: use
+a Node.js you own (nvm or fnm) rather than `sudo`.
+
+`ghx install` adds the PreToolUse hook to `~/.claude/settings.json` and the
+CLAUDE.md snippet to `~/.claude/CLAUDE.md`. Enforcement is per repo: the hook
+blocks raw `gh` writes and suggests `ghx` reads only in repos that have
+`.github/ghx.json`, and stays silent elsewhere. It keeps your other settings and
+backs up each file it changes. It's safe to run again, and `ghx uninstall`
+removes only what it added. Use `--scope project` to install into a repo's
+`.claude/settings.local.json` (per machine, not committed) instead; that scope
+also adds `permissions.deny` rules for raw `gh` writes. User scope doesn't,
+because deny rules can't be conditional: they would block `gh` in every repo,
+configured or not. [docs/agents/hooks.md](docs/agents/hooks.md) describes what
+it writes. The [docs/agents](docs/agents/) folder also has the skill and the
+command reference.
+
+Upgrade with `npm update -g @thegoldenmule/ghx`; the hook runs the global copy,
+so it picks up the new version (`ghx doctor` warns if the hook runs another
+copy or another `node`; run `ghx install` again). Uninstall with:
+
+```sh
+ghx uninstall && npm rm -g @thegoldenmule/ghx
+```
+
+### Developing
+
+Clone the repo, run `pnpm install`, and run `node bin/ghx.js` (it runs
+`src/` directly; there is no build step in a checkout).
+`node bin/ghx.js install --bin-dir ~/.local/bin` points the hook at the checkout
+and links `ghx` onto your `PATH`. `pnpm check` runs typecheck, lint and tests;
+`pnpm pack:test` packs and installs the package into a temp prefix. Releases:
+[RELEASING.md](RELEASING.md).
 
 This repo's own config is [.github/ghx.json](.github/ghx.json).
 
