@@ -665,6 +665,60 @@ test('a BOM and CRLF line endings are kept; formatting ghx cannot keep warns INS
 
 // ── ghx doctor's install check ─────────────────────────────────────────────────
 
+test('doctor expects deny rules only at project scope, and warns about ones an earlier user install left', async () => {
+  const repo = join(tmp, `repo-${n++}`);
+  mkdirSync(repo);
+  const git = fakeGit({ toplevel: repo });
+  const warned = (r: { json: { warnings?: { code: string }[] } }) =>
+    (r.json.warnings ?? []).some((w) => w.code === 'INSTALL_DENY_LEGACY');
+
+  // A user-scope install adds no deny rules, so none are missing.
+  const h = home();
+  await run(['install'], { HOME: h.home });
+  const fresh = await run(['doctor'], { HOME: h.home }, { git });
+  assert.deepEqual(fresh.json.install.user.deny, { expected: false, present: [], ghxAdded: [] });
+  assert.ok(!warned(fresh));
+
+  // A pre-manifest ghx install that added deny rules at user scope: those, not the user's own, are flagged.
+  const mine = { permissions: { deny: ['Bash(gh pr merge:*)', 'Bash(rm:*)'] } };
+  const old = {
+    permissions: { deny: [...mine.permissions.deny, ...GHX_DENY_RULES.filter((r) => r !== 'Bash(gh pr merge:*)')] },
+    hooks: {
+      PreToolUse: [
+        { matcher: 'Bash|Monitor', hooks: [{ type: 'command', command: "'/n' '/g' hook claude-pretooluse" }] },
+      ],
+    },
+  };
+  const legacy = home({
+    'settings.json': `${JSON.stringify(old, null, 2)}\n`,
+    'settings.json.bak-ghx-20261001T000000Z': `${JSON.stringify(mine, null, 2)}\n`,
+  });
+  const l = await run(['doctor'], { HOME: legacy.home }, { git });
+  const ld = l.json.install.user.deny;
+  assert.equal(ld.expected, false);
+  assert.ok(!('missing' in ld));
+  assert.deepEqual(ld.present, GHX_DENY_RULES);
+  assert.deepEqual(
+    ld.ghxAdded,
+    GHX_DENY_RULES.filter((r) => r !== 'Bash(gh pr merge:*)'),
+  );
+  assert.ok(warned(l), JSON.stringify(l.json.warnings));
+
+  // Hand-written ghx-identical rules with no ghx install behind them are the user's: no warning.
+  const hand = home({ 'settings.json': JSON.stringify({ permissions: { deny: [...GHX_DENY_RULES] } }) });
+  const hd = await run(['doctor'], { HOME: hand.home }, { git });
+  assert.deepEqual(hd.json.install.user.deny.ghxAdded, []);
+  assert.ok(!warned(hd));
+
+  // Project scope still expects them and reports any missing.
+  const before = await run(['doctor'], { HOME: h.home }, { git });
+  assert.deepEqual(before.json.install.project.deny, { expected: true, present: [], missing: GHX_DENY_RULES });
+  await run(['install', '--scope', 'project'], { HOME: h.home }, { git });
+  const p = await run(['doctor'], { HOME: h.home }, { git });
+  assert.deepEqual(p.json.install.project.deny, { expected: true, present: GHX_DENY_RULES, missing: [] });
+  assert.ok(!warned(p));
+});
+
 test('doctor reports the install per scope, informationally, and flags a hook whose paths are gone', async () => {
   const h = home();
   const repo = join(tmp, `repo-${n++}`);
@@ -686,7 +740,7 @@ test('doctor reports the install per scope, informationally, and flags a hook wh
   assert.equal(u.status, 'ok');
   assert.equal(u.hook.installed, true);
   assert.deepEqual(u.hook.missingPaths, []);
-  assert.equal(u.deny.present, 0, 'user scope has no deny rules');
+  assert.deepEqual(u.deny, { expected: false, present: [], ghxAdded: [] }, 'user scope has no deny rules');
   assert.equal(u.claudeMd.block, true);
   assert.equal(after.json.install.project.hook.installed, false);
 
@@ -707,7 +761,7 @@ test('doctor reports the install per scope, informationally, and flags a hook wh
   assert.equal(shared.status, 'ok');
   assert.equal(shared.hook.installed, true);
   assert.deepEqual(shared.hook.missingPaths, ['/gone/node']);
-  assert.equal(shared.deny.present, 0);
+  assert.deepEqual(shared.deny.present, []);
   assert.equal(hand.json.install.project.hook.installed, false, 'settings.local.json is reported separately');
   assert.ok(
     hand.json.warnings.some(

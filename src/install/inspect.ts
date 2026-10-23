@@ -1,6 +1,8 @@
 // What `ghx doctor` reports about an install: per scope, whether a ghx hook is registered and the
 // paths its command runs still exist, which deny rules are present, and whether the CLAUDE.md block
 // is there. Read-only and informational: a missing install is a fact, not a failure.
+// Deny rules are expected only at project scope (04 "enforcement scope"): user scope reports the ones
+// present and which of them an earlier ghx install added, which a user-scope re-install removes.
 import { accessSync, constants, existsSync } from 'node:fs';
 import { delimiter, isAbsolute, join } from 'node:path';
 import { z } from 'zod';
@@ -9,7 +11,8 @@ import type { Git } from '../git/index.ts';
 import { scanShell } from '../hook/shell.ts';
 import { findBlock } from './claude-md.ts';
 import { readOrNull, resolveTargets, type Scope, type Targets } from './files.ts';
-import { GHX_DENY_RULES, inspectSettings, parseSettings } from './settings.ts';
+import { ownedSettings, readManifest } from './owned.ts';
+import { inspectSettings, parseSettings } from './settings.ts';
 import { toPlain } from './text.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -23,7 +26,20 @@ const SettingsInstall = z.object({
     command: z.string().nullable(),
     missingPaths: z.array(z.string()).describe('Programs or files the hook command names that do not exist'),
   }),
-  deny: z.object({ present: z.number(), total: z.number(), missing: z.array(z.string()) }),
+  deny: z.discriminatedUnion('expected', [
+    z.object({
+      expected: z.literal(true).describe('Project scope: ghx install adds the gh write deny rules'),
+      present: z.array(z.string()),
+      missing: z.array(z.string()),
+    }),
+    z.object({
+      expected: z.literal(false).describe('User scope: ghx install adds no deny rules'),
+      present: z.array(z.string()).describe('ghx-shaped deny rules in the file anyway'),
+      ghxAdded: z
+        .array(z.string())
+        .describe('Of those, the ones an earlier ghx install added; a user-scope re-install removes them'),
+    }),
+  ]),
   hookMode: z.string().nullable(),
 });
 type SettingsInstall = z.input<typeof SettingsInstall>;
@@ -66,13 +82,20 @@ function missingPaths(command: string, env: Env): string[] {
   return out;
 }
 
-function inspectSettingsFile(settingsPath: string, env: Env): SettingsInstall {
+/** `user`: the targets whose settings this is, at user scope, where deny rules are not expected. */
+function inspectSettingsFile(settingsPath: string, env: Env, user?: Targets): SettingsInstall {
   const text = readOrNull(settingsPath);
   let status: SettingsInstall['status'] = text === null ? 'missing' : 'ok';
   let found = inspectSettings({});
   let problem: string | undefined;
+  let ghxAdded: string[] = [];
   try {
-    found = inspectSettings(parseSettings(text, settingsPath));
+    const parsed = parseSettings(text, settingsPath);
+    found = inspectSettings(parsed);
+    if (user) {
+      const owned = new Set(ownedSettings(user, readManifest(user), parsed).deny);
+      ghxAdded = found.denyPresent.filter((r) => owned.has(r));
+    }
   } catch (e) {
     status = 'invalid';
     problem = e instanceof Error ? e.message : String(e);
@@ -83,12 +106,14 @@ function inspectSettingsFile(settingsPath: string, env: Env): SettingsInstall {
     status,
     ...(problem ? { problem } : {}),
     hook: { installed: command !== null, command, missingPaths: command ? missingPaths(command, env) : [] },
-    deny: { present: found.denyPresent.length, total: GHX_DENY_RULES.length, missing: found.denyMissing },
+    deny: user
+      ? { expected: false, present: found.denyPresent, ghxAdded }
+      : { expected: true, present: found.denyPresent, missing: found.denyMissing },
     hookMode: found.hookMode,
   };
 }
 
-function inspectScope(t: Targets, env: Env): ScopeInstall {
+function inspectScope(scope: Scope, t: Targets, env: Env): ScopeInstall {
   const md = readOrNull(t.claudeMd);
   let block = false;
   let problem: string | undefined;
@@ -98,7 +123,7 @@ function inspectScope(t: Targets, env: Env): ScopeInstall {
     problem = e instanceof Error ? e.message : String(e);
   }
   return {
-    ...inspectSettingsFile(t.settings, env),
+    ...inspectSettingsFile(t.settings, env, scope === 'user' ? t : undefined),
     claudeMd: { path: t.claudeMd, block, ...(problem ? { problem } : {}) },
     ...(t.sharedSettings ? { shared: inspectSettingsFile(t.sharedSettings, env) } : {}),
   };
@@ -107,7 +132,7 @@ function inspectScope(t: Targets, env: Env): ScopeInstall {
 async function scopeOrNull(scope: Scope, env: Env, git: Git): Promise<ScopeInstall | null> {
   try {
     const t = await resolveTargets(scope, env, git);
-    return inspectScope(t, env);
+    return inspectScope(scope, t, env);
   } catch (e) {
     if (isGhxError(e)) return null;
     throw e;

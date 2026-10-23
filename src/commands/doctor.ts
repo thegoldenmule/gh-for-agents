@@ -282,6 +282,13 @@ export default defineCommand({
           message: `The ${scope} ghx hook runs ${s.hook.missingPaths.join(', ')}, which no longer exists; it fails open. Re-run ghx install${scope === 'project' ? ' --scope project' : ''}.`,
         });
       }
+      // User scope expects no deny rules; only ones an earlier ghx install left behind are worth a warning.
+      if (s?.deny.expected === false && s.deny.ghxAdded.length > 0) {
+        ctx.warn({
+          code: 'INSTALL_DENY_LEGACY',
+          message: `${s.settings} still has ${s.deny.ghxAdded.length} gh write deny rule(s) an earlier ghx install added; user scope relies on the hook, which enforces only in repos with .github/ghx.json. Re-run ghx install to remove them.`,
+        });
+      }
       const flag = scope === 'project' ? ' --scope project' : '';
       for (const f of [s, s?.shared]) {
         if (f?.problem) {
