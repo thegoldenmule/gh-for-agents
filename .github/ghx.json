@@ -51,7 +51,7 @@
     },
     "docs": {
       "description": "Agent docs, plans and the README",
-      "paths": ["docs/**", "README.md"]
+      "paths": ["docs/**", "README.md", "RELEASING.md"]
     },
     "test": {
       "description": "Tests, helpers and fixtures",
