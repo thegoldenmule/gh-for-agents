@@ -47,6 +47,7 @@
     "check": "pnpm typecheck && pnpm lint && pnpm test",
     "docs:gen": "node scripts/docs/gen.ts",
     "docs:check": "node scripts/docs/gen.ts --check",
+    "pack:test": "node scripts/pack-test.ts",
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "prepublishOnly": "rm -rf dist && tsc -p tsconfig.build.json"
   },
