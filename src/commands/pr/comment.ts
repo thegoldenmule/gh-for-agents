@@ -2,6 +2,8 @@
 // precondition, status, supersede) with its `comment` block. Flow: strict input → Q1 (state, ids) → ref
 // lookup → render → POST issues/N/comments (--dry-run halts here) → optional PATCH state=closed.
 import { z } from 'zod';
+import { parseCommandOverrides } from '../../ci/rerun/overrides.ts';
+import { isViewer } from '../../ci/rerun/retrigger.ts';
 import { defineCommand } from '../../core/command.ts';
 import { rethrowControlFlow } from '../../core/control-flow.ts';
 import { GhxError, type IssueDetail, mapZodIssues } from '../../core/errors.ts';
@@ -22,6 +24,8 @@ const Input = z
   .strictObject({
     pr: z.string().min(1).describe('PR: 3198, #3198, owner/repo#3198 or a PR URL'),
     close: z.boolean().default(false).describe('Close the PR after commenting (not with a precondition)'),
+    override: z.array(z.string().min(1)).optional().describe("AUTHOR_NOT_VIEWER: --close someone else's PR"),
+    reason: z.string().optional().describe('Why the override is allowed (who asked); required with --override'),
     kind: json(z.enum(['note', 'precondition', 'status', 'supersede'])).optional(),
     body: json(z.string()).optional(),
     condition: json(z.unknown()).optional(),
@@ -38,6 +42,7 @@ const Output = z.object({
   commentId: z.number().int(),
   url: z.string(),
   closed: z.boolean(),
+  overrides: z.array(z.object({ code: z.literal('AUTHOR_NOT_VIEWER'), reason: z.string() })),
   precondition: z.object({ status: PreconditionStatus, evidence: z.string() }).nullable(),
 });
 
@@ -72,7 +77,8 @@ export default defineCommand({
   description:
     'Write {kind, …} with your file tool and pass --input c.json. Kinds: note {body}; precondition ' +
     '{condition: {type: pr-merged|release-includes, ref} | {type: manual, text}}; status {state, body, refs?}; ' +
-    'supersede {by}. Refs must exist and not be this PR. --close closes the PR (not with a precondition).',
+    'supersede {by}. Refs must exist and not be this PR. --close closes the PR (not with a precondition); ' +
+    "on someone else's PR it is AUTHOR_NOT_VIEWER unless --override AUTHOR_NOT_VIEWER --reason.",
   kind: 'write',
   input: Input,
   output: Output,
@@ -91,7 +97,8 @@ export default defineCommand({
   ],
   async run(raw, ctx) {
     const t = await resolveTarget(ctx, raw.pr);
-    const { pr: _pr, close, ...fields } = raw;
+    const { pr: _pr, close, override, reason, ...fields } = raw;
+    const overrides = parseCommandOverrides(override, reason, ['AUTHOR_NOT_VIEWER'] as const);
     const parsed = PrCommentInput.safeParse(fields);
     if (!parsed.success) throw validationError(mapZodIssues(parsed.error, { schema: PrCommentInput, input: fields }));
     const c = parsed.data;
@@ -114,6 +121,16 @@ export default defineCommand({
 
     const pr = await readPrForWrite(ctx, t);
     assertOpen(t, pr);
+    if (close && !isViewer(pr) && overrides === null) {
+      throw new GhxError(
+        'AUTHOR_NOT_VIEWER',
+        `${t.ref} is authored by ${pr.authorLogin ?? 'a deleted user'}, not you (${pr.viewerLogin}); --close would close it.`,
+        {
+          hint: 'Only close your own PRs; if the user asked for this one, add --override AUTHOR_NOT_VIEWER --reason "<who asked>".',
+          details: { author: pr.authorLogin },
+        },
+      );
+    }
     const found = await lookupRefs(
       ctx.gh,
       t.repo,
@@ -188,6 +205,7 @@ export default defineCommand({
       commentId: posted.data.id,
       url: posted.data.html_url,
       closed,
+      overrides: overrides ? [{ code: 'AUTHOR_NOT_VIEWER' as const, reason: overrides.reason }] : [],
       precondition: preconditionAtCreate(c, id, found, full),
     };
   },

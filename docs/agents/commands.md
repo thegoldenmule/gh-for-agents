@@ -217,11 +217,13 @@ Post a typed coordination comment: note, merge precondition, status or supersede
 
 write, single document, timeout 1m (max 5m).
 
-Write {kind, …} with your file tool and pass --input c.json. Kinds: note {body}; precondition {condition: {type: pr-merged|release-includes, ref} | {type: manual, text}}; status {state, body, refs?}; supersede {by}. Refs must exist and not be this PR. --close closes the PR (not with a precondition).
+Write {kind, …} with your file tool and pass --input c.json. Kinds: note {body}; precondition {condition: {type: pr-merged|release-includes, ref} | {type: manual, text}}; status {state, body, refs?}; supersede {by}. Refs must exist and not be this PR. --close closes the PR (not with a precondition); on someone else's PR it is AUTHOR_NOT_VIEWER unless --override AUTHOR_NOT_VIEWER --reason.
 
 Flags:
 
 - `--close` (default `false`): Close the PR after commenting (not with a precondition)
+- `--override <string>` (repeatable): AUTHOR_NOT_VIEWER: --close someone else's PR
+- `--reason <string>`: Why the override is allowed (who asked); required with --override
 
 JSON-only fields: `kind`, `body`, `condition`, `state`, `refs`, `by`.
 

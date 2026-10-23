@@ -180,3 +180,30 @@ test('smoke/pr-comment: the example halts in dry-run, and the fixture query matc
   );
   assert.equal(argvKey(fixture.argv), argvKey(built.args));
 });
+
+test("--close on another author's PR is AUTHOR_NOT_VIEWER (6) before any write; --override closes it", async () => {
+  const refs = { 'powerhouse-inc/powerhouse#3250': { state: 'OPEN' } };
+  const s = writeScene({ refs, viewer: 'someone-else' });
+  const r = await run(s.gh, { kind: 'supersede', by: '#3250' }, ['--close']);
+  assert.equal(r.exitCode, EXIT.POLICY, r.stdout);
+  assert.equal(r.json.error.code, 'AUTHOR_NOT_VIEWER');
+  assert.equal(r.json.error.details.author, 'thegoldenmule');
+  assert.match(r.json.error.hint, /--override AUTHOR_NOT_VIEWER --reason/);
+  s.gh.expectNoMutations();
+
+  const note = writeScene({ viewer: 'someone-else' });
+  const n = await run(note.gh, { kind: 'note', body: 'hi' });
+  assert.equal(n.exitCode, EXIT.OK, 'commenting without --close is not guarded');
+
+  const ok = writeScene({ refs, viewer: 'someone-else' });
+  const o = await run(ok.gh, { kind: 'supersede', by: '#3250' }, [
+    '--close',
+    '--override',
+    'AUTHOR_NOT_VIEWER',
+    '--reason',
+    'user asked in chat',
+  ]);
+  assert.equal(o.exitCode, EXIT.OK, o.stdout);
+  assert.equal(o.json.closed, true);
+  assert.deepEqual(o.json.overrides, [{ code: 'AUTHOR_NOT_VIEWER', reason: 'user asked in chat' }]);
+});
