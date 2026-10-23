@@ -135,6 +135,13 @@ test('outside a git checkout: REPO_NOT_FOUND', async () => {
   assert.equal(r.json.error.code, 'REPO_NOT_FOUND');
 });
 
+test('without git: ENV_GIT_MISSING (exit 4), before looking for a checkout', async () => {
+  const r = await runInProcess(['init'], { git: fakeGit({ available: false, toplevel: pnpmRepo() }) });
+  assert.equal(r.exitCode, EXIT.ENV, r.stdout);
+  assert.equal(r.json.error.code, 'ENV_GIT_MISSING');
+  assert.equal(r.json.error.hint, 'Install git.');
+});
+
 test('helpers: pnpm yaml line parse and component tokens', () => {
   assert.deepEqual(parsePnpmWorkspace('packages:\n  - a/*\n  - "b/*" # c\nx: 1\n  - nope\n'), ['a/*', 'b/*']);
   assert.equal(componentToken('@scope/My_Pkg'), 'my-pkg');

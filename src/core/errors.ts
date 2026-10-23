@@ -52,7 +52,6 @@ export const ERROR_CODES = {
     hint: "Install GitHub CLI and run 'gh auth login'; 'ghx doctor' checks the setup.",
   },
   ENV_GH_AUTH: { exit: ExitCode.ENV, hint: "Run 'gh auth login' (a human must do this)." },
-  ENV_GH_TOO_OLD: { exit: ExitCode.ENV, hint: "Upgrade GitHub CLI; 'ghx doctor' shows the minimum version." },
   ENV_GIT_MISSING: { exit: ExitCode.ENV, hint: 'Install git.' },
 
   // ── 5 NOT_FOUND ──────────────────────────────────────────────────────────

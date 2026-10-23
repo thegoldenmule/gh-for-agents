@@ -26,6 +26,13 @@ export default defineCommand({
   }),
   examples: [{ argv: 'ghx init --dry-run' }, { argv: 'ghx init --component reactor --component codegen' }],
   async run(input, ctx) {
+    // Without git there is no toplevel to find; say so rather than "not a checkout".
+    if (!(await ctx.git.available())) {
+      throw new GhxError(
+        'ENV_GIT_MISSING',
+        'ghx init needs git to find the repository root, and git is not installed.',
+      );
+    }
     const toplevel = await ctx.git.toplevel();
     if (!toplevel) {
       throw new GhxError('REPO_NOT_FOUND', 'ghx init must run inside a git checkout.', {
