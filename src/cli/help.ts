@@ -18,6 +18,12 @@ function flagLine(g: (typeof GLOBAL_FLAGS)[number]): string {
 }
 
 export function globalHelp(specs: readonly AnyCommandSpec[], version: string): Record<string, unknown> {
+  // A `timeout: null` command has no deadline and rejects --timeout; say so where the flag is listed.
+  const noDeadline = specs.filter((s) => s.timeout === null).map(commandName);
+  const line = (g: (typeof GLOBAL_FLAGS)[number]): string =>
+    g.flag === '--timeout' && noDeadline.length > 0
+      ? `${flagLine(g)} (not ${noDeadline.join(', ')}: no deadline)`
+      : flagLine(g);
   return {
     name: 'ghx',
     version,
@@ -28,7 +34,7 @@ export function globalHelp(specs: readonly AnyCommandSpec[], version: string): R
       'stdout is one JSON document; errors are {error:{code,message,hint,details}}, exit non-zero.',
       'Large artifacts are written to files; the result carries their paths.',
     ],
-    globalFlags: GLOBAL_FLAGS.map(flagLine),
+    globalFlags: GLOBAL_FLAGS.map(line),
     commands: Object.fromEntries(
       [...specs.map((s) => ({ name: commandName(s), kind: s.kind, summary: s.summary })), ...BUILTINS].map((c) => [
         c.name,

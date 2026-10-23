@@ -16,6 +16,24 @@ test('ghx --help is one JSON document under 4 KB', async () => {
   assert.equal(JSON.parse(r.stdout).name, 'ghx');
 });
 
+test('the global --timeout line names every command that takes no --timeout (help timeout:null)', async () => {
+  const global = JSON.parse((await spawnGhx(['--help'])).stdout) as {
+    globalFlags: string[];
+    commands: Record<string, string>;
+  };
+  const line = global.globalFlags.find((f) => f.startsWith('--timeout')) ?? '';
+  const none: string[] = [];
+  for (const name of Object.keys(global.commands)) {
+    if (name === 'help' || name === 'schema') continue;
+    const help = JSON.parse((await spawnGhx([...name.split(' '), '--help'])).stdout) as { timeout: unknown };
+    if (help.timeout === null) none.push(name);
+  }
+  assert.ok(none.includes('ci wait'), `ci wait has no deadline: ${none}`);
+  for (const name of none) assert.ok(line.includes(name), `${line} should name ${name}`);
+  const r = await spawnGhx(['ci', 'wait', 'o/r#1', '--timeout', '1m']);
+  assert.equal(JSON.parse(r.stdout).error.code, 'USAGE_UNKNOWN_FLAG', 'the note matches the parser');
+});
+
 test('<cmd> --schema and ghx schema make no gh calls (the fake gh log stays empty)', async () => {
   const log = join(tmp, 'calls.ndjson');
   const env = { GHX_FAKE_SCENARIO: 'doctor-ok', GHX_FAKE_LOG: log };
