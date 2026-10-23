@@ -174,3 +174,10 @@ Filled in by the wave 1 bootstrap agent (commits `f29f2eb`..`3cd7603`).
   - New non-overridable policy blocker `NO_MERGE_PERMISSION`. It fails closed, so it also blocks when GitHub reports `viewerPermission: null`. Its hint must say so.
   - `ci wait --until mergeable` keeps its 6–12 scope and doesn't evaluate it.
 - **2026-10-23, project-scope install target.** `ghx install`/`uninstall --scope project` write `<git toplevel>/.claude/settings.local.json`, not `.claude/settings.json`, because the hook command holds machine-specific absolute paths. CLAUDE.md stays at the repo root. Install warns `SETTINGS_LOCAL_NOT_IGNORED` (replacing `INSTALL_PROJECT_ABSOLUTE_PATHS`) when git doesn't ignore that file, and never edits `.gitignore`; doctor also reads a hand-installed `.claude/settings.json` as `install.project.shared`.
+- **2026-10-23, enforcement scope (user decision).** Write-blocking applies only in repos with `.github/ghx.json`.
+  - User-scope `ghx install` adds the PreToolUse hook and the marked CLAUDE.md block, but **no** `permissions.deny` rules.
+  - The hook resolves the repo from the event's `cwd` using a filesystem walk only (no gh, no git spawn, <100 ms). It enforces (write deny, read suggestions) only when that repo has `.github/ghx.json`, and is silent elsewhere.
+  - The `ci wait` `run_in_background` rewrite applies everywhere, because it only fires on `ghx ci wait`.
+  - `--scope project` keeps adding the deny rules (`settings.local.json`).
+  - The snippet says to use ghx in repos with a ghx config.
+  - Uninstall removes exactly what install added: it keeps a manifest or uses backup matching, and never removes the user's own identical rules.
