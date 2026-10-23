@@ -288,3 +288,132 @@ test('the hook command it writes runs without PATH and denies a raw gh write', a
   assert.equal(reply.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(reply.hookSpecificOutput.permissionDecisionReason, /ghx pr merge 12/);
 });
+
+// ── ghx uninstall ───────────────────────────────────────────────────────────────
+
+test('uninstall restores the original byte for byte when ghx was the only change, keeping its empty PreToolUse', async () => {
+  const md = '# Global rules\n\n- be brief\n';
+  const h = home({ 'settings.json': EXISTING, 'CLAUDE.md': md });
+  const bin = join(tmp, `bin-${n++}`);
+  mkdirSync(bin);
+  const env = { HOME: h.home };
+  assert.equal((await run(['install', '--hook-mode', 'deny', '--bin-dir', bin], env)).exitCode, 0);
+  assert.notEqual(read(h.settings), EXISTING);
+  const r = await run(['uninstall', '--bin-dir', bin], env);
+  assert.equal(r.exitCode, 0, r.stdout);
+  assert.equal(read(h.settings), EXISTING, 'EXISTING had "PreToolUse": [] and keeps it');
+  assert.equal(read(h.claudeMd), md);
+  assert.ok(!existsSync(join(bin, 'ghx')));
+  assert.equal(r.json.binLink.action, 'removed');
+  assert.deepEqual(r.json.denyRules, GHX_DENY_RULES);
+  assert.match(r.json.hookCommand, /hook claude-pretooluse$/);
+  assert.ok(r.json.files.every((f: { action: string; backup: string | null }) => f.action === 'updated' && f.backup));
+  // Idempotent: a second uninstall changes nothing and makes no new backups.
+  const count = backups(h.dir).length;
+  const again = await run(['uninstall', '--bin-dir', bin], env);
+  assert.deepEqual(again.json.changed, []);
+  assert.equal(again.json.binLink.action, 'absent');
+  assert.equal(backups(h.dir).length, count);
+});
+
+test('uninstall after a fresh install removes the files ghx created, and drops containers it created', async () => {
+  const h = home();
+  assert.equal((await run(['install'], { HOME: h.home })).exitCode, 0);
+  const r = await run(['uninstall'], { HOME: h.home });
+  assert.equal(r.exitCode, 0, r.stdout);
+  assert.deepEqual(
+    r.json.files.map((f: { action: string }) => f.action),
+    ['removed', 'removed'],
+  );
+  assert.ok(!existsSync(h.settings) && !existsSync(h.claudeMd));
+  // A settings file without the containers gets none back.
+  const other = home({ 'settings.json': '{\n  "model": "opus"\n}\n' });
+  await run(['install', '--no-snippet'], { HOME: other.home });
+  await run(['uninstall'], { HOME: other.home });
+  assert.equal(read(other.settings), '{\n  "model": "opus"\n}\n');
+});
+
+test('uninstall leaves user-added deny rules, hooks and env alone', async () => {
+  const h = home({ 'settings.json': EXISTING });
+  await run(['install', '--no-snippet'], { HOME: h.home });
+  const s = json(h.settings);
+  s.permissions.deny.push('Bash(git push:*)');
+  s.hooks.PreToolUse.push({ matcher: 'Bash', hooks: [{ type: 'command', command: 'audit' }] });
+  s.env.EXTRA = '1';
+  writeFileSync(h.settings, `${JSON.stringify(s, null, 2)}\n`);
+  const r = await run(['uninstall'], { HOME: h.home });
+  assert.equal(r.exitCode, 0, r.stdout);
+  const out = json(h.settings);
+  assert.deepEqual(out.permissions.deny, ['Bash(rm -rf:*)', 'Bash(git push:*)']);
+  assert.deepEqual(out.hooks.PreToolUse, [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'audit' }] }]);
+  assert.deepEqual(out.env, { FOO: 'bar', EXTRA: '1' });
+  assert.deepEqual(out.hooks.PostToolUse, JSON.parse(EXISTING).hooks.PostToolUse);
+});
+
+test('uninstall --dry-run writes nothing; a foreign bin file is left alone with a warning', async () => {
+  const h = home({ 'CLAUDE.md': '# Mine\n' });
+  await run(['install'], { HOME: h.home });
+  const s = read(h.settings);
+  const m = read(h.claudeMd);
+  const bin = join(tmp, `bin-${n++}`);
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'ghx'), 'other');
+  const r = await run(['uninstall', '--dry-run', '--bin-dir', bin], { HOME: h.home });
+  assert.equal(r.exitCode, 0, r.stdout);
+  assert.equal(r.json.dryRun, true);
+  assert.deepEqual(
+    r.json.wouldRun.map((w: { action: string }) => w.action),
+    ['removed', 'updated'],
+  );
+  assert.match(r.json.wouldRun[1].diff, /^-<!-- ghx:begin -->$/m);
+  assert.equal(read(h.settings), s);
+  assert.equal(read(h.claudeMd), m);
+  assert.equal(r.json.binLink.action, 'unchanged');
+  assert.ok(r.json.warnings.some((w: { code: string }) => w.code === 'INSTALL_BIN_FOREIGN'));
+  assert.equal(read(join(bin, 'ghx')), 'other');
+});
+
+test('uninstall refuses invalid settings JSON untouched', async () => {
+  const h = home({ 'settings.json': '{,}' });
+  const r = await run(['uninstall'], { HOME: h.home });
+  assert.equal(r.json.error.code, 'INSTALL_SETTINGS_INVALID');
+  assert.equal(read(h.settings), '{,}');
+});
+
+// ── ghx doctor's install check ─────────────────────────────────────────────────
+
+test('doctor reports the install per scope, informationally, and flags a hook whose paths are gone', async () => {
+  const h = home();
+  const repo = join(tmp, `repo-${n++}`);
+  mkdirSync(repo);
+  const git = fakeGit({ toplevel: repo });
+  const before = await run(['doctor'], { HOME: h.home }, { git });
+  assert.notEqual(before.exitCode, 1, before.stdout);
+  assert.deepEqual(before.json.install.user.hook, { installed: false, command: null, missingPaths: [] });
+  assert.equal(before.json.install.user.status, 'missing');
+  assert.equal(before.json.install.project.settings, join(repo, '.claude', 'settings.json'));
+  assert.ok(!before.json.checks.some((c: { name: string }) => c.name.includes('install')), 'not a failing check');
+
+  await run(['install'], { HOME: h.home });
+  const after = await run(['doctor'], { HOME: h.home }, { git });
+  assert.equal(after.exitCode, before.exitCode, 'the install never changes doctor’s exit code');
+  const u = after.json.install.user;
+  assert.equal(u.status, 'ok');
+  assert.equal(u.hook.installed, true);
+  assert.deepEqual(u.hook.missingPaths, []);
+  assert.deepEqual(u.deny, { present: GHX_DENY_RULES.length, total: GHX_DENY_RULES.length, missing: [] });
+  assert.equal(u.claudeMd.block, true);
+  assert.equal(after.json.install.project.hook.installed, false);
+
+  // A hook pointing at a node that has since been removed is reported, and doctor still does not fail on it.
+  const s = json(h.settings);
+  s.hooks.PreToolUse[0].hooks[0].command = `'/gone/node' '${GHX_BIN}' hook claude-pretooluse`;
+  writeFileSync(h.settings, JSON.stringify(s));
+  const stale = await run(['doctor'], { HOME: h.home }, { git });
+  assert.deepEqual(stale.json.install.user.hook.missingPaths, ['/gone/node']);
+  assert.ok(stale.json.warnings.some((w: { code: string }) => w.code === 'INSTALL_HOOK_STALE'));
+  assert.equal(stale.exitCode, before.exitCode);
+
+  const none = await run(['doctor'], {});
+  assert.deepEqual(none.json.install, { user: null, project: null });
+});

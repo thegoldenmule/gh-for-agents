@@ -20,6 +20,7 @@ Every command prints one JSON document (or a spill result). Errors are `{"error"
 - [`ghx pr resolve`](#ghx-pr-resolve) (write): Set the status of findings or preconditions (append-only event; resolves the review thread)
 - [`ghx pr review`](#ghx-pr-review) (write): Post a review: verdict, inline findings in the diff, hidden blocks, pinned to the head
 - [`ghx pr status`](#ghx-pr-status) (read): One object: description, block, merge readiness, CI for the head, feedback, preconditions, stack
+- [`ghx uninstall`](#ghx-uninstall) (write): Remove what ghx install added to Claude Code settings and CLAUDE.md (try --dry-run).
 - [`ghx version`](#ghx-version) (read): Print the ghx version, Node version and platform (no gh calls).
 
 ## Passthrough reads
@@ -465,6 +466,30 @@ Examples:
 - `ghx pr status 12 --no-wait-mergeable`: Read mergeable once, even if GitHub says UNKNOWN
 
 Schema: `ghx pr status --schema`.
+
+## ghx uninstall
+
+Remove what ghx install added to Claude Code settings and CLAUDE.md (try --dry-run).
+
+`ghx uninstall [flags]`
+
+write, single document, timeout 1m (max 5m).
+
+Removes only the ghx PreToolUse hook, the exact ghx deny rules, a GHX_HOOK_MODE of ask|deny|off, the marked CLAUDE.md block, and with --bin-dir a ghx link into this checkout. Every other setting stays. Containers it empties are dropped unless a ghx backup shows they existed. Backs up each changed file; a file left empty is removed. --dry-run returns unified diffs and writes nothing.
+
+Flags:
+
+- `--scope <user|project>` (default `"user"`): user (~/.claude) or project (repo .claude/)
+- `--bin-dir <string>`: Also remove <dir>/ghx if it links to this checkout
+
+Input: Flags and positionals only; --input file.json is also accepted.
+
+Examples:
+
+- `ghx uninstall --dry-run`: Show the diffs first
+- `ghx uninstall --bin-dir ~/.local/bin`
+
+Schema: `ghx uninstall --schema`.
 
 ## ghx version
 

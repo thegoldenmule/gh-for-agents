@@ -78,6 +78,7 @@ Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then co
 - `ghx pr resolve` (write): Set the status of findings or preconditions (append-only event; resolves the review thread)
 - `ghx pr review` (write): Post a review: verdict, inline findings in the diff, hidden blocks, pinned to the head
 - `ghx pr status` (read): One object: description, block, merge readiness, CI for the head, feedback, preconditions, stack
+- `ghx uninstall` (write): Remove what ghx install added to Claude Code settings and CLAUDE.md (try --dry-run).
 - `ghx version` (read): Print the ghx version, Node version and platform (no gh calls).
 
 Full reference: `ghx <cmd> --help`, or docs/agents/commands.md in the ghx repo.

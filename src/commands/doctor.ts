@@ -11,6 +11,7 @@ import { GhFailure } from '../gh/index.ts';
 import { type ResolvedRepo, resolveCwdRepo } from '../gh/repo.ts';
 import { DEFAULT_HOST, repoSlug } from '../gh/types.ts';
 import { MIN_GH_VERSION, versionAtLeast } from '../gh/version.ts';
+import { InstallReport, inspectInstall } from '../install/inspect.ts';
 
 const Check = z.object({ name: z.string(), ok: z.boolean(), message: z.string(), hint: z.string().nullable() });
 
@@ -35,6 +36,7 @@ const Output = z.object({
     issues: z.array(z.unknown()).optional(),
   }),
   checks: z.array(Check),
+  install: InstallReport,
 });
 type Output = z.output<typeof Output>;
 
@@ -271,6 +273,17 @@ export default defineCommand({
       }
     }
 
-    return { ok: checks.every((c) => c.ok), gh, auth, git, config, checks };
+    // ghx install state (informational: never part of ok or the exit code).
+    const install = await inspectInstall(ctx.env, ctx.git);
+    for (const [scope, s] of Object.entries(install)) {
+      if (s?.hook.installed && s.hook.missingPaths.length > 0) {
+        ctx.warn({
+          code: 'INSTALL_HOOK_STALE',
+          message: `The ${scope} ghx hook runs ${s.hook.missingPaths.join(', ')}, which no longer exists; it fails open. Re-run ghx install${scope === 'project' ? ' --scope project' : ''}.`,
+        });
+      }
+    }
+
+    return { ok: checks.every((c) => c.ok), gh, auth, git, config, checks, install };
   },
 });

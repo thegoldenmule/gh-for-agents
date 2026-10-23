@@ -38,7 +38,7 @@ test('doctor ok: JSON shape, exit 0, and the fake gh saw the sanitized env', asy
   const r = await spawnGhx(['doctor'], { fakeGh: true, cwd, env: { ...f.env, GH_FORCE_TTY: '1', GH_PAGER: 'less' } });
   assert.equal(r.exitCode, EXIT.OK, r.stdout + r.stderr);
   const out = JSON.parse(r.stdout);
-  assert.deepEqual(Object.keys(out), ['ok', 'gh', 'auth', 'git', 'config', 'checks']);
+  assert.deepEqual(Object.keys(out), ['ok', 'gh', 'auth', 'git', 'config', 'checks', 'install']);
   assert.equal(out.git.repo, 'octo/widgets');
   assert.equal(out.config.status, 'valid');
   const calls = readFileSync(f.log, 'utf8')
