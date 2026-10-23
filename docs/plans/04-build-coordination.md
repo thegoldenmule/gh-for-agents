@@ -168,3 +168,8 @@ Filled in by the wave 1 bootstrap agent (commits `f29f2eb`..`3cd7603`).
   - **`pr feedback --open` never drops a blocking finding for being outdated**, with or without `--include-outdated`. "Blocks merge" is `openFindings`' definition: open at or above `merge.blockOnSeverity`, or addressed there with an unverified commit. `--include-outdated` governs only outdated findings that don't block.
   - **Acceptance scorer.** "≤5 GitHub calls end to end" is informational. A metric with nothing to measure reports `null`, not pass. Raw gh CI polling fails the CI-wait metric.
   - **`--schema` output** is exempt from spill, because it's documentation.
+- **2026-10-23, post-push fixes (`0dc974f`..`6669805`).**
+  - `pr status` derives the expected set exactly as `ci wait` does: required checks cached for 1 h, baselines via `baseline:v2:`. This supersedes the "pr status quiet branch… warn on a cache miss" decision, and `REQUIRED_CHECKS_UNCACHED` is removed.
+  - The interrupted `ci wait` summary carries `ci.observed:false` when nothing has been observed yet.
+  - New non-overridable policy blocker `NO_MERGE_PERMISSION`. It fails closed, so it also blocks when GitHub reports `viewerPermission: null`. Its hint must say so.
+  - `ci wait --until mergeable` keeps its 6–12 scope and doesn't evaluate it.
