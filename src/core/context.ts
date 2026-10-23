@@ -113,6 +113,7 @@ export function createContext(d: ContextDeps): BuiltContext {
     deadline: d.deadline,
     gh,
     git,
+    proc: d.proc,
     artifacts: d.artifacts,
     dryRun: d.dryRun,
     log: d.log,

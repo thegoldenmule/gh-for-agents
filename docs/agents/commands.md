@@ -219,7 +219,7 @@ Install the Claude Code hook and CLAUDE.md block, plus deny rules at project sco
 
 write, single document, timeout 1m (max 5m).
 
-User scope edits $CLAUDE_CONFIG_DIR (else ~/.claude)/settings.json and CLAUDE.md, adding the hook and the block but no deny rules: deny rules cannot be conditional, and the hook enforces only in repos with .github/ghx.json. A user-scope re-install removes deny rules an earlier ghx install added (warning INSTALL_DENY_REMOVED) and never the ones you added. Project scope edits .claude/settings.local.json (per machine, uncommitted) and CLAUDE.md at the git toplevel, and also merges the gh write deny rules (--no-deny skips them). Warns SETTINGS_LOCAL_NOT_IGNORED when git would not ignore that file. Keeps every other setting, backs up each changed file to <config dir>/ghx-install/<scope>-<hash>/backups/<name>.bak-ghx-<time> (never into the repo; files[].backup gives each path) beside the record of what it added, and writes atomically. The hook runs this checkout by absolute path. Re-running updates in place; --dry-run returns unified diffs and writes nothing. Undo: ghx uninstall.
+User scope edits $CLAUDE_CONFIG_DIR (else ~/.claude)/settings.json and CLAUDE.md, adding the hook and the block but no deny rules: deny rules cannot be conditional, and the hook enforces only in repos with .github/ghx.json. A user-scope re-install removes deny rules an earlier ghx install added (warning INSTALL_DENY_REMOVED) and never the ones you added. Project scope edits .claude/settings.local.json (per machine, uncommitted) and CLAUDE.md at the git toplevel, and also merges the gh write deny rules (--no-deny skips them). Warns SETTINGS_LOCAL_NOT_IGNORED when git would not ignore that file. Keeps every other setting, backs up each changed file to <config dir>/ghx-install/<scope>-<hash>/backups/<name>.bak-ghx-<time> (never into the repo; files[].backup gives each path) beside the record of what it added, and writes atomically. The hook runs this ghx by absolute path. Run from npx, it first runs npm i -g @thegoldenmule/ghx@<this version> and hands the install to that global copy (handoff); --no-global refuses instead. Re-running updates in place; --dry-run returns unified diffs and writes nothing. Undo: ghx uninstall.
 
 Flags:
 
@@ -229,6 +229,7 @@ Flags:
 - `--snippet` (default `true`): Add the CLAUDE.md block; --no-snippet skips it
 - `--bin-dir <string>`: Also symlink <dir>/ghx to bin/ghx.js (recorded, so uninstall removes it without the flag)
 - `--hook-mode <ask|deny>`: deny sets env.GHX_HOOK_MODE=deny; ask removes it (the default mode)
+- `--global` (default `true`): From npx: install ghx globally first (default); --no-global refuses instead
 
 Input: Flags and positionals only; --input file.json is also accepted.
 

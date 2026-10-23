@@ -53,6 +53,8 @@ export const ERROR_CODES = {
   },
   ENV_GH_AUTH: { exit: ExitCode.ENV, hint: "Run 'gh auth login' (a human must do this)." },
   ENV_GIT_MISSING: { exit: ExitCode.ENV, hint: 'Install git.' },
+  // ghx install from the npx cache installs ghx globally with npm first.
+  ENV_NPM_MISSING: { exit: ExitCode.ENV, hint: 'Install Node.js with npm, or install ghx globally yourself.' },
   // Printed by bin/ghx.js itself, before anything else loads.
   ENV_NODE_UNSUPPORTED: {
     exit: ExitCode.ENV,
@@ -63,6 +65,10 @@ export const ERROR_CODES = {
   INSTALL_CLAUDE_MD_INVALID: { exit: ExitCode.ENV, hint: 'Fix the ghx marker lines by hand, then run it again.' },
   INSTALL_BIN_CONFLICT: { exit: ExitCode.ENV, hint: 'Move the existing file, or pass a different --bin-dir.' },
   INSTALL_HOME_UNKNOWN: { exit: ExitCode.ENV, hint: 'Set HOME or CLAUDE_CONFIG_DIR, or use --scope project.' },
+  INSTALL_GLOBAL_FAILED: {
+    exit: ExitCode.ENV,
+    hint: 'Read the npm output in details, fix it, and run it again; or install ghx globally yourself.',
+  },
   INSTALL_NOT_WRITABLE: { exit: ExitCode.ENV, hint: 'Make the file or its directory writable, then run it again.' },
 
   // ── 5 NOT_FOUND ──────────────────────────────────────────────────────────

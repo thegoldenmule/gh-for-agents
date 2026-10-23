@@ -6,6 +6,7 @@ import type { Gh } from '../gh/index.ts';
 import type { RepoNeed, ResolvedRepo } from '../gh/repo.ts';
 import type { RepoRef } from '../gh/types.ts';
 import type { Git } from '../git/index.ts';
+import type { ProcessRunner } from '../proc/runner.ts';
 import type { ArtifactStore } from './artifacts.ts';
 import type { Clock } from './clock.ts';
 import type { ExitCode } from './exit.ts';
@@ -127,6 +128,8 @@ export interface Context {
   /** Read mode for read commands (mutations throw), write mode otherwise. */
   readonly gh: Gh;
   readonly git: Git;
+  /** The raw process seam, for programs other than gh and git (ghx install runs npm). Not mode-guarded. */
+  readonly proc: ProcessRunner;
   readonly artifacts: ArtifactStore;
   /** --dry-run (write commands only). Local fs writes must check it themselves. */
   readonly dryRun: boolean;

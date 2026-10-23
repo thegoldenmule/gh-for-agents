@@ -51,6 +51,16 @@ export const InstallOutput = z.object({
     .array(z.object({ path: z.string(), action: Action, diff: z.string() }))
     .optional()
     .describe('--dry-run only: each planned change as a unified diff'),
+  handoff: z
+    .object({
+      from: z.string().describe('The npx cache copy of ghx that ran'),
+      install: z.array(z.string()).describe('The global install it ran (or, with --dry-run, would run)'),
+      prefix: z.string().describe('npm prefix -g'),
+      bin: z.string().describe('The global ghx that ran the install'),
+      args: z.array(z.string()).describe('What it ran that ghx with'),
+    })
+    .optional()
+    .describe('Run from npx: ghx installed itself globally and handed the install to that copy'),
   next: z.array(z.string()),
 });
 export type InstallOutput = z.input<typeof InstallOutput>;

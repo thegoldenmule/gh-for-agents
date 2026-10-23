@@ -212,6 +212,7 @@ step('ghx doctor sees the install, with no hook warnings', () => {
   const d = json(run(ghx, ['doctor'], { env: ghxEnv(home), cwd: work }), 'ghx doctor');
   assert.equal(d.install.user.hook.installed, true);
   assert.deepEqual(d.install.user.hook.missingPaths, []);
+  assert.equal(d.install.user.hook.version, PKG.version);
   const hookWarnings = (d.warnings ?? []).filter((w: { code: string }) => w.code.startsWith('INSTALL_HOOK_'));
   assert.deepEqual(hookWarnings, []);
   return undefined;
@@ -221,6 +222,56 @@ step('ghx uninstall', () => {
   ok(run(ghx, ['uninstall'], { env: ghxEnv(home), cwd: work }), 'uninstall');
   assert.ok(!existsSync(settings), 'settings.json (created by install) is still there');
   assert.ok(!existsSync(claudeMd), 'CLAUDE.md (created by install) is still there');
+  return undefined;
+});
+
+// npx: a real run from a fresh npx cache (so from a real _npx path) installs into a second temp prefix
+// and hands off to it. GHX_TEST_GLOBAL_SPEC makes its npm i -g install the tarball, not the registry.
+const npxPrefix = join(TMP, 'prefix-npx');
+const npxHome = join(TMP, 'home-npx');
+mkdirSync(npxHome, { recursive: true });
+const npxEnv = (): Env => ({
+  ...npmEnv(npxPrefix, npxHome),
+  npm_config_cache: join(TMP, 'npx-cache'),
+  npm_config_yes: 'true',
+  GHX_TEST_GLOBAL_SPEC: tarball,
+});
+const npx = (args: string[]) =>
+  run('npx', ['--yes', '--package', tarball, '--', 'ghx', ...args], { env: npxEnv(), cwd: work });
+const npxSettings = join(npxHome, '.claude', 'settings.json');
+const npxGhx = join(npxPrefix, 'bin', 'ghx');
+
+step('npx ghx install --dry-run: reports the global install, runs nothing', () => {
+  const d = json(ok(npx(['install', '--dry-run']), 'npx install --dry-run'), 'npx install --dry-run');
+  assert.equal(d.dryRun, true);
+  assert.deepEqual(d.handoff?.install, ['npm', 'i', '-g', tarball]);
+  assert.ok(d.handoff.from.includes('/_npx/'), d.handoff.from);
+  assert.ok(!existsSync(npxGhx), 'dry run installed globally');
+  assert.ok(!existsSync(npxSettings), 'dry run wrote settings.json');
+  return d.handoff.from;
+});
+
+step('npx ghx install: installs globally, hands off, and the hook points at the global copy', () => {
+  const d = json(ok(npx(['install']), 'npx install'), 'npx install');
+  assert.ok(existsSync(npxGhx), `${npxGhx} was not installed`);
+  const [command, ...more] = hookCommands(npxSettings);
+  assert.equal(more.length, 0);
+  const want = join(realpathSync(npxPrefix), 'lib', 'node_modules', ...PKG.name.split('/'), 'bin', 'ghx.js');
+  assert.ok(command?.includes(want), `hook command ${command} does not run ${want}`);
+  assert.ok(!command?.includes('_npx'), command);
+  assert.equal(d.hookCommand, command);
+  assert.equal(d.handoff.bin, npxGhx);
+  return command;
+});
+
+step('the handed-off install: doctor is clean and uninstall removes it', () => {
+  const d = json(run(npxGhx, ['doctor'], { env: ghxEnv(npxHome), cwd: work }), 'ghx doctor');
+  assert.equal(d.install.user.hook.installed, true);
+  assert.equal(d.install.user.hook.version, PKG.version);
+  const hookWarnings = (d.warnings ?? []).filter((w: { code: string }) => w.code.startsWith('INSTALL_HOOK_'));
+  assert.deepEqual(hookWarnings, []);
+  ok(run(npxGhx, ['uninstall'], { env: ghxEnv(npxHome), cwd: work }), 'uninstall');
+  assert.ok(!existsSync(npxSettings));
   return undefined;
 });
 

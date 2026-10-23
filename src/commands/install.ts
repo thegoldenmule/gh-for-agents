@@ -15,10 +15,12 @@ import {
   type FileChange,
   hookCommand,
   planBinLink,
+  REPO_ROOT,
   readOrNull,
   resolveTargets,
   SNIPPET_PATH,
 } from '../install/files.ts';
+import { handoff, runsFromNpx } from '../install/npx.ts';
 import {
   type Manifest,
   manifestPath,
@@ -52,7 +54,8 @@ export default defineCommand({
     '(--no-deny skips them). Warns ' +
     'SETTINGS_LOCAL_NOT_IGNORED when git would not ignore that file. Keeps every other setting, backs up each changed ' +
     'file to <config dir>/ghx-install/<scope>-<hash>/backups/<name>.bak-ghx-<time> (never into the repo; ' +
-    'files[].backup gives each path) beside the record of what it added, and writes atomically. The hook runs this checkout by absolute path. ' +
+    'files[].backup gives each path) beside the record of what it added, and writes atomically. The hook runs this ghx by absolute path. ' +
+    'Run from npx, it first runs npm i -g @thegoldenmule/ghx@<this version> and hands the install to that global copy (handoff); --no-global refuses instead. ' +
     'Re-running updates in place; --dry-run returns unified diffs and writes nothing. Undo: ghx uninstall.',
   kind: 'write',
   needs: { repo: 'none', config: 'none' },
@@ -78,6 +81,10 @@ export default defineCommand({
       .enum(['ask', 'deny'])
       .optional()
       .describe('deny sets env.GHX_HOOK_MODE=deny; ask removes it (the default mode)'),
+    global: z
+      .boolean()
+      .default(true)
+      .describe('From npx: install ghx globally first (default); --no-global refuses instead'),
   }),
   output: InstallOutput,
   examples: [
@@ -91,6 +98,11 @@ export default defineCommand({
         hint: 'Deny rules apply in every repo and cannot be conditional; at user scope the hook enforces only in repos with .github/ghx.json. Use --scope project for deny rules in one repo.',
         details: { issues: [{ path: 'deny', code: 'scope', message: '--deny needs --scope project' }] },
       });
+    }
+    // From the npx cache: install globally and let that copy do the install, so the hook points there.
+    if (runsFromNpx(REPO_ROOT, ctx.env)) {
+      const out = await handoff(input, ctx, REPO_ROOT);
+      if (out) return out;
     }
     const deny = input.scope === 'project' && input.deny !== false;
     const targets = await resolveTargets(input.scope, ctx.env, ctx.git);
