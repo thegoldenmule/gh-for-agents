@@ -82,4 +82,4 @@ The `run_in_background` rewrite never carries a decision in any mode.
 
 **It fails open.** Any internal error, unparseable stdin, an unknown tool, or a missing `tool_input` exits 0 with no output, so a broken ghx never blocks the agent. It makes no gh or network calls, and loads only its own module, which keeps it well under the 100 ms budget.
 
-**Version note.** `updatedInput` without a permission decision was verified on Claude Code 2.1.280 (03 §3.6). Re-check it after a Claude Code upgrade with `node scripts/spike-hook.ts`, which works in a temp directory and never touches your settings.
+**Version note.** `updatedInput` without a permission decision was verified on Claude Code 2.1.280. Re-check it after a Claude Code upgrade with `node scripts/spike-hook.ts`, which works in a temp directory and never touches your settings.

@@ -33,7 +33,7 @@ const OUTPUT_MARGIN_MS = 15_000;
 const Input = z.strictObject({
   pr: z.string().min(1).describe('PR: 3198, #3198, owner/repo#3198 or a PR URL'),
   job: z.array(z.string().min(1)).optional().describe('Only failed jobs whose name matches (repeatable; * and ?)'),
-  flaky: z.boolean().default(false).describe('Only jobs whose flake score is medium or higher (02 §11.8)'),
+  flaky: z.boolean().default(false).describe('Only jobs whose flake score is medium or higher'),
   expectHead: ShaInput.optional().describe('Refuse with HEAD_MOVED unless the head is this SHA'),
   override: z.array(z.string().min(1)).optional().describe('RERUN_LIMIT: rerun past ci.maxRerunAttempts'),
   reason: z.string().optional().describe('Why the override is allowed (who asked); required with --override'),

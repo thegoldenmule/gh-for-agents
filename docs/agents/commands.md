@@ -38,7 +38,7 @@ Reruns the failed jobs of completed Actions runs for the current head, skipping 
 Flags:
 
 - `--job <string>` (repeatable): Only failed jobs whose name matches (repeatable; * and ?)
-- `--flaky` (default `false`): Only jobs whose flake score is medium or higher (02 §11.8)
+- `--flaky` (default `false`): Only jobs whose flake score is medium or higher
 - `--expect-head <string>`: Refuse with HEAD_MOVED unless the head is this SHA
 - `--override <string>` (repeatable): RERUN_LIMIT: rerun past ci.maxRerunAttempts
 - `--reason <string>`: Why the override is allowed (who asked); required with --override
@@ -93,14 +93,14 @@ Wait for CI on a PR or branch; one JSON summary, exit code = outcome (run in bac
 
 read, stream, no deadline.
 
-Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then continue other work or end your turn. Do not poll, sleep, or use Monitor for CI. You will be re-invoked when it exits. Its stdout is the full answer and its exit code is the outcome (§6.1). The summary is never spilled: it is compacted to 16 KB, and --max-bytes and GHX_MAX_BYTES are ignored.
+Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then continue other work or end your turn. Do not poll, sleep, or use Monitor for CI. You will be re-invoked when it exits. Its stdout is the full answer and its exit code is the outcome. The summary is never spilled: it is compacted to 16 KB, and --max-bytes and GHX_MAX_BYTES are ignored.
 
 Flags:
 
 - `--until <first-failure|settled|mergeable>` (default `"first-failure"`): first-failure: return at the first new failure or settled green; settled: wait for everything; mergeable: settled, then the merge CI gate (PR targets only)
 - `--any` (default `false`): Return when the first target reaches a terminal state
 - `--on-head-change <restart|stop|stay>`: On a head change: restart (PR default), stop (exit 12) or stay (branch default)
-- `--check <string>` (repeatable): Only checks whose name matches (repeatable; globs)
+- `--check <string>` (repeatable): Only checks whose name matches (repeatable; globs); under --until mergeable, required checks always count
 - `--diagnose` (default `true`): Diagnose each failure as it lands; --no-diagnose skips it
 - `--compare-main` (default `true`): Compare failures with the default branch; --no-compare-main skips it
 - `--stream` (default `false`): Print every event as NDJSON (for humans; agents use the default)
@@ -251,7 +251,7 @@ Write the PR object with your file tool and pass --input pr.json. Draft and stac
 
 Flags:
 
-- `--batch`: Create several PRs from {defaults, items} (02 §2.4)
+- `--batch`: Create several PRs from {defaults, items}
 
 JSON-only fields: `title`, `description`, `testing`, `risk`, `riskNote`, `components`, `revertPolicy`, `revertNote`, `revertWith`, `base`, `head`, `draft`, `refs`, `defaults`, `items`.
 

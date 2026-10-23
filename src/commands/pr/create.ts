@@ -22,7 +22,7 @@ const jsonFields = Object.fromEntries(
 const Input = z
   .strictObject({
     ...jsonFields,
-    batch: z.boolean().optional().describe('Create several PRs from {defaults, items} (02 §2.4)'),
+    batch: z.boolean().optional().describe('Create several PRs from {defaults, items}'),
     defaults: BatchDefaults.optional(),
     items: z
       .array(BatchItem)

@@ -310,7 +310,7 @@ const PrEditInput = PrCreateInput.innerType().omit({ head: true }).partial().ext
 - **Merge.** `{...block, ...patch}`; arrays replace. The result is validated with the full `createRules` plus network checks, and `rev` is incremented.
 - **`NO_BLOCK`** unless the patch has `adopt:true` and the full object.
 - **`DESCRIPTION_DRIFT`** if the visible text was edited in the UI and the patch omits `description`. `--discard-ui-edits` overrides it.
-- **`CONCURRENT_EDIT`** if `updatedAt` or the body hash changed before the PATCH.
+- **`CONCURRENT_EDIT`** if the title or body changed before the PATCH. Only those two are compared, not `updatedAt`, which unrelated activity (a comment, a push, a label) also bumps.
 - **`draft:false`** replaces `gh pr ready` (12 calls).
 - **`base`** replaces `gh pr edit --base` (§3.2); warns `HAS_CHILDREN`.
 

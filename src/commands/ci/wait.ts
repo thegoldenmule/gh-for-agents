@@ -9,11 +9,11 @@ import { defineStreamCommand } from '../../core/command.ts';
 import type { ExitCode } from '../../core/exit.ts';
 import { WaitEvent, WaitSummary } from '../../schemas/ci.ts';
 
-/** 02 §11.0, verbatim (M12 asserts the same string in the agent docs). */
+/** 02 §11.0, verbatim but for the internal §6.1 citation (M12 asserts the same string in the agent docs). */
 export const PROTOCOL =
   'Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then continue other work or end ' +
   'your turn. Do not poll, sleep, or use Monitor for CI. You will be re-invoked when it exits. Its stdout is ' +
-  'the full answer and its exit code is the outcome (§6.1).';
+  'the full answer and its exit code is the outcome.';
 
 const Input = z.strictObject({
   targets: z
@@ -33,7 +33,12 @@ const Input = z.strictObject({
     .enum(['restart', 'stop', 'stay'])
     .optional()
     .describe('On a head change: restart (PR default), stop (exit 12) or stay (branch default)'),
-  check: z.array(z.string().min(1)).optional().describe('Only checks whose name matches (repeatable; globs)'),
+  check: z
+    .array(z.string().min(1))
+    .optional()
+    .describe(
+      'Only checks whose name matches (repeatable; globs); under --until mergeable, required checks always count',
+    ),
   diagnose: z.boolean().default(true).describe('Diagnose each failure as it lands; --no-diagnose skips it'),
   compareMain: z
     .boolean()
