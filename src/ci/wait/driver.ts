@@ -174,8 +174,12 @@ export async function* runWait(
   const returnAt = attended ? Number.POSITIVE_INFINITY : startedMono + UNATTENDED_RETURN_MS - offset;
 
   const globs = o.check ?? [];
-  const consider = (c: { name: string }) =>
-    globs.length === 0 || globs.some((g) => c.name === g || matchesGlob(c.name, g));
+  // --until mergeable evaluates the full required set (04, final review): a required check outside the
+  // --check filter still gates, else the wait settles without it and the gate spins at CI_PENDING.
+  const consider = (c: { name: string; required?: boolean; source?: string }) =>
+    globs.length === 0 ||
+    globs.some((g) => c.name === g || matchesGlob(c.name, g)) ||
+    (o.until === 'mergeable' && (c.required === true || c.source === 'required'));
   const cfg: MachineConfig = { until: o.until, ...WAIT_DEFAULTS, ...(globs.length > 0 ? { consider } : {}) };
 
   // Warnings: every one goes to diagnosisPath; the summary gets the first of each code, capped.

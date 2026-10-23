@@ -222,6 +222,25 @@ test('the gate uses the wait’s aged-out baselines: a missing baseline check do
   assert.ok(r.json.results[0].elapsedSec < 6 * 60, `${r.json.results[0].elapsedSec} s: gated before pr status's grace`);
 });
 
+test('--check does not narrow the required set: a required check outside the filter still gates', async () => {
+  // `build` is required but never registers. Filtering it out let the wait settle on `lint` and the gate
+  // spin at CI_PENDING until the cached required set expired (60 min), when `build` vanished: green.
+  const scenario = () => {
+    const lint = running(101, 'lint');
+    const sim = world([lint], { required: ['build'] });
+    change(sim, 3 * MIN, done(lint, 3 * MIN));
+    mirrorPr(sim, () => ['MERGEABLE', 'CLEAN']);
+    return sim;
+  };
+  const plain = await wait(scenario(), ['o/r#7', '--until', 'mergeable']);
+  const r = await wait(scenario(), ['o/r#7', '--until', 'mergeable', '--check', 'lint']);
+  assert.notEqual(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.exitCode, plain.exitCode, r.stdout);
+  assert.equal(r.json.results[0].outcome, plain.json.results[0].outcome);
+  assert.ok(r.json.results[0].elapsedSec < 30 * 60, `${r.json.results[0].elapsedSec} s: no CI_PENDING spin`);
+  assert.ok(r.json.results[0].ci.expectedMissing.includes('build'));
+});
+
 test('branch targets are refused with VALIDATION: a branch has no mergeable state', async () => {
   const sim = world([]);
   const r = await wait(sim, ['branch:main', '--until', 'mergeable', '-R', 'o/r']);
