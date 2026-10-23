@@ -17,6 +17,7 @@ import {
   okJson,
   REF,
   runMerge,
+  slowReplies,
   workedPr,
 } from './pr-merge-world.ts';
 
@@ -129,4 +130,14 @@ test('children that cannot be re-read fall back to the snapshot and keep the bra
   assert.match(warned(r, 'BRANCH_NOT_DELETED')?.message ?? '', /could not be read/);
   assert.equal(r.json.deletedBranch, false);
   fake.expectNoCall(isRefDelete);
+});
+
+test('runMerge never runs fake time past a slow job-log read, so the main comparison is not cut short', async () => {
+  // The race behind the flaky BRANCH_ALREADY_DELETED test: fake time outran real log I/O, the 60 s comparison
+  // budget expired, the shared red check lost its waiver and the merge was blocked.
+  const fake = installMerge();
+  slowReplies(fake, /\/actions\/jobs\/\d+\/logs$/, 300);
+  const r = await runMerge(['pr', 'merge', REF, '--delete-branch'], fake);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout.slice(0, 600));
+  assert.equal(warned(r, 'DIAGNOSIS_PARTIAL'), undefined);
 });

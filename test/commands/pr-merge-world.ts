@@ -1,7 +1,7 @@
 // The pr merge test world: the 02 §14 worked example (pr-status-world.ts; #3301, mergeable with its red
 // check waived as shared with main) plus the merge endpoints: the PUT, the REST re-read of the PR, the
 // fresh children list and the head ref. Tests override single replies with fake.on() after install().
-import { FakeClock } from '../helpers/fake-clock.ts';
+import { FakeClock, flush } from '../helpers/fake-clock.ts';
 import { FakeGh, type GhReply } from '../helpers/fake-gh.ts';
 import { HEAD } from '../unit/pr/snapshot-fixture.ts';
 import { httpReply, okJson } from './ci-why-world.ts';
@@ -82,13 +82,90 @@ export function puts(fake: FakeGh): Record<string, unknown>[] {
   return fake.calls.filter((c) => isPut(c.argv)).map((c) => JSON.parse(c.stdin ?? 'null') as Record<string, unknown>);
 }
 
-/** Run `ghx <argv>` while advancing the fake clock, so mergeable retries and verify polls complete. */
+/**
+ * Make gh replies whose endpoint matches `re` take `ms` of REAL time, as slow log reads do under a loaded
+ * test run. Fake time must not run past them: the main comparison's budget is a fake-clock timer.
+ */
+export function slowReplies(fake: FakeGh, re: RegExp, ms: number): void {
+  const runner = fake.runner.bind(fake);
+  fake.runner = (other) => {
+    const r = runner(other);
+    return async (req) => {
+      if (req.args.some((a) => re.test(a.split('?')[0] ?? ''))) await new Promise((ok) => setTimeout(ok, ms));
+      return r(req);
+    };
+  };
+}
+
+/** gh calls started and settled through `fake`, counted by a wrapper on its runner. */
+interface GhActivity {
+  started: number;
+  settled: number;
+  /** Calls that fetched a job or its log: real fs work (log analysis, caches) follows them. */
+  heavy: number;
+}
+
+const IO_HEAVY = /\/actions\/jobs\/\d+(\/logs)?$/;
+
+function track(fake: FakeGh): GhActivity {
+  const io: GhActivity = { started: 0, settled: 0, heavy: 0 };
+  const runner = fake.runner.bind(fake);
+  fake.runner = (other) => {
+    const r = runner(other);
+    return async (req) => {
+      io.started++;
+      if (req.args.some((a) => IO_HEAVY.test(a.split('?')[0] ?? ''))) io.heavy++;
+      try {
+        return await r(req);
+      } finally {
+        io.settled++;
+      }
+    };
+  };
+  return io;
+}
+
+const tick = (ms: number) => new Promise<void>((ok) => setTimeout(ok, ms));
+
+/**
+ * Real-time wait until no gh reply is in flight and, after a job or log fetch, until calls stop starting
+ * (the quiesce of ci-wait-world.ts: log analysis is real I/O that fake time must not outrun). Bounded, so a
+ * reply parked on a fake-clock delay cannot hang the driver.
+ */
+async function settle(io: GhActivity, heavySeen: number): Promise<void> {
+  for (let i = 0; i < 1_000 && io.started !== io.settled; i++) await tick(1);
+  if (io.heavy === heavySeen) return;
+  let last = -1;
+  let stable = 0;
+  for (let i = 0; i < 500 && stable < 5; i++) {
+    await tick(10);
+    const n = io.started === io.settled ? io.started : -2;
+    stable = n === last && n >= 0 ? stable + 1 : 0;
+    last = n;
+  }
+}
+
+/**
+ * Run `ghx <argv>` while advancing the fake clock, so mergeable retries and verify polls complete. Like
+ * ci-wait-world.ts's drive: fake time only advances once gh replies and the real I/O after log fetches have
+ * settled, so the main comparison's 60 s fake-clock budget never expires under a loaded test run.
+ */
 export async function runMerge(argv: string[], fake: FakeGh, clock = new FakeClock(NOW)) {
+  const io = track(fake);
   let done = false;
   const p = run(argv, fake, { clock }).finally(() => {
     done = true;
   });
-  await clock.runUntil(() => done, { stepMs: 500, maxMs: 120_000 });
+  const limit = clock.monotonic() + 120_000;
+  let heavySeen = 0;
+  await flush();
+  for (;;) {
+    await settle(io, heavySeen);
+    heavySeen = io.heavy;
+    if (done) break;
+    if (clock.monotonic() >= limit) throw new Error('runMerge: the command did not finish within 120 s of fake time');
+    await clock.advance(500);
+  }
   return p;
 }
 
