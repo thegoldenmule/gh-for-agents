@@ -1,16 +1,36 @@
 {
-  "name": "ghx",
+  "name": "@thegoldenmule/ghx",
   "version": "0.1.0",
-  "private": true,
   "description": "GitHub for agents: validated writes, one-call reads. Wraps gh.",
+  "license": "MIT",
+  "author": "Benjamin Jordan",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thegoldenmule/gh-for-agents.git"
+  },
+  "homepage": "https://github.com/thegoldenmule/gh-for-agents#readme",
+  "bugs": {
+    "url": "https://github.com/thegoldenmule/gh-for-agents/issues"
+  },
   "type": "module",
   "bin": {
     "ghx": "bin/ghx.js"
   },
+  "files": [
+    "bin/",
+    "dist/",
+    "docs/agents/claude-md-snippet.md",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=24"
   },
   "packageManager": "pnpm@12.5.1",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "typecheck": "tsc -p .",
     "lint": "biome check .",
@@ -26,7 +46,9 @@
     "fixtures:verify": "node scripts/fixtures/verify.ts",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
     "docs:gen": "node scripts/docs/gen.ts",
-    "docs:check": "node scripts/docs/gen.ts --check"
+    "docs:check": "node scripts/docs/gen.ts --check",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "prepublishOnly": "rm -rf dist && tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "zod": "^4.6.7"
