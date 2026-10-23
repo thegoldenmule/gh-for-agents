@@ -80,7 +80,9 @@
   "ci": {
     "expected": [
       { "name": "check (ubuntu-latest)", "workflow": "ci" },
-      { "name": "check (macos-latest)", "workflow": "ci" }
+      { "name": "check (macos-latest)", "workflow": "ci" },
+      { "name": "pack-test (ubuntu-latest)", "workflow": "ci" },
+      { "name": "pack-test (macos-latest)", "workflow": "ci" }
     ],
     "keySteps": ["Unit, command, regression tests", "Contract tests (spawn bin with fake gh)"]
   }

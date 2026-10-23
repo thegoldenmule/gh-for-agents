@@ -55,9 +55,9 @@ test('every file in the repo maps to at least one component', () => {
 test('ci.expected and ci.keySteps name real jobs and steps of .github/workflows/ci.yml', () => {
   const yml = readFileSync(join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
   const workflow = /^name:\s*(\S+)/m.exec(yml)?.[1];
-  const job = /^ {2}(\w[\w-]*):\n(?: {4}.*\n)*? {6}matrix: \{ os: \[([^\]]+)\] \}/m.exec(yml);
-  assert.ok(job, 'the check job and its os matrix');
-  const names = (job[2] ?? '').split(',').map((os) => `${job[1]} (${os.trim()})`);
+  const jobs = [...yml.matchAll(/^ {2}(\w[\w-]*):\n(?: {4}.*\n)*? {6}matrix: \{ os: \[([^\]]+)\] \}/gm)];
+  assert.ok(jobs.length > 0, 'the jobs and their os matrices');
+  const names = jobs.flatMap((job) => (job[2] ?? '').split(',').map((os) => `${job[1]} (${os.trim()})`));
   assert.deepEqual(
     (config.ci.expected ?? []).map((e) => [e.name, e.workflow]),
     names.map((n) => [n, workflow]),
