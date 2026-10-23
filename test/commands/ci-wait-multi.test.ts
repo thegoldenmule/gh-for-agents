@@ -47,6 +47,7 @@ test('--any returns at the first terminal target; the others are pending', async
     ],
   );
   assert.deepEqual(s.results[0]?.next, ['ghx ci wait o/r#1 o/r#2 --any']);
+  assert.equal(s.results[0]?.reason, 'any-satisfied', 'not an unattended self-return');
 });
 
 test('without --any every target finishes, and the exit follows the precedence (red beats green)', async () => {

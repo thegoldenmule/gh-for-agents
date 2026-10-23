@@ -7,7 +7,7 @@ import { SUITES_QUERY } from '../../src/ci/wait/poller.ts';
 import { WaitEvent, WaitSummary } from '../../src/schemas/ci.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeClock } from '../helpers/fake-clock.ts';
-import { GitHubSim, type SimJob, type SimState, sha, wait } from './ci-wait-world.ts';
+import { GitHubSim, type ProcResultLike, type SimJob, type SimState, sha, wait } from './ci-wait-world.ts';
 
 const H = sha('a');
 const MIN = 60_000;
@@ -361,6 +361,27 @@ test('one check set: a reviewer app on the previous head is no baseline, so sett
   assert.equal(r.exitCode, EXIT.OK, r.stdout.slice(0, 300));
   assert.ok(r.json.results[0].elapsedSec < 3 * 60 + 30, `${r.json.results[0].elapsedSec}s: no 90 s expect-grace`);
   assert.ok(!events(r).some((e) => e.type === 'expected-absent'), 'copilot was never expected');
+});
+
+test('a warning message reaches the summary capped at 300 characters (the full text stays on disk)', async () => {
+  const t = running(331, 'test');
+  const { sim } = world([t]);
+  change(sim, 2 * MIN, done(t, 2 * MIN));
+  const message = `Resource not accessible: ${'x'.repeat(1_000)}`;
+  sim.override(
+    (argv) => argv.some((a) => a.includes('/rules/branches/')),
+    (): ProcResultLike => ({
+      status: 403,
+      exitCode: 1,
+      stdout: `HTTP/2.0 403 Forbidden\r\nContent-Type: application/json\r\n\r\n${JSON.stringify({ message })}`,
+      stderr: `gh: ${message} (HTTP 403)\n`,
+    }),
+  );
+  const r = await wait(sim, ['o/r#7']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout.slice(0, 300));
+  const w = (r.json.warnings as { code: string; message: string }[]).find((x) => x.code === 'EXPECTED_CHECKS_PARTIAL');
+  assert.ok(w, JSON.stringify(r.json.warnings).slice(0, 300));
+  assert.ok(w.message.length <= 300, `${w.message.length} chars`);
 });
 
 test('ci wait caches the base branch’s required checks for pr status’s quiet read', async () => {

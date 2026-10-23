@@ -75,6 +75,8 @@ export const MAX_TICK_FAILURES = 5;
 const WARNINGS_RESERVE_BYTES = 3_072;
 /** At most this many distinct warnings reach the summary; all of them go to diagnosisPath. */
 const MAX_SUMMARY_WARNINGS = 8;
+/** A summary warning's message is cut to this many characters; diagnosisPath keeps the full text. */
+export const MAX_WARNING_CHARS = 300;
 
 export interface WaitOptions {
   targets: string[];
@@ -189,7 +191,9 @@ export async function* runWait(
     allWarnings.push(w);
     if (shownCodes.has(w.code) || shownCodes.size >= MAX_SUMMARY_WARNINGS) return;
     shownCodes.add(w.code);
-    ctx.warn(w);
+    ctx.warn(
+      w.message.length <= MAX_WARNING_CHARS ? w : { ...w, message: `${w.message.slice(0, MAX_WARNING_CHARS - 1)}…` },
+    );
   };
 
   /** `branch:<name>@<short sha>` binds the full SHA (state keys and events carry 40 chars). */
@@ -388,6 +392,7 @@ export async function* runWait(
       summary: r.summary,
       until: o.until,
       check: [...globs].sort(),
+      compareMain: o.compareMain,
     };
     save(r);
   };
@@ -594,8 +599,8 @@ export async function* runWait(
   async function* diagnoseNew(r: Run, st: WaitState, failures: readonly Check[]): AsyncGenerator<WaitEventOut> {
     if (!o.diagnose) return;
     for (const c of failures) {
-      if (!isDiagnosable(c) || st.diagnoses[String(c.jobId)]) continue;
-      if (Object.keys(st.diagnoses).length >= DIAGNOSIS_MAX_JOBS) return;
+      if (!isDiagnosable(c) || !needsDiagnosis(st, c)) continue;
+      if (!st.diagnoses[String(c.jobId)] && Object.keys(st.diagnoses).length >= DIAGNOSIS_MAX_JOBS) return;
       const left = DIAGNOSIS_BUDGET_MS - st.diagnosis.spentMs;
       if (left <= 0) {
         st.diagnosis.partial = true;
@@ -619,6 +624,10 @@ export async function* runWait(
       st.diagnosis.spentMs += spent;
       if (spent >= left) st.diagnosis.partial = true;
       st.diagnoses[String(c.jobId)] = job;
+      const uncompared = new Set(st.diagnosis.uncompared);
+      if (o.compareMain) uncompared.delete(String(c.jobId));
+      else uncompared.add(String(c.jobId));
+      st.diagnosis.uncompared = [...uncompared];
       save(r);
       yield { type: 'diagnosis', target: r.label, headSha: st.boundSha, job: eventDiagnosis(job) };
     }
@@ -728,7 +737,7 @@ export async function* runWait(
     }
     yield* ob.events;
     // Failures seen before (a resumed state) whose diagnosis was cut off are retried here too.
-    const undiagnosed = checks.filter((c) => isRed(c) && c.jobId !== null && !st.diagnoses[String(c.jobId)]);
+    const undiagnosed = checks.filter((c) => isRed(c) && c.jobId !== null && needsDiagnosis(st, c));
     yield* diagnoseNew(r, st, [...ob.newFailures, ...undiagnosed.filter((c) => !ob.newFailures.includes(c))]);
 
     await ensureTimeouts(r, st, checks);
@@ -782,13 +791,22 @@ export async function* runWait(
 
   /**
    * A stored terminal answers the identical question only when CI had settled (an early red continues to
-   * the next failure), --until and --check match, and, for mergeable, the PR was ready: a merge-blocked
+   * the next failure), --until and --check match, it compared with main if this run does, and, for mergeable, the PR was ready: a merge-blocked
    * red can clear without a new commit (an approval), so it is re-gated.
    */
   function honoured(t: NonNullable<WaitState['terminal']>): boolean {
     if (!t.settled || (t.check ?? []).join('\n') !== [...globs].sort().join('\n')) return false;
+    // red vs red-shared depends on the comparison with main: an answer stored without it (or by a run
+    // that did not record it) does not stand for a comparing run. A compared answer stands for either.
+    if (o.compareMain && t.compareMain !== true) return false;
     if (o.until !== 'mergeable') return t.until !== 'mergeable';
     return t.until === 'mergeable' && t.summary.merge?.ready === true;
+  }
+
+  /** No diagnosis yet, or one made under --no-compare-main while this run compares with main. */
+  function needsDiagnosis(st: WaitState, c: Check): boolean {
+    const id = String(c.jobId);
+    return !st.diagnoses[id] || (o.compareMain && (st.diagnosis.uncompared ?? []).includes(id));
   }
 
   /** Required names for REST check runs (which carry no isRequired). */
@@ -819,10 +837,16 @@ export async function* runWait(
   };
 
   const result = async (interruptedBy?: string): Promise<WaitSummary> => {
+    // --any returned because another target finished, not because this session self-returned.
+    const anySatisfied = o.any && runs.some((r) => r.summary !== null);
     for (const r of runs) {
       if (r.summary !== null) continue;
       const outcome: Outcome = interruptedBy ? 'interrupted' : 'pending';
-      const reason = interruptedBy ? `signal ${interruptedBy}` : 'unattended-self-return';
+      const reason = interruptedBy
+        ? `signal ${interruptedBy}`
+        : anySatisfied
+          ? 'any-satisfied'
+          : 'unattended-self-return';
       if (r.st) {
         r.summary = summarise(r, outcome, reason, r.lastDecision);
         save(r);

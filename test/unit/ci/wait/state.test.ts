@@ -66,6 +66,22 @@ test('save, then latest and load round-trip; another SHA is a miss', async () =>
   assert.equal(s.load('pr-7', A).kind, 'hit', 'the old state stays until it expires');
 });
 
+test('concurrent waits on one SHA: a save keeps the reported failures the other wait already saved', async () => {
+  const { clock, s } = await store();
+  const one = state(clock);
+  const two = state(clock);
+  one.machine = { ...one.machine, reported: ['job:1'] };
+  two.machine = { ...two.machine, reported: ['job:2'] };
+  s.save('pr-7', one);
+  s.save('pr-7', two);
+  const r = s.load('pr-7', A);
+  assert.deepEqual(r.kind === 'hit' && [...r.state.machine.reported].sort(), ['job:1', 'job:2']);
+  assert.deepEqual(two.machine.reported, ['job:2'], 'the caller’s state is not mutated');
+  s.save('pr-7', state(clock, B, { machine: { ...two.machine, boundSha: B } }));
+  const other = s.load('pr-7', B);
+  assert.deepEqual(other.kind === 'hit' && other.state.machine.reported, ['job:2'], 'another SHA is not merged in');
+});
+
 test('a corrupt or partial state file is discarded with a reason', async () => {
   const { clock, s } = await store();
   s.save('pr-7', state(clock));

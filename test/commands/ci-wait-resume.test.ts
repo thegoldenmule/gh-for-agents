@@ -308,6 +308,35 @@ test('branch:main pending: next pins the bound SHA, and running it resumes that 
   assert.equal(second.json.resumed, true);
 });
 
+test('a red stored under --no-compare-main is not the answer without it: the re-run compares with main', async () => {
+  const { sim, a, b } = world();
+  const t = 'src/a.test.ts > flaky on main';
+  const mainJob: SimJob = {
+    id: 9501,
+    runId: 950,
+    name: 'unit',
+    status: 'completed',
+    conclusion: 'failure',
+    startedAt: -60 * MIN,
+    completedAt: -50 * MIN,
+    tests: [t],
+  };
+  (sim.o as { mainRuns?: unknown }).mainRuns = [{ id: 950, jobs: [mainJob] }];
+  set(sim, 0, [
+    { ...a, status: 'completed', conclusion: 'failure', completedAt: 0, tests: [t] },
+    { ...b, status: 'completed', conclusion: 'success', completedAt: 0 },
+  ]);
+  const first = await wait(sim, ['o/r#7', '--no-compare-main']);
+  assert.equal(first.exitCode, EXIT.CI_RED, first.stdout);
+  assert.equal(first.json.results[0].diagnosis.jobs[0].sameOnMain, 'not-compared');
+  const second = await wait(sim, ['o/r#7'], { artifacts: first.artifacts });
+  assert.equal(second.exitCode, EXIT.CI_RED_SHARED, second.stdout);
+  assert.equal(second.json.results[0].diagnosis.jobs[0].sameOnMain, 'same-tests');
+  const third = await wait(sim, ['o/r#7', '--no-compare-main'], { artifacts: first.artifacts });
+  assert.equal(third.exitCode, EXIT.CI_RED_SHARED, 'a compared answer stands under --no-compare-main too');
+  assert.equal(third.json.resumed, true);
+});
+
 test('--on-head-change stop: a head that moved between runs is bound fresh, never a superseded loop', async () => {
   const { clock, sim, a, b } = world();
   set(sim, 0, [{ ...a, status: 'completed', conclusion: 'failure', completedAt: 0 }, b]);

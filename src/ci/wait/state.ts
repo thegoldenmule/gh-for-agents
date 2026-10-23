@@ -89,7 +89,12 @@ export const WaitStateSchema = z.object({
   timeouts: z.record(z.string(), TimeoutsSchema.nullable()),
   /** Full diagnoses by job id. */
   diagnoses: z.record(z.string(), FailingJob),
-  diagnosis: z.object({ spentMs: z.number(), partial: z.boolean() }),
+  diagnosis: z.object({
+    spentMs: z.number(),
+    partial: z.boolean(),
+    /** Job ids diagnosed under --no-compare-main: a comparing run diagnoses them again. */
+    uncompared: z.array(z.string()).optional(),
+  }),
   /** The last outcome returned for this SHA. */
   terminal: z
     .object({
@@ -99,6 +104,8 @@ export const WaitStateSchema = z.object({
       /** The --until and sorted --check of the run that stored it (a resume honours only the same question). */
       until: z.string().optional(),
       check: z.array(z.string()).optional(),
+      /** Whether that run compared failures with main (absent: stored before this was recorded). */
+      compareMain: z.boolean().optional(),
     })
     .nullable(),
 });
@@ -266,11 +273,22 @@ export async function createWaitStore(o: {
     },
     save(key, state) {
       withLock(key, () => {
-        writeAtomic(statePath(key, state.boundSha), state);
+        writeAtomic(statePath(key, state.boundSha), withReported(loadUnlocked(key, state.boundSha), state));
         writeAtomic(indexPath(key), { v: 1, boundSha: state.boundSha, savedAt: state.savedAt });
       });
     },
   };
+
+  /**
+   * Concurrent waits on one SHA each poll on their own (04): a save keeps the failures the other already
+   * reported (first-failure continuation), never replacing them. The caller's state is not changed.
+   */
+  function withReported(prev: LoadResult, state: WaitState): WaitState {
+    if (prev.kind !== 'hit') return state;
+    const reported = [...new Set([...state.machine.reported, ...prev.state.machine.reported])];
+    if (reported.length === state.machine.reported.length) return state;
+    return { ...state, machine: { ...state.machine, reported } };
+  }
 
   function loadUnlocked(key: string, boundSha: string): LoadResult {
     const path = statePath(key, boundSha);
