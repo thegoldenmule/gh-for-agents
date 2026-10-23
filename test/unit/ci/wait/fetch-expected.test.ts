@@ -42,14 +42,27 @@ test('branch paths keep slashes and encode the rest', () => {
   assert.equal(branchPath('a b/c#d'), 'a%20b/c%23d');
 });
 
+/** The commit's statusCheckRollup names (GraphQL: the one canonical check set). */
 function names(env: ReturnType<typeof ciEnv>, sha: string, runs: string[], statuses: string[] = []) {
   env.fake.on(
-    has(`commits/${sha}/check-runs`),
-    ok({ total_count: runs.length, check_runs: runs.map((name) => ({ name })) }),
-  );
-  env.fake.on(
-    has(`commits/${sha}/status`),
-    ok({ state: 'success', statuses: statuses.map((context) => ({ context })) }),
+    (a) => a.includes('graphql') && a.includes(`oid=${sha}`),
+    ok({
+      data: {
+        repository: {
+          object: {
+            statusCheckRollup: {
+              contexts: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [
+                  ...runs.map((name) => ({ __typename: 'CheckRun', name })),
+                  ...statuses.map((context) => ({ __typename: 'StatusContext', context })),
+                ],
+              },
+            },
+          },
+        },
+      },
+    }),
   );
 }
 
@@ -100,6 +113,60 @@ test('baseline: falls back to the last merged PR, then the base head, and caches
   await env.clock.advance(24 * 60 * 60_000);
   await fetchBaseline(opts);
   assert.ok(env.fake.calls.length > calls, 'expired after 24 h');
+});
+
+test('baseline names come from the rollup only: REST-only reviewer apps never become baselines', async () => {
+  const env = ciEnv();
+  // REST lists copilot's dynamic review suite; the rollup (what ci wait and pr status count) does not.
+  env.fake.on(
+    has('commits/p1/check-runs'),
+    ok({ total_count: 2, check_runs: [{ name: 'build' }, { name: 'copilot-pull-request-reviewer' }] }),
+  );
+  env.fake.on(has('commits/p1/status'), ok({ state: 'success', statuses: [] }));
+  names(env, 'p1', ['build']);
+  const b = await fetchBaseline({ gh: env.gh, repo, base: 'main', headSha: HEAD, previousHeads: ['p1'] });
+  assert.deepEqual(b?.names, ['build']);
+  env.fake.expectNoCall(has('check-runs'));
+});
+
+test('baseline names page through a rollup of more than 100 contexts', async () => {
+  const env = ciEnv();
+  const page = (nodes: string[], next: string | null) =>
+    ok({
+      data: {
+        repository: {
+          object: {
+            statusCheckRollup: {
+              contexts: {
+                pageInfo: { hasNextPage: next !== null, endCursor: next },
+                nodes: nodes.map((name) => ({ __typename: 'CheckRun', name })),
+              },
+            },
+          },
+        },
+      },
+    });
+  env.fake.on((a) => a.includes('graphql') && a.includes('oid=p1'), page(['a', 'b'], 'c1'));
+  env.fake.on((a) => a.includes('graphql') && a.includes('oid=p1') && a.includes('after=c1'), page(['c'], null));
+  const b = await fetchBaseline({
+    gh: env.gh,
+    repo,
+    base: 'main',
+    headSha: HEAD,
+    previousHeads: ['p1'],
+    previousOnly: true,
+  });
+  assert.deepEqual(b?.names, ['a', 'b', 'c']);
+});
+
+test('baseline cache: an entry under the pre-rollup key is not reused', async () => {
+  const env = ciEnv();
+  const cache = createJsonCache({ dir: await env.artifacts.pathFor('cache', 'wait-expected', repo), clock: env.clock });
+  const stale = { source: 'previous-head', sha: 'p1', confidence: 'high', names: ['copilot-pull-request-reviewer'] };
+  cache.set(`baseline:main:${HEAD}`, stale, 24 * 60 * 60_000);
+  names(env, 'p1', ['build']);
+  const b = await fetchBaseline({ gh: env.gh, repo, base: 'main', headSha: HEAD, previousHeads: ['p1'], cache });
+  assert.deepEqual(b?.names, ['build']);
 });
 
 test('last merged PR skips the PR itself and unmerged PRs; none gives null', async () => {

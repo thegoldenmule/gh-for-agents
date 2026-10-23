@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "api",
+    "graphql",
+    "--include",
+    "--hostname",
+    "github.com",
+    "-f",
+    "query=query($owner:String!,$name:String!,$oid:GitObjectID!,$after:String){repository(owner:$owner,name:$name){object(oid:$oid){... on Commit{statusCheckRollup{contexts(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{__typename ... on CheckRun{name} ... on StatusContext{context}}}}}}}}",
+    "-f",
+    "name=powerhouse",
+    "-f",
+    "oid=dddddddddddddddddddddddddddddddddddddddd",
+    "-f",
+    "owner=powerhouse-inc"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4998\r\nX-Ratelimit-Used: 2\r\nX-Ratelimit-Reset: 1792674000\r\nX-Ratelimit-Resource: graphql\r\n\r\n{\"data\":{\"repository\":{\"object\":{\"statusCheckRollup\":null}}}}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "ci wait smoke: a settled green PR, terminal on the first tick (the baseline candidate has no checks registered)"
+  }
+}

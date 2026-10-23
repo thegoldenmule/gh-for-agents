@@ -5,6 +5,7 @@
 import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
+import { BASELINE_NAMES_QUERY } from '../../src/ci/wait/fetch.ts';
 import { FALLBACK_PR_QUERY, SUITES_QUERY } from '../../src/ci/wait/poller.ts';
 import { isMutating } from '../../src/gh/guard.ts';
 import type { ProcessRunner, ProcRequest, ProcResult } from '../../src/proc/runner.ts';
@@ -468,6 +469,20 @@ export class GitHubSim {
             checkSuites: { nodes },
             statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: contexts } },
           },
+        },
+      });
+    }
+    if (q === BASELINE_NAMES_QUERY) {
+      const oid = field('oid') ?? '';
+      const nodes = [
+        ...(st.checks[oid] ?? [])
+          .filter((j) => j.rollup !== false)
+          .map((j) => ({ __typename: 'CheckRun', name: j.name })),
+        ...(st.statuses?.[oid] ?? []).map((s) => ({ __typename: 'StatusContext', context: s.context })),
+      ];
+      return ok({
+        repository: {
+          object: { statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false, endCursor: null }, nodes } } },
         },
       });
     }

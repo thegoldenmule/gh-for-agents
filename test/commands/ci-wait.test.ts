@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { SUITES_QUERY } from '../../src/ci/wait/poller.ts';
 import { WaitEvent, WaitSummary } from '../../src/schemas/ci.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeClock } from '../helpers/fake-clock.ts';
@@ -345,8 +346,21 @@ test('one check set: a REST check the GraphQL rollup leaves out (copilot review)
   assert.equal(r.exitCode, EXIT.OK, r.stdout.slice(0, 300));
   assert.equal(r.json.results[0].ci.counts.pass, 1);
   assert.equal(r.json.results[0].ci.counts.pending, 0);
-  const lookups = sim.calls.filter((c) => c.argv[1] === 'graphql').length;
+  const lookups = sim.calls.filter((c) => c.argv.includes(`query=${SUITES_QUERY}`)).length;
   assert.ok(lookups <= 2, `${lookups} GraphQL suite lookups: only when the suites change, plus one confirmation`);
+});
+
+test('one check set: a reviewer app on the previous head is no baseline, so settled CI returns at once', async () => {
+  const OLD = sha('b');
+  const t = running(321, 'test');
+  // The previous head had the same check plus copilot's review, which REST lists and the rollup leaves out.
+  const prev = [done(t, 0), done(running(322, 'copilot-pull-request-reviewer', { runId: 651, rollup: false }), 0)];
+  const { sim } = world([t], { prCommits: [OLD, H] }, { checks: { [H]: [t], [OLD]: prev } });
+  change(sim, 3 * MIN, done(t, 3 * MIN));
+  const r = await wait(sim, ['o/r#7'], { stepMs: 1_000 });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout.slice(0, 300));
+  assert.ok(r.json.results[0].elapsedSec < 3 * 60 + 30, `${r.json.results[0].elapsedSec}s: no 90 s expect-grace`);
+  assert.ok(!events(r).some((e) => e.type === 'expected-absent'), 'copilot was never expected');
 });
 
 test('ci wait caches the base branch’s required checks for pr status’s quiet read', async () => {

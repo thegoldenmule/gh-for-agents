@@ -107,27 +107,59 @@ export async function fetchRequiredSources(o: {
 }
 
 // ── Baseline names ────────────────────────────────────────────────────────
-const CheckRunsPage = z.object({ check_runs: z.array(z.object({ name: z.string() })) });
-const CombinedStatus = z.object({ statuses: z.array(z.object({ context: z.string() })) });
+/** Rollup pages read per candidate commit (500 contexts, like the poller's check-run pages). */
+export const BASELINE_NAME_PAGES = 5;
 
-/** Every check name registered on a commit: check runs (latest) plus status contexts. */
+/**
+ * A commit's statusCheckRollup names. The rollup is the one canonical check set (04): REST also lists
+ * suites it leaves out (a `dynamic` copilot review), which would be baselines that never register.
+ */
+export const BASELINE_NAMES_QUERY =
+  'query($owner:String!,$name:String!,$oid:GitObjectID!,$after:String){repository(owner:$owner,name:$name){' +
+  'object(oid:$oid){... on Commit{statusCheckRollup{contexts(first:100,after:$after){' +
+  'pageInfo{hasNextPage endCursor} nodes{__typename ... on CheckRun{name} ... on StatusContext{context}}}}}}}}';
+
+const RollupNames = z.object({
+  repository: z
+    .object({
+      object: z
+        .object({
+          statusCheckRollup: z
+            .object({
+              contexts: z.object({
+                pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullish() }),
+                nodes: z.array(
+                  z.object({ name: z.string().nullish(), context: z.string().nullish() }).loose().nullable(),
+                ),
+              }),
+            })
+            .nullish(),
+        })
+        .nullable(),
+    })
+    .nullable(),
+});
+
+/** Every check name registered on a commit: its statusCheckRollup's check runs and status contexts. */
 export async function fetchCheckNames(o: { gh: Gh; repo: RepoRef; sha: string }): Promise<string[]> {
-  const runs = await get(
-    o.gh,
-    {
-      path: `repos/{owner}/{repo}/commits/${o.sha}/check-runs`,
-      repo: o.repo,
-      fields: { filter: 'latest' },
-      paginate: { maxPages: 3, itemsKey: 'check_runs' },
-    },
-    CheckRunsPage,
-  );
-  const status = await getOrNull(
-    o.gh,
-    { path: `repos/{owner}/{repo}/commits/${o.sha}/status`, repo: o.repo, fields: { per_page: 100 } },
-    CombinedStatus,
-  );
-  return [...new Set([...runs.check_runs.map((r) => r.name), ...(status?.statuses ?? []).map((s) => s.context)])];
+  const out = new Set<string>();
+  let after: string | null = null;
+  for (let page = 0; page < BASELINE_NAME_PAGES; page++) {
+    const d: z.output<typeof RollupNames> = await o.gh.graphql(
+      BASELINE_NAMES_QUERY,
+      { owner: o.repo.owner, name: o.repo.name, oid: o.sha, after },
+      RollupNames,
+      { repo: o.repo },
+    );
+    const contexts = d.repository?.object?.statusCheckRollup?.contexts;
+    for (const n of contexts?.nodes ?? []) {
+      const name = n?.name ?? n?.context;
+      if (name) out.add(name);
+    }
+    if (!contexts?.pageInfo.hasNextPage || !contexts.pageInfo.endCursor) break;
+    after = contexts.pageInfo.endCursor;
+  }
+  return [...out];
 }
 
 /** The PR's commit SHAs, oldest first (bounded to 300). */
@@ -218,7 +250,8 @@ export async function fetchBaseline(o: {
   previousOnly?: boolean;
   cache?: JsonCache;
 }): Promise<Baseline | null> {
-  const key = `baseline:${o.previousOnly ? 'commit:' : ''}${o.base}:${o.headSha}`;
+  // v2: names from the rollup. A pre-rollup entry (REST names, reviewer apps included) is never reused.
+  const key = `baseline:v2:${o.previousOnly ? 'commit:' : ''}${o.base}:${o.headSha}`;
   const hit = o.cache?.get(key, CachedBaseline);
   if (hit !== undefined) return hit;
   const tried: BaselineCandidate[] = [];
