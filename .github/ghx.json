@@ -63,6 +63,7 @@
         ".github/**",
         "scripts/**",
         "package.json",
+        "LICENSE",
         "pnpm-lock.yaml",
         "biome.json",
         "tsconfig.json",
