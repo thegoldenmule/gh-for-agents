@@ -71,7 +71,8 @@ export interface PrSnapshot {
     /** Mergeable re-queries made. */
     retries: number;
   };
-  viewer: { login: string };
+  /** permission: Repository.viewerPermission on the base repo (null: not reported). */
+  viewer: { login: string; permission: string | null };
   repoSettings: Q1Result['repoSettings'];
   /** The PR body's ghx block, as readPrBlock reads it. */
   meta: PrBlockResult;
@@ -307,7 +308,7 @@ export async function fetchPrSnapshot(o: FetchPrSnapshotOptions): Promise<PrSnap
       mergeCommit: pr.mergeCommit?.oid ?? null,
       retries,
     },
-    viewer: { login: q1.viewerLogin },
+    viewer: { login: q1.viewerLogin, permission: q1.viewerPermission },
     repoSettings: q1.repoSettings,
     meta,
     ci: ciSnapshotOf(o, q1),

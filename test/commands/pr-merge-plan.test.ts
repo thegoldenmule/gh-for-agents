@@ -31,8 +31,8 @@ test('--dry-run: every check runs, the plan carries the exact PUT, and nothing i
   assert.ok(halted.argv.includes('PUT') && halted.argv.includes(plan.request.path), halted.argv.join(' '));
   assert.deepEqual(JSON.parse(halted.stdin), plan.request.body);
   assert.ok(!halted.argv.includes('pr'), 'never gh pr merge');
-  // All 17 checks are reported, the red check waived as shared with main.
-  assert.equal(plan.checks.length, 17);
+  // All 18 checks are reported, the red check waived as shared with main.
+  assert.equal(plan.checks.length, 18);
   assert.deepEqual(
     plan.waivers.map((w: { code: string }) => w.code),
     ['CI_RED'],
@@ -55,6 +55,20 @@ test('smoke scenario: examples[0] --dry-run replays and halts at the PUT pinned 
   assert.equal(JSON.parse(r.json.wouldRun[0].stdin).sha, HEAD);
   assert.equal(r.json.preview.plan.checks.find((c: { code: string }) => c.code === 'HEAD_MOVED').status, 'pass');
   fake.expectNoMutations();
+});
+
+test('--dry-run with pull-only access: NO_MERGE_PERMISSION blocks (exit 6), wouldMerge never true', async () => {
+  const fake = installMerge();
+  fake.on(isQ1, q1Reply(workedPr(), { viewerPermission: 'READ' }));
+  const r = await runMerge(['pr', 'merge', REF, '--dry-run'], fake);
+  assert.equal(r.exitCode, EXIT.POLICY, r.stdout);
+  assert.equal(r.json.error.code, 'MERGE_BLOCKED');
+  assert.deepEqual(codes(r), ['NO_MERGE_PERMISSION']);
+  const blocker = r.json.error.details.plan.blockers[0];
+  assert.equal(blocker.overridable, false);
+  assert.match(blocker.message, /READ/);
+  fake.expectNoMutations();
+  fake.expectNoCall(isPut);
 });
 
 test('several violations are reported together; any policy-class blocker exits 6', async () => {

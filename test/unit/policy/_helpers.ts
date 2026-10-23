@@ -31,7 +31,7 @@ export function snapshot(over: Partial<PolicySnapshot> = {}): PolicySnapshot {
       mergeCommit: null,
       retries: 0,
     },
-    viewer: { login: 'thegoldenmule' },
+    viewer: { login: 'thegoldenmule', permission: 'ADMIN' },
     repoSettings: {
       mergeCommitAllowed: true,
       squashMergeAllowed: true,

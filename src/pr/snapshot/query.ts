@@ -47,7 +47,7 @@ function connection(name: ConnectionName, after: boolean): string {
 export const Q1_QUERY =
   'query($owner:String!,$name:String!,$number:Int!,$after:String){viewer{login} ' +
   'repository(owner:$owner,name:$name){mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed deleteBranchOnMerge ' +
-  'defaultBranchRef{name} pullRequest(number:$number){number url title body state isDraft createdAt updatedAt ' +
+  'viewerPermission defaultBranchRef{name} pullRequest(number:$number){number url title body state isDraft createdAt updatedAt ' +
   `${ACTOR} authorAssociation baseRefName baseRefOid headRefName headRefOid isCrossRepository ` +
   'headRepository{nameWithOwner} changedFiles additions deletions commitCount:commits{totalCount} ' +
   'mergeable mergeStateStatus reviewDecision mergedAt mergeCommit{oid} ' +
@@ -142,6 +142,8 @@ export const Q1Data = z.object({
       squashMergeAllowed: z.boolean(),
       rebaseMergeAllowed: z.boolean(),
       deleteBranchOnMerge: z.boolean(),
+      // ADMIN, MAINTAIN, WRITE, TRIAGE, READ; null when GitHub does not say (merge policy fails closed).
+      viewerPermission: z.string().nullable(),
       defaultBranchRef: z.object({ name: z.string() }).nullable(),
       pullRequest: Q1Pr.nullable(),
     })
@@ -165,6 +167,8 @@ const CiPageData = z.object({
 // ── Fetch ─────────────────────────────────────────────────────────────────
 export interface Q1Result {
   viewerLogin: string;
+  /** The viewer's permission on the base repo (Repository.viewerPermission). */
+  viewerPermission: string | null;
   repoSettings: {
     mergeCommitAllowed: boolean;
     squashMergeAllowed: boolean;
@@ -290,6 +294,7 @@ export async function fetchQ1(o: Q1Options): Promise<Q1Result> {
 
   return {
     viewerLogin: data.viewer.login,
+    viewerPermission: repository.viewerPermission,
     repoSettings: {
       mergeCommitAllowed: repository.mergeCommitAllowed,
       squashMergeAllowed: repository.squashMergeAllowed,

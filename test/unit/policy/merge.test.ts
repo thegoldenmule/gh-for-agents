@@ -45,6 +45,11 @@ const ROWS: Row[] = [
     },
   },
   {
+    code: 'NO_MERGE_PERMISSION',
+    fail: { snapshot: { viewer: { login: 'thegoldenmule', permission: 'READ' } } },
+    pass: { snapshot: { viewer: { login: 'thegoldenmule', permission: 'WRITE' } } },
+  },
+  {
     code: 'METHOD_NOT_ALLOWED',
     fail: { request: { method: 'squash' } },
     pass: { request: { method: 'squash' }, config: config({ merge: { allowedMethods: ['merge', 'squash'] } }) },
@@ -535,6 +540,24 @@ test('CONFIG_MISSING (pr status without config) is a non-overridable blocker', (
     [['CONFIG_MISSING', false]],
   );
   assert.equal(e.exitClass, 'policy');
+});
+
+test('NO_MERGE_PERMISSION: write access to the base repo is required; an unread permission fails closed', () => {
+  const blocked = (permission: string | null) =>
+    evaluate({ snapshot: { viewer: { login: 'thegoldenmule', permission } } }).plan.blockers.some(
+      (b) => b.code === 'NO_MERGE_PERMISSION',
+    );
+  for (const p of ['ADMIN', 'MAINTAIN', 'WRITE']) assert.equal(blocked(p), false, p);
+  for (const p of ['TRIAGE', 'READ', null]) assert.equal(blocked(p), true, String(p));
+  assert.throws(
+    () =>
+      evaluate({
+        snapshot: { viewer: { login: 'thegoldenmule', permission: 'READ' } },
+        request: { overrides: { codes: ['NO_MERGE_PERMISSION' as never], reason: 'user asked' } },
+      }),
+    (e) => e instanceof Error && 'code' in e && e.code === 'VALIDATION',
+    'never overridable',
+  );
 });
 
 test('the engine re-validates overrides: an empty reason or a non-overridable code is VALIDATION', () => {

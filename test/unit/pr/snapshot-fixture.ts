@@ -100,6 +100,7 @@ export function q1Reply(pr: unknown = q1Pr(), repo: Record<string, unknown> = {}
         squashMergeAllowed: true,
         rebaseMergeAllowed: false,
         deleteBranchOnMerge: false,
+        viewerPermission: 'ADMIN',
         defaultBranchRef: { name: 'main' },
         pullRequest: pr,
         ...repo,

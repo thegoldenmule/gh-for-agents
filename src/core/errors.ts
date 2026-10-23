@@ -71,6 +71,8 @@ export const ERROR_CODES = {
   WRITER_UNTRUSTED: { exit: ExitCode.POLICY },
   RERUN_LIMIT: { exit: ExitCode.POLICY },
   METHOD_NOT_ALLOWED: { exit: ExitCode.POLICY },
+  // A merge blocker (in MERGE_BLOCKED's plan): the viewer lacks write access to the base repo.
+  NO_MERGE_PERMISSION: { exit: ExitCode.POLICY },
   PASSTHROUGH_WRITE_REFUSED: { exit: ExitCode.POLICY },
 
   // ── 7 GH_FAILED ──────────────────────────────────────────────────────────

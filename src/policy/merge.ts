@@ -142,6 +142,21 @@ function authorNotViewer(s: PolicySnapshot, c: MergePolicyConfig): Result {
   });
 }
 
+/** Repository.viewerPermission values that may merge (GitHub needs write access to the base repo). */
+export const MERGE_PERMISSIONS: ReadonlySet<string> = new Set(['ADMIN', 'MAINTAIN', 'WRITE']);
+
+function noMergePermission(s: PolicySnapshot): Result {
+  const p = s.viewer.permission;
+  if (p !== null && MERGE_PERMISSIONS.has(p)) return pass(`viewerPermission ${p}`);
+  const slug = `${s.repo.owner}/${s.repo.name}`;
+  return fail(
+    p === null
+      ? `GitHub did not report your permission on ${slug}; merging needs write access, so this fails closed.`
+      : `You (${s.viewer.login}) have ${p} access to ${slug}; merging needs write access.`,
+    { permission: p, hint: 'Ask a maintainer to merge it, or ask the user to grant you write access.' },
+  );
+}
+
 const REPO_SETTING = {
   merge: 'mergeCommitAllowed',
   squash: 'squashMergeAllowed',
@@ -456,6 +471,7 @@ export function evaluateMerge(i: MergePolicyInput): MergeEvaluation {
     ],
     ['HEAD_MOVED', headMoved(s, i.request?.expectHead)],
     ['AUTHOR_NOT_VIEWER', authorNotViewer(s, i.config)],
+    ['NO_MERGE_PERMISSION', noMergePermission(s)],
     ['METHOD_NOT_ALLOWED', methodNotAllowed(i)],
     ['MERGEABLE_UNKNOWN', open ? mergeableUnknown(s) : notOpen],
     ['MERGE_CONFLICT', open ? mergeConflict(s) : notOpen],

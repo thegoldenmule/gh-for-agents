@@ -80,6 +80,18 @@ test('no .github/ghx.json: warning CONFIG_MISSING plus the CONFIG_MISSING blocke
   );
 });
 
+test('pull-only access: merge.ready false with the non-overridable NO_MERGE_PERMISSION blocker, as pr merge', async () => {
+  const fake = install();
+  fake.on(isQ1, q1Reply(workedPr(), { viewerPermission: 'READ' }));
+  const r = await run(['pr', 'status', REF], fake);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.merge.ready, false);
+  assert.deepEqual(
+    r.json.merge.blockers.map((b: { code: string; overridable: boolean }) => [b.code, b.overridable]),
+    [['NO_MERGE_PERMISSION', false]],
+  );
+});
+
 test('--no-compare-main leaves sameOnMain null, so the red check blocks as CI_RED', async () => {
   const fake = install();
   const r = await run(['pr', 'status', REF, '--no-compare-main'], fake);

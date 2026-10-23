@@ -17,6 +17,8 @@ export const MERGE_CHECKS = [
   { row: '2', code: 'PR_DRAFT', class: 'state', overridable: false },
   { row: '3', code: 'HEAD_MOVED', class: 'state', overridable: false },
   { row: '4', code: 'AUTHOR_NOT_VIEWER', class: 'policy', overridable: true },
+  // Not in 02 §8.2: GitHub refuses the merge PUT without write access to the base repo (never overridable).
+  { row: '4b', code: 'NO_MERGE_PERMISSION', class: 'policy', overridable: false },
   { row: '5', code: 'METHOD_NOT_ALLOWED', class: 'policy', overridable: false },
   { row: '6', code: 'MERGEABLE_UNKNOWN', class: 'state', overridable: false },
   { row: '7', code: 'MERGE_CONFLICT', class: 'state', overridable: false },
