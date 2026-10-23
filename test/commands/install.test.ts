@@ -417,6 +417,41 @@ test('uninstall leaves user-added deny rules, hooks and env alone', async () => 
   assert.deepEqual(out.hooks.PostToolUse, JSON.parse(EXISTING).hooks.PostToolUse);
 });
 
+test("uninstall removes only what install added: the user's identical deny rule and GHX_HOOK_MODE survive", async () => {
+  const repo = join(tmp, `repo-${n++}`);
+  const local = join(repo, '.claude', 'settings.local.json');
+  mkdirSync(join(repo, '.claude'), { recursive: true });
+  const mine = `${JSON.stringify({ permissions: { deny: ['Bash(gh pr merge:*)'] }, env: { GHX_HOOK_MODE: 'deny' } }, null, 2)}\n`;
+  writeFileSync(local, mine);
+  const h = home();
+  const git = fakeGit({ toplevel: repo, ignored: [local] });
+  const i = await run(
+    ['install', '--scope', 'project', '--hook-mode', 'deny', '--no-snippet'],
+    { HOME: h.home },
+    { git },
+  );
+  assert.equal(i.exitCode, 0, i.stdout);
+  assert.deepEqual(json(local).permissions.deny, [
+    'Bash(gh pr merge:*)',
+    ...GHX_DENY_RULES.filter((r) => r !== 'Bash(gh pr merge:*)'),
+  ]);
+  // The record lives in the user config dir, not in the repository.
+  const state = join(h.dir, 'ghx-install');
+  const [dir] = readdirSync(state);
+  const manifest = JSON.parse(read(join(state, dir as string, 'manifest.json')));
+  assert.equal(manifest.settings.path, local);
+  assert.ok(!manifest.settings.deny.includes('Bash(gh pr merge:*)'));
+  assert.equal(manifest.settings.hookMode, null, 'GHX_HOOK_MODE was already deny: not ghx');
+  assert.deepEqual(
+    readdirSync(join(repo, '.claude')).filter((f) => !f.includes('.bak-ghx-')),
+    ['settings.local.json'],
+  );
+  const u = await run(['uninstall', '--scope', 'project'], { HOME: h.home }, { git });
+  assert.equal(u.exitCode, 0, u.stdout);
+  assert.deepEqual(json(local), JSON.parse(mine));
+  assert.ok(!existsSync(join(state, dir as string, 'manifest.json')), 'uninstall drops the record');
+});
+
 test('uninstall --dry-run writes nothing; a foreign bin file is left alone with a warning', async () => {
   const h = home({ 'CLAUDE.md': '# Mine\n' });
   await run(['install'], { HOME: h.home });

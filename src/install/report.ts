@@ -1,9 +1,12 @@
 // The document `ghx install` and `ghx uninstall` print, and the commit step they share: under
 // --dry-run nothing is written and each planned change comes back as a unified diff in `wouldRun`.
+
+import { rmSync } from 'node:fs';
 import { z } from 'zod';
 import type { Clock } from '../core/clock.ts';
 import {
   actionOf,
+  atomicWrite,
   type BinLink,
   commitBinLink,
   commitChanges,
@@ -51,6 +54,8 @@ export interface Plan {
   hookCommand: string | null;
   denyRules: readonly string[];
   binLink: BinLink | null;
+  /** ghx's install record, written (or removed, when null) after the files; never under --dry-run. */
+  manifest?: { path: string; content: string | null } | undefined;
 }
 
 /** Apply a validated plan (or describe it, under dry-run) and build the output document. */
@@ -74,6 +79,8 @@ export function finish(plan: Plan, o: { dryRun: boolean; clock: Clock; next: str
   } else {
     files = commitChanges(plan.changes, o.clock);
     if (plan.binLink) commitBinLink(plan.binLink);
+    if (plan.manifest?.content === null) rmSync(plan.manifest.path, { force: true });
+    else if (plan.manifest) atomicWrite(plan.manifest.path, plan.manifest.content);
   }
   return {
     scope: plan.scope,

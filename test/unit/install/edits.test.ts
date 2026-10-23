@@ -9,6 +9,7 @@ import {
   inspectSettings,
   installSettings,
   parseSettings,
+  recordAdded,
   serializeSettings,
   uninstallSettings,
 } from '../../../src/install/settings.ts';
@@ -74,14 +75,29 @@ test('hook mode: deny sets env.GHX_HOOK_MODE, ask removes it, omitted leaves env
   );
 });
 
-test('uninstallSettings removes only ghx strings and hooks; prune drops containers it emptied', () => {
-  const orig = { permissions: { deny: ['Bash(rm:*)'] }, hooks: { PreToolUse: [] }, env: { X: '1' } };
+test('recordAdded names only what ghx added; uninstallSettings takes exactly that out', () => {
+  const orig = {
+    permissions: { deny: ['Bash(rm:*)', 'Bash(gh pr merge:*)'] },
+    hooks: { PreToolUse: [] },
+    env: { X: '1', GHX_HOOK_MODE: 'off' },
+  };
+  const none = { deny: [], containers: [], hookMode: null };
   const installed = installSettings(orig, { deny: true, hookCommand: CMD, hookMode: 'deny' });
-  assert.deepEqual(uninstallSettings(installed, false), orig);
-  assert.deepEqual(uninstallSettings(installed, true), { permissions: { deny: ['Bash(rm:*)'] }, env: { X: '1' } });
+  const added = recordAdded(none, orig, installed);
+  assert.ok(!added.deny.includes('Bash(gh pr merge:*)'), "the user's own identical rule is not ghx's");
+  assert.equal(added.deny.length, GHX_DENY_RULES.length - 1);
+  assert.deepEqual(added.containers, [], 'every container was already there');
+  assert.deepEqual(added.hookMode, { set: 'deny', prev: 'off' });
+  assert.deepEqual(uninstallSettings(installed, added), orig, 'the empty PreToolUse and the user rule stay');
+  // A second install folds into the first record; a fresh file owns every container it got.
+  assert.deepEqual(recordAdded(added, installed, installed), added);
   const fresh = installSettings({}, { deny: true, hookCommand: CMD });
-  assert.deepEqual(uninstallSettings(fresh, true), {});
-  assert.deepEqual(uninstallSettings({ env: { GHX_HOOK_MODE: 'weird' } }, true), { env: { GHX_HOOK_MODE: 'weird' } });
+  const freshAdded = recordAdded(none, {}, fresh);
+  assert.deepEqual(freshAdded.containers, ['permissions', 'permissions.deny', 'hooks', 'hooks.PreToolUse']);
+  assert.deepEqual(uninstallSettings(fresh, freshAdded), {});
+  assert.deepEqual(uninstallSettings({ env: { GHX_HOOK_MODE: 'weird' } }, freshAdded), {
+    env: { GHX_HOOK_MODE: 'weird' },
+  });
 });
 
 test('parseSettings refuses what it cannot merge into, with the path in details', () => {

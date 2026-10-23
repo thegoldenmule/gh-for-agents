@@ -9,8 +9,9 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { defineCommand } from '../core/command.ts';
 import { GhxError } from '../core/errors.ts';
-import { installBlock } from '../install/claude-md.ts';
+import { installBlock, removeBlock } from '../install/claude-md.ts';
 import {
+  backupsOf,
   type FileChange,
   hookCommand,
   planBinLink,
@@ -18,12 +19,13 @@ import {
   resolveTargets,
   SNIPPET_PATH,
 } from '../install/files.ts';
-import { legacyOwned } from '../install/owned.ts';
+import { type Manifest, manifestPath, ownedSettings, readManifest, serializeManifest } from '../install/owned.ts';
 import { finish, InstallOutput } from '../install/report.ts';
 import {
   GHX_DENY_RULES,
   installSettings,
   parseSettings,
+  recordAdded,
   removeDenyRules,
   serializeSettings,
 } from '../install/settings.ts';
@@ -81,18 +83,21 @@ export default defineCommand({
     const changes: FileChange[] = [];
 
     // Plan and validate everything before writing anything.
+    const manifest = readManifest(targets);
     const before = readOrNull(targets.settings);
     const parsed = parseSettings(before, targets.settings);
+    const owned = ownedSettings(targets, manifest, parsed);
     // User scope: drop the deny rules an earlier ghx install added there, and only those.
-    const owned = input.scope === 'user' ? legacyOwned(targets.settings, parsed) : { deny: [], containers: [] };
-    if (deny || input.hook || input.hookMode || owned.deny.length > 0) {
-      const cleaned = removeDenyRules(parsed, owned.deny, owned.containers);
+    const drop = input.scope === 'user' ? owned.deny : [];
+    let settingsRecord: Manifest['settings'] = manifest?.settings ?? null;
+    if (deny || input.hook || input.hookMode || drop.length > 0) {
+      const cleaned = removeDenyRules(parsed, drop, owned.containers);
       const next = installSettings(cleaned, { deny, hookCommand: command, hookMode: input.hookMode });
       const same = JSON.stringify(next) === JSON.stringify(parsed);
-      if (owned.deny.length > 0) {
+      if (drop.length > 0) {
         ctx.warn({
           code: 'INSTALL_DENY_REMOVED',
-          message: `Removed ${owned.deny.length} gh write deny rule(s) an earlier ghx install added to ${targets.settings}. User scope relies on the hook, which enforces only in repos with .github/ghx.json; use --scope project for deny rules in one repo.`,
+          message: `Removed ${drop.length} gh write deny rule(s) an earlier ghx install added to ${targets.settings}. User scope relies on the hook, which enforces only in repos with .github/ghx.json; use --scope project for deny rules in one repo.`,
         });
       }
       changes.push({
@@ -101,10 +106,20 @@ export default defineCommand({
         before,
         after: same ? before : serializeSettings(next, before),
       });
+      settingsRecord = {
+        path: targets.settings,
+        ...recordAdded(owned, parsed, next),
+        created: owned.created ?? before === null,
+      };
     }
+    let claudeMdRecord: Manifest['claudeMd'] = manifest?.claudeMd ?? null;
     if (input.snippet) {
       const before = readOrNull(targets.claudeMd);
       const snippet = readFileSync(SNIPPET_PATH, 'utf8');
+      // A block already there with no record is a legacy install's: it created the file if no backup exists.
+      const legacy =
+        before !== null && removeBlock(before, targets.claudeMd) === '' && backupsOf(targets.claudeMd).length === 0;
+      claudeMdRecord ??= { path: targets.claudeMd, created: before === null || legacy };
       changes.push({
         path: targets.claudeMd,
         kind: 'claude-md',
@@ -123,8 +138,20 @@ export default defineCommand({
     }
     const next = ['Start a new Claude Code session so it loads the settings.', 'Check the install: ghx doctor'];
     if (binLink && !binLink.onPath) next.push(`Add ${resolve(binLink.path, '..')} to PATH to run ghx by name.`);
+    // The record changes only alongside a file change, so a no-op re-install writes nothing.
+    const record = serializeManifest({ version: 1, settings: settingsRecord, claudeMd: claudeMdRecord });
+    const manifestChange = changes.some((c) => c.before !== c.after)
+      ? { path: manifestPath(targets), content: record }
+      : undefined;
     return finish(
-      { scope: targets.scope, changes, hookCommand: command, denyRules: deny ? GHX_DENY_RULES : [], binLink },
+      {
+        scope: targets.scope,
+        changes,
+        hookCommand: command,
+        denyRules: deny ? GHX_DENY_RULES : [],
+        binLink,
+        manifest: manifestChange,
+      },
       { dryRun: ctx.dryRun, clock: ctx.clock, next },
     );
   },

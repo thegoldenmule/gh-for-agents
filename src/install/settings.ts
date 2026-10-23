@@ -130,41 +130,6 @@ export function installSettings(input: Json, edit: SettingsEdit): Json {
   return s;
 }
 
-/**
- * The settings with only what ghx adds removed: the exact deny strings, ghx hooks, and a recognised
- * env.GHX_HOOK_MODE. With `prune`, a container that this removal emptied (permissions.deny, then
- * permissions; hooks.PreToolUse, then hooks; env) is deleted too, because ghx creates them when absent.
- */
-export function uninstallSettings(input: Json, prune: boolean): Json {
-  const s = clone(input);
-  const emptied = (parent: Json, key: string) => {
-    const v = parent[key];
-    if (prune && (Array.isArray(v) ? v.length === 0 : isObj(v) && Object.keys(v).length === 0)) delete parent[key];
-  };
-  if (isObj(s.permissions) && Array.isArray(s.permissions.deny)) {
-    const before = s.permissions.deny as unknown[];
-    const kept = before.filter((r) => !(typeof r === 'string' && GHX_DENY_RULES.includes(r)));
-    s.permissions.deny = kept;
-    if (kept.length < before.length) {
-      emptied(s.permissions, 'deny');
-      emptied(s, 'permissions');
-    }
-  }
-  if (isObj(s.hooks) && Array.isArray(s.hooks.PreToolUse)) {
-    const { groups, at } = stripGhxHooks(s.hooks.PreToolUse);
-    if (at !== null) {
-      s.hooks.PreToolUse = groups;
-      emptied(s.hooks, 'PreToolUse');
-      emptied(s, 'hooks');
-    }
-  }
-  if (isObj(s.env) && HOOK_MODE_VALUES.has(String(s.env.GHX_HOOK_MODE))) {
-    delete s.env.GHX_HOOK_MODE;
-    emptied(s, 'env');
-  }
-  return s;
-}
-
 /** The containers ghx creates when absent, innermost after outermost. */
 export const CONTAINERS = ['permissions', 'permissions.deny', 'hooks', 'hooks.PreToolUse', 'env'] as const;
 
@@ -194,6 +159,58 @@ export function removeDenyRules(input: Json, rules: readonly string[], container
   if (rules.length === 0 || !isObj(s.permissions) || !Array.isArray(s.permissions.deny)) return s;
   s.permissions.deny = s.permissions.deny.filter((r) => !(typeof r === 'string' && rules.includes(r)));
   pruneContainers(s, containers);
+  return s;
+}
+
+/** What ghx added to one settings file, as `ghx uninstall` needs it (src/install/owned.ts records it). */
+export interface Added {
+  /** Deny rules ghx added: exact strings that were not there before. */
+  deny: string[];
+  /** CONTAINERS ghx created, which uninstall drops once they are empty again. */
+  containers: string[];
+  /** env.GHX_HOOK_MODE as ghx set it, and the value it replaced (null: absent). */
+  hookMode: { set: string; prev: string | null } | null;
+}
+
+const modeOf = (s: Json): string | null =>
+  isObj(s.env) && typeof s.env.GHX_HOOK_MODE === 'string' ? s.env.GHX_HOOK_MODE : null;
+
+/**
+ * What going from `before` to `after` added, folded into what ghx had added already (`prior`). Entries
+ * no longer present drop out, so the record only ever names things that are there and ghx's.
+ */
+export function recordAdded(prior: Added, before: Json, after: Json): Added {
+  const had = inspectSettings(before).denyPresent;
+  const now = inspectSettings(after).denyPresent;
+  const deny = GHX_DENY_RULES.filter((r) => now.includes(r) && (prior.deny.includes(r) || !had.includes(r)));
+  const containers = CONTAINERS.filter(
+    (c) =>
+      containerOf(after, c) !== undefined && (prior.containers.includes(c) || containerOf(before, c) === undefined),
+  );
+  const [was, is] = [modeOf(before), modeOf(after)];
+  let hookMode: Added['hookMode'] = prior.hookMode?.set === was ? prior.hookMode : null;
+  if (is !== was) hookMode = is === null ? null : { set: is, prev: hookMode ? hookMode.prev : was };
+  return { deny, containers, hookMode };
+}
+
+/**
+ * The settings with what ghx added taken out again: its recorded deny rules, every ghx hook (they carry
+ * HOOK_MARK, so they are never the user's), GHX_HOOK_MODE back to its previous value if ghx's value is
+ * still there, and the containers ghx created once that leaves them empty. Everything else stays.
+ */
+export function uninstallSettings(input: Json, added: Added): Json {
+  const s = clone(input);
+  if (isObj(s.permissions) && Array.isArray(s.permissions.deny)) {
+    s.permissions.deny = s.permissions.deny.filter((r) => !(typeof r === 'string' && added.deny.includes(r)));
+  }
+  if (isObj(s.hooks) && Array.isArray(s.hooks.PreToolUse))
+    s.hooks.PreToolUse = stripGhxHooks(s.hooks.PreToolUse).groups;
+  const m = added.hookMode;
+  if (m && isObj(s.env) && s.env.GHX_HOOK_MODE === m.set) {
+    if (m.prev === null) delete s.env.GHX_HOOK_MODE;
+    else s.env.GHX_HOOK_MODE = m.prev;
+  }
+  pruneContainers(s, added.containers);
   return s;
 }
 

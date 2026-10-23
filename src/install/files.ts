@@ -1,6 +1,8 @@
 // Where `ghx install` writes and how: target resolution (user or project scope), the absolute hook
 // command, the optional bin link, and backed-up atomic writes. Nothing here reads os.homedir() or
 // process.env: HOME and CLAUDE_CONFIG_DIR come from the command's env, so tests point them at temp dirs.
+
+import { createHash } from 'node:crypto';
 import {
   copyFileSync,
   existsSync,
@@ -40,6 +42,14 @@ export interface Targets {
   claudeMd: string;
   /** Project scope only: .claude/settings.json, which ghx never writes but doctor reads (hand installs). */
   sharedSettings?: string;
+  /** ghx's own install state for this target (manifest), under the user config dir, never in a repo. */
+  stateDir: string;
+}
+
+/** <config>/ghx-install/<scope>-<hash of the settings path>: one directory per install target. */
+export function stateDirFor(configDir: string, scope: Scope, settings: string): string {
+  const key = createHash('sha256').update(settings).digest('hex').slice(0, 16);
+  return join(configDir, 'ghx-install', `${scope}-${key}`);
 }
 
 export function shellQuote(s: string): string {
@@ -66,7 +76,14 @@ export async function resolveTargets(scope: Scope, env: Env, git: Git): Promise<
         hint: 'Set HOME (or CLAUDE_CONFIG_DIR to your Claude Code config directory), or use --scope project.',
       });
     }
-    return { scope, settings: join(dir, 'settings.json'), claudeMd: join(dir, 'CLAUDE.md') };
+    const settings = join(dir, 'settings.json');
+    return { scope, settings, claudeMd: join(dir, 'CLAUDE.md'), stateDir: stateDirFor(dir, scope, settings) };
+  }
+  const configDir = userConfigDir(env);
+  if (!configDir) {
+    throw new GhxError('INSTALL_HOME_UNKNOWN', 'Neither CLAUDE_CONFIG_DIR nor HOME is set.', {
+      hint: 'Set HOME (or CLAUDE_CONFIG_DIR): ghx keeps its install record and backups there, outside the repository.',
+    });
   }
   if (!(await git.available())) {
     throw new GhxError('ENV_GIT_MISSING', '--scope project needs git to find the repository root.');
@@ -78,11 +95,13 @@ export async function resolveTargets(scope: Scope, env: Env, git: Git): Promise<
     });
   }
   // The hook command holds this machine's absolute paths, so it goes in the file Claude Code keeps per machine.
+  const settings = join(top, '.claude', 'settings.local.json');
   return {
     scope,
-    settings: join(top, '.claude', 'settings.local.json'),
+    settings,
     claudeMd: join(top, 'CLAUDE.md'),
     sharedSettings: join(top, '.claude', 'settings.json'),
+    stateDir: stateDirFor(configDir, scope, settings),
   };
 }
 
@@ -150,7 +169,7 @@ export function backupsOf(path: string): string[] {
 }
 
 /** Write via a temp file and rename. A symlinked file is written through to its target. */
-function atomicWrite(path: string, content: string): void {
+export function atomicWrite(path: string, content: string): void {
   const target = existsSync(path) ? realpathSync(path) : path;
   mkdirSync(dirname(target), { recursive: true });
   const mode = existsSync(target) ? statSync(target).mode & 0o777 : 0o644;

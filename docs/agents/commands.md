@@ -475,7 +475,7 @@ Remove what ghx install added to Claude Code settings and CLAUDE.md (try --dry-r
 
 write, single document, timeout 1m (max 5m).
 
-Removes only the ghx PreToolUse hook, the exact ghx deny rules, a GHX_HOOK_MODE of ask|deny|off, the marked CLAUDE.md block, and with --bin-dir a ghx link into this checkout. Every other setting stays. Containers it empties are dropped unless a ghx backup shows they existed. Backs up each changed file; a file left empty is removed. --dry-run returns unified diffs and writes nothing.
+Removes only what ghx install added, as its install record (kept beside its backups in the user config dir) shows: the ghx PreToolUse hook, the deny rules it added (never your identical ones), the GHX_HOOK_MODE it set (restoring any earlier value), containers it created once empty, the marked CLAUDE.md block, and with --bin-dir a ghx link into this checkout. Every other setting stays. An install from before the record is judged from its <file>.bak-ghx-* backups. Backs up each changed file; a file ghx created and leaves empty is removed. --dry-run returns unified diffs and writes nothing.
 
 Flags:
 
