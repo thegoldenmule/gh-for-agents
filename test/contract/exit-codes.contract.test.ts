@@ -1,6 +1,6 @@
 // Exit codes through the real bin, table-driven from exit-table.ts. The bootstrap covers the rows
-// producible before any pr/ci command exists; later milestones add rows 5–7 and 9–15 here or in
-// their own contract files.
+// producible before any pr/ci command exists; the rows that need a GitHub reply (4 via auth, 5, 9 and
+// 11–14) are in exit-rows.contract.test.ts, and 3, 6, 7, 10 and 15 in their commands' contract files.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readyPath, spawnGhx, waitForFile } from '../helpers/spawn.ts';

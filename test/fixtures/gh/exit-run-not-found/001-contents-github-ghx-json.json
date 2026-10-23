@@ -1,0 +1,16 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "repos/o/r/contents/.github/ghx.json"
+  ],
+  "exitCode": 1,
+  "stdout": "HTTP/2.0 404 Not Found\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"message\":\"Not Found\",\"documentation_url\":\"https://docs.github.com/rest\",\"status\":\"404\"}",
+  "stderr": "gh: Not Found (HTTP 404)\n",
+  "meta": {
+    "source": "synthetic",
+    "note": "no .github/ghx.json on the default branch (optional config: defaults apply)"
+  }
+}
