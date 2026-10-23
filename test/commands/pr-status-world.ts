@@ -135,6 +135,9 @@ export function install(fake: FakeGh = new FakeGh(), o: InstallOptions = {}): Fa
   fake.on(isMergeable, mergeableReply('MERGEABLE', { mergeState: 'UNSTABLE' }));
   fake.on(isQ2, q2Reply({ children: { nodes: [] } }));
   fake.on(isPrCommits, prCommitsReply([OLD_HEAD, HEAD]));
+  // main has no required checks (pr status reads them on a cold cache, as ci wait does).
+  fake.on(at('/rules/branches/main'), okJson([]));
+  fake.on(at('/branches/main'), okJson({ name: 'main', commit: { sha: MAIN_SHA }, protected: false }));
   fake.on(at(`/actions/jobs/${FAILING_JOB}`), okJson(jobRow(world, prJob)));
   fake.on(at(`/actions/jobs/${FAILING_JOB}/logs`), logReply({ text: sharedLog() }));
   fake.on(

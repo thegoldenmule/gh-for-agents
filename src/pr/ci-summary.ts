@@ -1,11 +1,13 @@
 // The shared CI-summary composition (04; 02 §4.3 steps 6–7), called by pr status, pr merge and ci wait
 // --until mergeable so merge.ready has one set of inputs.
-// - Quiet (settled ≥ EXPECT_GRACE_MS ago): no REST call, no baseline, `eta: null`. Otherwise required
-//   sources, baseline and ETA samples are read via ci wait's helpers, cached under PR_CI_CACHE_NS.
-// - Baselines age to `absent` after the grace (02 §11.3) unless the caller passes `agedOut`.
+// - The expected set is ci wait's (04, one check set): required sources (cached, else read and cached),
+//   config and baseline, read via ci wait's helpers and cached under PR_CI_CACHE_NS.
+// - Baselines age to `absent` as in ci wait's machine (02 §11.3): only once everything else settled
+//   EXPECT_GRACE_MS ago, unless the caller passes `agedOut`. Quiet (that case, cache warm): no REST call,
+//   no baseline read, `eta: null`.
 // - Shared-with-main: ≤5 failing Actions checks, no flake signals (02 §14.5); uncompared stays null.
 import { z } from 'zod';
-import { repoCache } from '../ci/cache.ts';
+import { type JsonCache, repoCache } from '../ci/cache.ts';
 import type { IgnoreRule } from '../ci/checks.ts';
 import { createMainComparer } from '../ci/compare-main.ts';
 import {
@@ -22,7 +24,6 @@ import { type CiSnapshot, snapshotSummary } from '../ci/snapshot.ts';
 import { isRed } from '../ci/summary.ts';
 import { type BaselineStats, computeEta } from '../ci/wait/eta.ts';
 import {
-  type Baseline,
   buildExpectedSet,
   type ConfigExpectedEntry,
   configExpected,
@@ -115,7 +116,32 @@ function settledAt(checks: readonly Check[]): number | null {
 
 const CachedRequired = z.object({ rules: z.array(z.string()).nullable(), branch: z.array(z.string()).nullable() });
 
-async function expectedSet(o: CiSummaryOptions, quiet: boolean, graceOver: boolean): Promise<ExpectedCheck[]> {
+/** The base's required-check sources: the cached set (ci wait writes it too), else read and cached. */
+async function requiredSources(
+  o: CiSummaryOptions,
+  cache: JsonCache,
+): Promise<{ sources: RequiredSources; baseHeadSha?: string | null }> {
+  const key = requiredCacheKey(o.base);
+  const hit = cache.get(key, CachedRequired);
+  if (hit) return { sources: hit };
+  const fetched = await optional(o, `The required checks for ${o.base}`, null, () =>
+    fetchRequiredSources({ gh: o.gh, repo: o.repo, base: o.base, warn: o.warn }),
+  );
+  if (!fetched) return { sources: { rules: null, branch: null } };
+  const { rules, branch } = fetched.sources;
+  const sources = { rules: rules ? [...rules] : null, branch: branch ? [...branch] : null };
+  cache.set(key, sources, REQUIRED_TTL_MS);
+  return { sources, baseHeadSha: fetched.baseHeadSha };
+}
+
+/**
+ * The expected set, derived as ci wait derives it (04, one check set): required, config and baseline,
+ * with ci wait's aging rule (machine.ts observe): a missing baseline check ages to `absent` only once
+ * everything else has settled (nothing pending, no required or config check missing) for EXPECT_GRACE_MS
+ * of CI time. When that holds, every baseline check is reported or absent, so the baseline is not read
+ * (the quiet read); otherwise it is read through the shared `baseline:v2:` cache.
+ */
+async function expectedSet(o: CiSummaryOptions, graceOver: boolean): Promise<ExpectedCheck[]> {
   const checks = o.ci.checks;
   const entries = o.config.expected ?? [];
   const unreported = entries.some(
@@ -126,57 +152,32 @@ async function expectedSet(o: CiSummaryOptions, quiet: boolean, graceOver: boole
         fetchChangedFiles({ gh: o.gh, repo: o.repo, number: o.number }),
       )
     : null;
-  let sources: RequiredSources = { rules: null, branch: null };
-  let baseline: Baseline | null = null;
   const cache = await repoCache({ artifacts: o.artifacts, repo: o.repo, clock: o.clock, ns: PR_CI_CACHE_NS });
-  const key = requiredCacheKey(o.base);
-  const hit = cache.get(key, CachedRequired);
-  if (quiet) {
-    // No REST call, but a required check that never registered must not vanish (04): the cached set.
-    if (hit) sources = hit;
-    else {
-      o.warn({
-        code: 'REQUIRED_CHECKS_UNCACHED',
-        message: `The required checks for ${o.base} were not read (no cached set); a required check that never registered is not shown. ghx ci wait ${o.ref} reads them.`,
-      });
-    }
-  } else {
-    let baseHeadSha: string | null | undefined;
-    if (hit) {
-      sources = hit;
-    } else {
-      const fetched = await optional(o, `The required checks for ${o.base}`, null, () =>
-        fetchRequiredSources({ gh: o.gh, repo: o.repo, base: o.base, warn: o.warn }),
-      );
-      if (fetched) {
-        const { rules, branch } = fetched.sources;
-        sources = { rules: rules ? [...rules] : null, branch: branch ? [...branch] : null };
-        baseHeadSha = fetched.baseHeadSha;
-        cache.set(key, sources, REQUIRED_TTL_MS);
-      }
-    }
-    baseline = await optional(o, 'The baseline checks', null, async () => {
-      const commits = await fetchPrCommits({ gh: o.gh, repo: o.repo, number: o.number });
-      return fetchBaseline({
-        gh: o.gh,
-        repo: o.repo,
-        base: o.base,
-        headSha: o.ci.headSha,
-        previousHeads: previousHeadCandidates(commits, o.ci.headSha),
-        number: o.number,
-        ...(baseHeadSha !== undefined ? { baseHeadSha } : {}),
-        cache,
-      });
-    });
-  }
-  const defs = buildExpectedSet({
-    required: requiredChecks(sources, checks),
+  const req = await requiredSources(o, cache);
+  const input = {
+    required: requiredChecks(req.sources, checks),
     config: configExpected(entries, changedFiles),
-    baseline,
     ignore: o.config.ignore,
+  };
+  const head = expectedState(buildExpectedSet({ ...input, baseline: null }), checks);
+  const othersSettled =
+    checks.length > 0 && !checks.some((c) => c.bucket === 'pending') && !head.some((e) => e.state === 'missing');
+  if (othersSettled && graceOver) return head;
+  const baseline = await optional(o, 'The baseline checks', null, async () => {
+    const commits = await fetchPrCommits({ gh: o.gh, repo: o.repo, number: o.number });
+    return fetchBaseline({
+      gh: o.gh,
+      repo: o.repo,
+      base: o.base,
+      headSha: o.ci.headSha,
+      previousHeads: previousHeadCandidates(commits, o.ci.headSha),
+      number: o.number,
+      ...(req.baseHeadSha !== undefined ? { baseHeadSha: req.baseHeadSha } : {}),
+      cache,
+    });
   });
-  const agedOut = o.agedOut ?? (graceOver ? defs.filter((d) => d.source === 'baseline').map((d) => d.name) : []);
-  return expectedState(defs, checks, agedOut);
+  const defs = buildExpectedSet({ ...input, baseline });
+  return expectedState(defs, checks, o.agedOut ?? []);
 }
 
 async function etaOf(o: CiSummaryOptions, pending: readonly Check[]): Promise<CiSummary['eta']> {
@@ -308,7 +309,7 @@ export async function buildCiSummary(o: CiSummaryOptions): Promise<CiSummaryResu
   const pending = s.checks.filter((c) => c.bucket === 'pending');
   const at = settledAt(s.checks);
   const graceOver = at !== null && o.clock.now() - at >= EXPECT_GRACE_MS;
-  const expected = await expectedSet(o, graceOver, graceOver);
+  const expected = await expectedSet(o, graceOver);
   const summary = snapshotSummary(s, { expected, eta: pending.length > 0 ? await etaOf(o, pending) : null });
   const red = s.checks.filter(isRed);
   if (o.compareMain !== false && red.length > 0) {

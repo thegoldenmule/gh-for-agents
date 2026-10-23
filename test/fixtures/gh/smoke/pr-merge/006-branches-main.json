@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/powerhouse-inc/powerhouse/branches/main"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nETag: W/\"b6db4e9137e75a65\"\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4995\r\nX-Ratelimit-Used: 5\r\nX-Ratelimit-Reset: 1792674000\r\nX-Ratelimit-Resource: core\r\n\r\n{\"name\":\"main\",\"commit\":{\"sha\":\"dddddddddddddddddddddddddddddddddddddddd\"},\"protected\":false,\"protection\":{\"required_status_checks\":{\"contexts\":[]}}}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "main has no required checks (read on a cold cache)"
+  }
+}

@@ -3,6 +3,7 @@
 // as keyStepsUnchecked, so KEY_STEP_SKIPPED fails closed (04, key steps).
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { z } from 'zod';
 import { repoCache } from '../../../src/ci/cache.ts';
 import type { CiSnapshot } from '../../../src/ci/snapshot.ts';
 import { buildCiSummary, type CiSummaryConfig, PR_CI_CACHE_NS } from '../../../src/pr/ci-summary.ts';
@@ -142,25 +143,74 @@ test('checks reported: no workflow-list call', async () => {
   assert.ok(!env.fake.calls.some((c) => path(c.argv) === 'repos/o/r/actions/workflows'));
 });
 
-test('quiet read: a cached required check that never registered stays missing (no REST call)', async () => {
-  const env = ciEnv();
+const BASE_SHA = 'b'.repeat(40);
+const isRollupNames = (argv: readonly string[]) => argv.some((a) => a.includes('object(oid:$oid)'));
+const rollupNames = (names: string[]) =>
+  ok({
+    data: {
+      repository: {
+        object: {
+          statusCheckRollup: {
+            contexts: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: names.map((name) => ({ __typename: 'CheckRun', name })),
+            },
+          },
+        },
+      },
+    },
+  });
+
+/** main requires `build`; the baseline (the base head, nothing earlier) ran unit and integration. */
+function coldWorld(env = ciEnv()) {
+  env.fake.on((a) => path(a) === 'repos/o/r/rules/branches/main', ok([]));
+  env.fake.on(
+    (a) => path(a) === 'repos/o/r/branches/main',
+    ok({ commit: { sha: BASE_SHA }, protected: true, protection: { required_status_checks: { contexts: ['build'] } } }),
+  );
+  env.fake.on((a) => path(a) === 'repos/o/r/pulls/7/commits', ok([{ sha: HEAD }]));
+  env.fake.on((a) => path(a) === 'repos/o/r/pulls', ok([]));
+  env.fake.on(isRollupNames, rollupNames(['unit', 'integration']));
+  return env;
+}
+
+test('settled long ago, nothing cached: the required set is read (and cached), never silently green', async () => {
+  const env = coldWorld();
+  const r = await facts([check()], {}, env);
+  assert.deepEqual(
+    r.summary.expectedMissing.map((e) => [e.name, e.source, e.state]),
+    [
+      ['build', 'required', 'missing'],
+      ['integration', 'baseline', 'missing'],
+    ],
+  );
+  assert.equal(r.summary.state, 'pending');
+  assert.equal(r.summary.phase, 'partial');
+  const cache = await repoCache({ artifacts: env.artifacts, repo: REPO, clock: env.clock, ns: PR_CI_CACHE_NS });
+  assert.ok(cache.get('required:main', z.unknown()), 'the required set is cached for the next read');
+  assert.ok(!env.warnings.some((w) => w.code === 'REQUIRED_CHECKS_UNCACHED'));
+});
+
+test('a cached required check that never registered stays missing, and so does the baseline (as ci wait)', async () => {
+  const env = coldWorld();
   const cache = await repoCache({ artifacts: env.artifacts, repo: REPO, clock: env.clock, ns: PR_CI_CACHE_NS });
   cache.set('required:main', { rules: null, branch: ['e2e'] }, 60 * 60_000);
   const r = await facts([check()], {}, env);
   assert.deepEqual(
     r.summary.expectedMissing.map((e) => [e.name, e.source, e.state]),
-    [['e2e', 'required', 'missing']],
+    [
+      ['e2e', 'required', 'missing'],
+      ['integration', 'baseline', 'missing'],
+    ],
   );
   assert.notEqual(r.summary.state, 'green');
-  assert.deepEqual(env.fake.calls, [], 'quiet: no gh call');
+  assert.ok(!env.fake.calls.some((c) => path(c.argv) === 'repos/o/r/rules/branches/main'), 'the cached set is used');
 });
 
-test('quiet read with no cached required set: warned, not silently green', async () => {
-  const env = ciEnv();
-  const r = await facts([check()], {}, env);
+test('settled long ago with every required check reported: baseline checks age out, no baseline read', async () => {
+  const env = coldWorld();
+  const r = await facts([check(), check({ name: 'build', jobId: 5002 })], {}, env);
   assert.equal(r.summary.state, 'green');
-  assert.ok(
-    env.warnings.some((w) => w.code === 'REQUIRED_CHECKS_UNCACHED'),
-    JSON.stringify(env.warnings),
-  );
+  assert.deepEqual(r.summary.expectedMissing, []);
+  assert.ok(!env.fake.calls.some((c) => isRollupNames(c.argv) || path(c.argv) === 'repos/o/r/pulls/7/commits'));
 });
