@@ -4,7 +4,7 @@
 // Deny rules are expected only at project scope (04 "enforcement scope"): user scope reports the ones
 // present and which of them an earlier ghx install added, which a user-scope re-install removes.
 import { accessSync, constants, existsSync } from 'node:fs';
-import { delimiter, isAbsolute, join } from 'node:path';
+import { delimiter, dirname, isAbsolute, join } from 'node:path';
 import { z } from 'zod';
 import { isGhxError } from '../core/errors.ts';
 import type { Git } from '../git/index.ts';
@@ -25,6 +25,11 @@ const SettingsInstall = z.object({
     installed: z.boolean(),
     command: z.string().nullable(),
     missingPaths: z.array(z.string()).describe('Programs or files the hook command names that do not exist'),
+    node: z.string().nullable().describe('The node the hook command runs, when it is an absolute path'),
+    version: z
+      .string()
+      .nullable()
+      .describe("The version in the package.json beside the hook's bin/ghx.js (null when unreadable)"),
   }),
   deny: z.discriminatedUnion('expected', [
     z.object({
@@ -82,6 +87,23 @@ function missingPaths(command: string, env: Env): string[] {
   return out;
 }
 
+/** The absolute node a hook command runs, and the version of the ghx package whose bin/ghx.js it runs. */
+function hookTarget(command: string | null): { node: string | null; version: string | null } {
+  const argv = command ? (scanShell(command).invocations[0]?.argv ?? []) : [];
+  const [node, bin] = argv;
+  let version: string | null = null;
+  if (bin && isAbsolute(bin)) {
+    try {
+      const pkg: unknown = JSON.parse(readOrNull(join(dirname(dirname(bin)), 'package.json')) ?? 'null');
+      const v = typeof pkg === 'object' && pkg !== null ? (pkg as { version?: unknown }).version : undefined;
+      if (typeof v === 'string') version = v;
+    } catch {
+      // unreadable: no version to compare
+    }
+  }
+  return { node: node && isAbsolute(node) ? node : null, version };
+}
+
 /** `user`: the targets whose settings this is, at user scope, where deny rules are not expected. */
 function inspectSettingsFile(settingsPath: string, env: Env, user?: Targets): SettingsInstall {
   const text = readOrNull(settingsPath);
@@ -105,7 +127,12 @@ function inspectSettingsFile(settingsPath: string, env: Env, user?: Targets): Se
     settings: settingsPath,
     status,
     ...(problem ? { problem } : {}),
-    hook: { installed: command !== null, command, missingPaths: command ? missingPaths(command, env) : [] },
+    hook: {
+      installed: command !== null,
+      command,
+      missingPaths: command ? missingPaths(command, env) : [],
+      ...hookTarget(command),
+    },
     deny: user
       ? { expected: false, present: found.denyPresent, ghxAdded }
       : { expected: true, present: found.denyPresent, missing: found.denyMissing },

@@ -21,6 +21,7 @@ import { after, test } from 'node:test';
 import { BEGIN, END } from '../../src/install/claude-md.ts';
 import { GHX_BIN } from '../../src/install/files.ts';
 import { GHX_DENY_RULES } from '../../src/install/settings.ts';
+import { VERSION } from '../../src/version.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { fakeGit } from '../helpers/fake-git.ts';
 import { runInProcess } from '../helpers/harness.ts';
@@ -485,6 +486,37 @@ test('a --bin-dir-only re-install records the link, and uninstall leaves a link 
   assert.equal(read(join(bin, 'ghx')), 'mine');
 });
 
+test('doctor warns when the hook runs another ghx version or another node than the running ghx', async () => {
+  const h = home();
+  await run(['install', '--no-snippet'], { HOME: h.home });
+  const fresh = await run(['doctor'], { HOME: h.home });
+  const u = fresh.json.install.user.hook;
+  assert.equal(u.node, process.execPath);
+  assert.equal(u.version, VERSION);
+  assert.ok(!fresh.json.warnings?.some((w: { code: string }) => w.code.endsWith('_MISMATCH')), fresh.stdout);
+
+  // An older global install: its package.json says another version.
+  const old = join(tmp, `old-ghx-${n++}`);
+  mkdirSync(join(old, 'bin'), { recursive: true });
+  writeFileSync(join(old, 'bin', 'ghx.js'), '');
+  writeFileSync(join(old, 'package.json'), '{"name":"@thegoldenmule/ghx","version":"0.0.1"}\n');
+  const otherNode = join(old, 'node');
+  writeFileSync(otherNode, '');
+  const set = (command: string) => {
+    const s = json(h.settings);
+    s.hooks.PreToolUse[0].hooks[0].command = command;
+    writeFileSync(h.settings, JSON.stringify(s));
+  };
+  const codes = async () =>
+    ((await run(['doctor'], { HOME: h.home })).json.warnings ?? []).map((w: { code: string }) => w.code);
+  set(`'${process.execPath}' '${join(old, 'bin', 'ghx.js')}' hook claude-pretooluse`);
+  assert.deepEqual(await codes(), ['INSTALL_HOOK_VERSION_MISMATCH']);
+  set(`'${otherNode}' '${GHX_BIN}' hook claude-pretooluse`);
+  assert.deepEqual(await codes(), ['INSTALL_HOOK_NODE_MISMATCH']);
+  const r = await run(['doctor'], { HOME: h.home });
+  assert.match(r.json.warnings[0].message, /Re-run ghx install/);
+});
+
 /** The shape of a real user settings file (fake values): permissions without deny, an empty PreToolUse, env, statusLine. */
 const REAL_SHAPE = {
   env: { FAKE_FLAG: '1', OTHER: 'x' },
@@ -767,7 +799,13 @@ test('doctor reports the install per scope, informationally, and flags a hook wh
   const git = fakeGit({ toplevel: repo });
   const before = await run(['doctor'], { HOME: h.home }, { git });
   assert.notEqual(before.exitCode, 1, before.stdout);
-  assert.deepEqual(before.json.install.user.hook, { installed: false, command: null, missingPaths: [] });
+  assert.deepEqual(before.json.install.user.hook, {
+    installed: false,
+    command: null,
+    missingPaths: [],
+    node: null,
+    version: null,
+  });
   assert.equal(before.json.install.user.status, 'missing');
   assert.equal(before.json.install.project.settings, join(repo, '.claude', 'settings.local.json'));
   assert.equal(before.json.install.project.shared.settings, join(repo, '.claude', 'settings.json'));
@@ -793,6 +831,7 @@ test('doctor reports the install per scope, informationally, and flags a hook wh
   assert.deepEqual(stale.json.install.user.hook.missingPaths, ['/gone/node']);
   assert.ok(stale.json.warnings.some((w: { code: string }) => w.code === 'INSTALL_HOOK_STALE'));
   assert.equal(stale.exitCode, before.exitCode);
+  assert.ok(!stale.json.warnings.some((w: { code: string }) => w.code.endsWith('_MISMATCH')), 'stale covers it');
 
   // A hand install in the repo's shared .claude/settings.json is read too, with its own remedy.
   mkdirSync(join(repo, '.claude'), { recursive: true });
