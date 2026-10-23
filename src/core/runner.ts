@@ -288,7 +288,9 @@ export async function runCommandWith(
     return { exitCode: spec.exitCode?.(checked.data as never) ?? ExitCode.OK, forced: false };
   } catch (e) {
     if (e instanceof DryRunHalt) {
-      const wouldRun = [{ argv: e.argv, ...(e.stdin !== undefined ? { stdin: e.stdin } : {}) }];
+      // An empty argv halts a write with nothing to send (pr merge --dry-run on a merged PR): wouldRun is [].
+      const wouldRun =
+        e.argv.length === 0 ? [] : [{ argv: e.argv, ...(e.stdin !== undefined ? { stdin: e.stdin } : {}) }];
       const preview = previews.length === 0 ? null : previews.length === 1 ? previews[0] : previews;
       await emitDocument(
         deps.stdout,

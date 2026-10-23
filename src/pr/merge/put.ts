@@ -159,6 +159,26 @@ function notMergeable(o: PutMergeOptions, pull: MergePull, github: string, statu
   });
 }
 
+/** A 409 although the re-read head is still H: a known refusal from the re-read, else a state error. */
+function refusedAtHead(o: PutMergeOptions, pull: MergePull, github: string, status: number): GhxError {
+  const ms = (pull.mergeable_state ?? 'unknown').toLowerCase();
+  if (pull.state !== 'open' || !['clean', 'unstable', 'has_hooks'].includes(ms)) {
+    return notMergeable(o, pull, github, status);
+  }
+  const h = short(headOf(o));
+  return blockedAtPut(
+    o.plan,
+    'MERGEABLE_UNKNOWN',
+    `GitHub refused the merge (HTTP 409) although the head is still ${h}: the base branch changed, or GitHub refused it for another reason.`,
+    {
+      status,
+      github,
+      mergeableState: ms,
+      hint: `Re-check: ghx pr status ${o.ref}, then retry: ghx pr merge ${o.ref} --expect-head ${h}.`,
+    },
+  );
+}
+
 /**
  * Poll GET pulls/N until it reports merged at H with a merge commit; READBACK_MISMATCH after VERIFY_MS
  * (never a false success). `first` is a read already made (a re-read after a refused or failed PUT), so a
@@ -221,9 +241,13 @@ export async function putMerge(o: PutMergeOptions): Promise<MergeOutcome> {
     const status = failure.failure.status;
     const github = githubMessage(failure);
     if (status === 409) {
-      // The head moved after the snapshot: GitHub refused the pinned sha. Never retried.
+      // GitHub refused the pinned sha: the head moved after the snapshot. Never retried.
       const pull = await tryRead(o);
-      throw headMovedError(o.ref, h, pull?.head.sha ?? null, { status, github });
+      if (pull === null || pull.head.sha !== h)
+        throw headMovedError(o.ref, h, pull?.head.sha ?? null, { status, github });
+      if (pull.merged) return { ...(await verify(o, null, pull)), alreadyMerged: true };
+      // The head is still H, so it is not HEAD_MOVED: the base changed under the merge, or GitHub refused it.
+      throw refusedAtHead(o, pull, github, status);
     }
     if (status === 405) {
       const pull = await tryRead(o);

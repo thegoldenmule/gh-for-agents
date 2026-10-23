@@ -4,6 +4,7 @@
 import { z } from 'zod';
 import { MergeMethod } from '../../config/sections/_shared.ts';
 import { defineCommand } from '../../core/command.ts';
+import { DryRunHalt } from '../../gh/index.ts';
 import { afterMerge } from '../../pr/merge/branch.ts';
 import { planMerge } from '../../pr/merge/plan.ts';
 import { putMerge } from '../../pr/merge/put.ts';
@@ -58,6 +59,12 @@ export default defineCommand({
     const deleteBranch = input.deleteBranch ?? d.config.merge.deleteBranch;
     const after = () => afterMerge({ ctx, repo: d.repo, snapshot, head: d.head, deleteBranch });
     if (d.kind === 'already-merged') {
+      if (ctx.dryRun) {
+        ctx.preview({ wouldMerge: false, alreadyMerged: true, mergeCommit: d.mergeCommit, deleteBranch, plan });
+        // A branch delete halts at its DELETE; with nothing to send, halt with an empty wouldRun.
+        await after();
+        throw new DryRunHalt([], undefined);
+      }
       const { deletedBranch, children } = await after();
       return {
         ref: snapshot.ref,

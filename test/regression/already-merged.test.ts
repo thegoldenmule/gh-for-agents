@@ -68,3 +68,21 @@ test('R17 race: a 405 re-read merged at H without a merge commit yet is polled, 
   assert.equal(r.json.alreadyMerged, true);
   assert.equal(r.json.mergeCommit, MERGE_COMMIT);
 });
+
+test('R17: --dry-run on an already merged PR is a dry-run result with nothing to run, not a merge success', async () => {
+  const fake = installMerge(undefined, { pr: merged() });
+  const r = await runMerge(['pr', 'merge', REF, '--dry-run'], fake);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.dryRun, true);
+  assert.deepEqual(r.json.wouldRun, []);
+  assert.equal(r.json.merged, undefined);
+  assert.deepEqual([r.json.preview.alreadyMerged, r.json.preview.mergeCommit], [true, MERGE_COMMIT]);
+  fake.expectNoMutations();
+  // With --delete-branch it halts at the DELETE it would send.
+  const del = await runMerge(
+    ['pr', 'merge', REF, '--dry-run', '--delete-branch'],
+    installMerge(undefined, { pr: merged() }),
+  );
+  assert.equal(del.json.dryRun, true, del.stdout);
+  assert.ok(del.json.wouldRun[0].argv.includes('DELETE'), JSON.stringify(del.json.wouldRun));
+});

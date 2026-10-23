@@ -59,3 +59,25 @@ test('R01b: a 409 whose re-read fails is still HEAD_MOVED, with the new head unk
   assert.equal(r.json.error.details.actual, null);
   assert.equal(puts(fake).length, 1);
 });
+
+test('R01b: a 409 whose re-read shows the head unchanged is not HEAD_MOVED: the base changed or GitHub refused', async () => {
+  const fake = installMerge();
+  fake.on(isPut, put409());
+  fake.on(isPullGet, okJson(openPull('clean')));
+  const r = await runMerge(['pr', 'merge', REF], fake);
+  assert.equal(r.exitCode, EXIT.STATE, r.stdout);
+  assert.equal(r.json.error.code, 'MERGE_BLOCKED');
+  const [blocker] = r.json.error.details.plan.blockers;
+  assert.equal(blocker.code, 'MERGEABLE_UNKNOWN');
+  assert.match(blocker.message, /head is still 9f2c4e1/);
+  assert.match(blocker.message, /base branch changed|refused/);
+  assert.equal(blocker.details.status, 409);
+  assert.match(r.json.error.hint, /--expect-head 9f2c4e1/);
+  assert.equal(puts(fake).length, 1, 'never retried');
+
+  const behind = installMerge();
+  behind.on(isPut, put409());
+  behind.on(isPullGet, okJson(openPull('behind')));
+  const b = await runMerge(['pr', 'merge', REF], behind);
+  assert.equal(b.json.error.details.plan.blockers[0].code, 'BEHIND_BASE', b.stdout);
+});
