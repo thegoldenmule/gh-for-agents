@@ -280,7 +280,19 @@ export async function* runWait(
   }
 
   const shape: CommandShape = { ...o, repo: flagRepo };
-  const identical = identicalCommand(shape);
+  /**
+   * The identical command, with each bound unpinned branch target pinned to its bound SHA: re-running
+   * `branch:<name>` after the branch moved would bind the new head and lose the commit being waited on.
+   */
+  const identical = (): string =>
+    identicalCommand({
+      ...shape,
+      targets: runs.map((r, i) =>
+        r.target.kind === 'branch' && r.target.sha === null && r.st
+          ? `branch:${r.target.branch}@${r.st.boundSha}`
+          : (o.targets[i] as string),
+      ),
+    });
   const prRef = (r: Run) => (r.target.kind === 'pr' ? r.label : null);
   const active = () => runs.filter((r) => r.summary === null);
   const save = (r: Run) => {
@@ -328,7 +340,7 @@ export async function* runWait(
         headSha: st.boundSha,
         settled: d?.settled ?? false,
         flaky: flaky.length > 0,
-        identical,
+        identical: identical(),
       }),
     };
   };
@@ -352,7 +364,7 @@ export async function* runWait(
     stalled: [],
     rerunCandidates: [],
     merge: null,
-    next: [identical],
+    next: [identical()],
   });
 
   const finish = (
@@ -378,6 +390,8 @@ export async function* runWait(
 
   /** A fresh binding: the expected set (required, config, baseline), read once and stored. */
   async function bind(r: Run, sha: string, t: TickResult): Promise<WaitState> {
+    // An unpinned branch target's state lives under its pinned key, the target its `next` names.
+    if (r.target.kind === 'branch' && r.target.sha === null) r.key = targetKey({ ...r.target, sha });
     const loaded = r.store.load(r.key, sha);
     const first = !r.bound;
     r.bound = true;

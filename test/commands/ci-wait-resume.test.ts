@@ -284,6 +284,30 @@ test('branch:main moved since run 1: run 2 binds the new head fresh, not the sto
   assert.equal(second.json.resumed, false);
 });
 
+test('branch:main pending: next pins the bound SHA, and running it resumes that commit after main moved', async () => {
+  const clock = new FakeClock();
+  const build: SimJob = { id: 71, runId: 71, name: 'build', status: 'in_progress', startedAt: 0 };
+  const sim = new GitHubSim(clock, { pr: { state: 'open', head: H }, branches: { main: H }, checks: { [H]: [build] } });
+  const unattended = { env: { CLAUDE_CODE_SESSION_ATTENDED: undefined } };
+  const first = await wait(sim, ['branch:main', '-R', 'o/r'], unattended);
+  assert.equal(first.exitCode, EXIT.CI_PENDING_RESUME, first.stdout);
+  const next = first.json.results[0].next as string[];
+  assert.deepEqual(next, [`ghx ci wait branch:main@${H} -R o/r`]);
+  // main moves on; the pinned re-run still waits for the commit it was bound to.
+  const t = clock.monotonic() + 1;
+  sim.at(t, (s) => ({
+    ...s,
+    branches: { main: H2 },
+    checks: { [H]: [{ ...build, status: 'completed', conclusion: 'success', completedAt: t }], [H2]: [] },
+  }));
+  await clock.advance(1);
+  const argv = (next[0] as string).split(' ').slice(3);
+  const second = await wait(sim, argv, { artifacts: first.artifacts });
+  assert.equal(second.exitCode, EXIT.OK, second.stdout);
+  assert.equal(second.json.results[0].headSha, H);
+  assert.equal(second.json.resumed, true);
+});
+
 test('--on-head-change stop: a head that moved between runs is bound fresh, never a superseded loop', async () => {
   const { clock, sim, a, b } = world();
   set(sim, 0, [{ ...a, status: 'completed', conclusion: 'failure', completedAt: 0 }, b]);
