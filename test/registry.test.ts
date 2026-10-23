@@ -20,9 +20,10 @@ const RESERVED_EVENT_TYPES = new Set(['summary', 'error', 'heartbeat', 'warning'
 /**
  * Write commands that change only local files, never GitHub, so their --dry-run is their own document
  * rather than the {dryRun: true} halt. They must make no gh call at all in the smoke run. Their own
- * tests cover the dry run (init: test/commands/init.test.ts).
+ * tests cover the dry run (init: test/commands/init.test.ts; install and uninstall:
+ * test/commands/install.test.ts).
  */
-const LOCAL_WRITES = new Set(['init']);
+const LOCAL_WRITES = new Set(['init', 'install', 'uninstall']);
 
 function allFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((d) =>

@@ -53,6 +53,11 @@ export const ERROR_CODES = {
   },
   ENV_GH_AUTH: { exit: ExitCode.ENV, hint: "Run 'gh auth login' (a human must do this)." },
   ENV_GIT_MISSING: { exit: ExitCode.ENV, hint: 'Install git.' },
+  // ghx install / uninstall refuse to touch a local file they can't edit safely; a human fixes it.
+  INSTALL_SETTINGS_INVALID: { exit: ExitCode.ENV, hint: 'Fix the settings file by hand, then run it again.' },
+  INSTALL_CLAUDE_MD_INVALID: { exit: ExitCode.ENV, hint: 'Fix the ghx marker lines by hand, then run it again.' },
+  INSTALL_BIN_CONFLICT: { exit: ExitCode.ENV, hint: 'Move the existing file, or pass a different --bin-dir.' },
+  INSTALL_HOME_UNKNOWN: { exit: ExitCode.ENV, hint: 'Set HOME or CLAUDE_CONFIG_DIR, or use --scope project.' },
 
   // ── 5 NOT_FOUND ──────────────────────────────────────────────────────────
   PR_NOT_FOUND: { exit: ExitCode.NOT_FOUND },

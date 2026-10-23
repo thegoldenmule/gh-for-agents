@@ -42,8 +42,8 @@
       "paths": ["src/render/**"]
     },
     "hook": {
-      "description": "The Claude Code PreToolUse hook",
-      "paths": ["src/hook/**", "src/commands/hook/**"]
+      "description": "The Claude Code PreToolUse hook and ghx install",
+      "paths": ["src/hook/**", "src/commands/hook/**", "src/install/**"]
     },
     "passthrough": {
       "description": "Allowlisted raw gh reads and write refusals",

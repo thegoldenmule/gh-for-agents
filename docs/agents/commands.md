@@ -11,6 +11,7 @@ Every command prints one JSON document (or a spill result). Errors are `{"error"
 - [`ghx doctor`](#ghx-doctor) (read): Check the setup: gh version and features, auth, git, the target repo and its config.
 - [`ghx hook claude-pretooluse`](#ghx-hook-claude-pretooluse) (read): Claude Code PreToolUse hook: background ghx ci wait, steer raw gh to ghx (stdin protocol)
 - [`ghx init`](#ghx-init) (write): Write a starter .github/ghx.json (components inferred from the workspace).
+- [`ghx install`](#ghx-install) (write): Install the Claude Code hook, gh write deny rules and CLAUDE.md block (try --dry-run).
 - [`ghx pr comment`](#ghx-pr-comment) (write): Post a typed coordination comment: note, merge precondition, status or supersede
 - [`ghx pr create`](#ghx-pr-create) (write): Open a PR from validated JSON: compact body, hidden ghx block, exact read-back
 - [`ghx pr edit`](#ghx-pr-edit) (write): Patch a ghx PR: re-validated, block rev+1, retarget or draft toggle, exact read-back
@@ -208,6 +209,35 @@ Examples:
 - `ghx init --component reactor --component codegen`
 
 Schema: `ghx init --schema`.
+
+## ghx install
+
+Install the Claude Code hook, gh write deny rules and CLAUDE.md block (try --dry-run).
+
+`ghx install [flags]`
+
+write, single document, timeout 1m (max 5m).
+
+User scope edits $CLAUDE_CONFIG_DIR (else ~/.claude)/settings.json and CLAUDE.md; project scope edits .claude/settings.json and CLAUDE.md at the git toplevel. Keeps every other setting, backs up each changed file to <file>.bak-ghx-<time>, and writes atomically. The hook runs this checkout by absolute path. Re-running updates in place; --dry-run returns unified diffs and writes nothing. Undo: ghx uninstall.
+
+Flags:
+
+- `--scope <user|project>` (default `"user"`): user (~/.claude) or project (repo .claude/)
+- `--deny` (default `true`): Merge the gh write deny rules; --no-deny skips them
+- `--hook` (default `true`): Register the PreToolUse hook; --no-hook skips it
+- `--snippet` (default `true`): Add the CLAUDE.md block; --no-snippet skips it
+- `--bin-dir <string>`: Also symlink <dir>/ghx to bin/ghx.js
+- `--hook-mode <ask|deny>`: deny sets env.GHX_HOOK_MODE=deny; ask removes it (the default mode)
+
+Input: Flags and positionals only; --input file.json is also accepted.
+
+Examples:
+
+- `ghx install --dry-run`: Show the diffs first
+- `ghx install --bin-dir ~/.local/bin`
+- `ghx install --scope project --no-snippet`
+
+Schema: `ghx install --schema`.
 
 ## ghx pr comment
 

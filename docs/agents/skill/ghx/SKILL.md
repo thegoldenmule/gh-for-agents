@@ -69,6 +69,7 @@ Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then co
 - `ghx doctor` (read): Check the setup: gh version and features, auth, git, the target repo and its config.
 - `ghx hook claude-pretooluse` (read): Claude Code PreToolUse hook: background ghx ci wait, steer raw gh to ghx (stdin protocol)
 - `ghx init` (write): Write a starter .github/ghx.json (components inferred from the workspace).
+- `ghx install` (write): Install the Claude Code hook, gh write deny rules and CLAUDE.md block (try --dry-run).
 - `ghx pr comment` (write): Post a typed coordination comment: note, merge precondition, status or supersede
 - `ghx pr create` (write): Open a PR from validated JSON: compact body, hidden ghx block, exact read-back
 - `ghx pr edit` (write): Patch a ghx PR: re-validated, block rev+1, retarget or draft toggle, exact read-back
