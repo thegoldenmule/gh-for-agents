@@ -36,8 +36,8 @@ So the two rules carry these intents:
 
 `components` stays the agent's list, capped at 5. ghx derives the rest from the diff and records it.
 
-1. **While `components` has room, the touched rule is unchanged.** If fewer than 5 components are declared and the diff touches an undeclared one, `components.undeclared_touched` fires as today. A PR whose touched set fits in 5 is validated exactly as before.
-2. **Wide PRs.** When the declared list together with the touched components exceeds 5:
+1. **A PR that touches at most 5 components is validated exactly as before.** Every touched component must be declared, and `components.undeclared_touched` names each one that is not.
+2. **Wide PRs.** When the diff touches more than 5 components:
    - with fewer than 5 declared, one `components.undeclared_touched` issue names the count and asks for the 5 primary components (not one issue per component);
    - with 5 declared, the touched components outside `components` are valid. ghx records them in the block as `alsoTouched` and warns `COMPONENTS_ALSO_TOUCHED`.
 3. **Risk floors cover `alsoTouched`.** `risk.below_component_floor` is also checked against the `minRisk` of every `alsoTouched` component (a network rule, because only the diff knows the set). Filling `components` with 5 low-floor names cannot hide a `minRisk: high` component.
@@ -49,7 +49,7 @@ So the two rules carry these intents:
 
 ```ts
 components: z.array(ComponentName).min(1).max(MAX_COMPONENTS)
-  .describe('Primary components from .github/ghx.json, up to 5. List every component the diff touches while there is room; past 5, ghx records the rest as alsoTouched'),
+  .describe('Components from .github/ghx.json: every one the diff touches; past 5, the 5 primary ones (ghx records the rest as alsoTouched)'),
 ```
 
 The `pr` block (02 §9.2) gains one optional field:
@@ -90,8 +90,8 @@ The names stay in the hidden block, so the visible body stays one line however w
 
 | Case | Code | Text |
 |---|---|---|
-| Fits in 5, some undeclared | `components.undeclared_touched` (issue) | Unchanged: `the PR changes shared (libs/common/x.ts, …); add 'shared' to components` |
-| Wide, fewer than 5 declared | `components.undeclared_touched` (issue) | `the PR touches 26 components (connect, apps-switchboard, ph-cli, +23 more), more than components can list (5); declare the 5 primary ones and ghx records the rest as alsoTouched` |
+| Touches ≤ 5, some undeclared | `components.undeclared_touched` (issue) | Unchanged: `the PR changes shared (libs/common/x.ts, …); add 'shared' to components` |
+| Wide, fewer than 5 declared | `components.undeclared_touched` (issue) | `the PR touches 26 components, more than components can list (5); declare the 5 primary ones and ghx records the rest as alsoTouched (undeclared: connect, apps-switchboard, ph-cli, +20 more)` |
 | Wide, 5 declared | `COMPONENTS_ALSO_TOUCHED` (warning) | `The PR also touches 21 components beyond the 5 declared; recorded as alsoTouched: connect, apps-switchboard, ph-cli, +18 more.` |
 | Floor set by a derived component | `risk.below_component_floor` (issue) | `risk 'low' is below the floor set by host-core (high), which the PR also touches, in .github/ghx.json` |
 
@@ -109,7 +109,7 @@ Warnings list at most 3 names, then a count, so their length is bounded.
 
 | Area | Case | Valid | Invalid |
 |---|---|---|---|
-| `createNetworkRules` | touched set fits in 5 | all declared | one undeclared: per-component issue (existing test) |
+| `createNetworkRules` | touches ≤ 5 | all declared | one undeclared: per-component issue (existing test); 5 declared with one unrelated and one touched missing: still per-component, nothing recorded |
 | | wide, room left | — | 2 declared of 7 touched: one issue with the count and first 3 names, `alsoTouched` empty |
 | | wide, full | 5 declared of 7 touched: no issue, `alsoTouched` the 2 others in config order, warning `COMPONENTS_ALSO_TOUCHED` | — |
 | | floor via `alsoTouched` | risk at the derived component's floor | risk below it: `risk.below_component_floor` naming the component |
@@ -126,6 +126,6 @@ Warnings list at most 3 names, then a count, so their length is bounded.
 
 1. **Derive the remainder rather than raise the cap.** A per-repo `create.maxComponents` was rejected: #3259 would need a 26-name list written by hand, and the trailer would carry all 26. Agents should not enumerate what ghx can derive from the diff, and the body must stay compact.
 2. **No wide marker.** A `"wide": true` flag or a `*` component was rejected: it drops which components were touched, and with it the risk floors.
-3. **The touched rule still applies while `components` has room.** The alternative was to always derive, so `components` would only be the primaries even for a 2-component PR. That changes the contract for every small PR and hides a forgotten component behind a warning. With this rule the behaviour changes only where no valid input existed before. Choosing "always derive" later is a rule change in `createNetworkRules` alone, because the block field and the trailer would stay the same.
+3. **The touched rule still applies whenever the touched set fits in 5.** The alternative was to always derive, so `components` would only be the primaries even for a 2-component PR. That changes the contract for every small PR and hides a forgotten component behind a warning. With this rule the behaviour changes only where no valid input existed before. Choosing "always derive" later is a rule change in `createNetworkRules` alone, because the block field and the trailer would stay the same.
 4. **A full list (5) is required before ghx records the rest.** Without that, an agent could declare 1 component on a 26-component PR. Filling the list to the cap matches the touched rule's intent as closely as the cap allows.
 5. **`alsoTouched` stores only the undeclared names**, not the whole touched set. Then the block is unchanged for PRs that are not wide, and nothing is stored twice.

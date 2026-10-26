@@ -214,7 +214,7 @@ const PrCreateInput = z.object({ title: z.string(), description: z.string(),
 | refs.stackedOn | `refs.stacked_on_default_base` | Not allowed on the default base |
 
 **Network checks** (reported as `VALIDATION` issues):
-- `components.undeclared_touched`: a changed path belongs to an undeclared component.
+- `components.undeclared_touched`: a changed path belongs to an undeclared component. A PR that touches more than 5 declares its 5 primary components and ghx records the rest as `alsoTouched` (06).
 - `refs.stack_mismatch`: `stackedOn` disagrees with the PR whose head is the base.
 - `refs.not_found`: a referenced PR or issue doesn't exist.
 
@@ -345,7 +345,7 @@ One object that answers: what is this PR, can it land, and what's left (§8a, §
 
 ```ts
 const PrMeta = z.object({ id: z.string(), rev: z.number(), gen: z.string(), risk: Risk.or(z.string()), riskNote: z.string().nullable(),
-  components: z.array(z.string()), revertPolicy: RevertPolicy.or(z.string()), revertNote: z.string().nullable(), revertWith: z.array(PrRef),
+  components: z.array(z.string()), alsoTouched: z.array(z.string()) /* 06 */, revertPolicy: RevertPolicy.or(z.string()), revertNote: z.string().nullable(), revertWith: z.array(PrRef),
   testing: z.array(TestingItem.passthrough()), refs: Refs.passthrough() });
 const Violation = z.object({ code: z.string(), message: z.string(), overridable: z.boolean(), details: z.record(z.unknown()).optional() });
 const StatusEvent = z.object({ id: z.string(), by: z.string(), at: Iso, commit: Sha.nullable(), note: z.string().nullable(), verified: z.boolean().nullable(), url: z.string() });
@@ -775,7 +775,7 @@ The code is `MERGE_BLOCKED`. The exit code is **6** if any blocker is policy-cla
 
 ```ts
 const PrBlock = z.object({ t: z.literal("pr"), id, gen, rev: z.number().int().min(1), title, description, testing, risk, riskNote?,
-  components, revertPolicy, revertNote?, revertWith?, refs? }).strict();   // PR body; one (extra ⇒ first valid + DUPLICATE_BLOCK)
+  components, alsoTouched? /* 06 */, revertPolicy, revertNote?, revertWith?, refs? }).strict();   // PR body; one (extra ⇒ first valid + DUPLICATE_BLOCK)
 const ReviewBlock = z.object({ t: z.literal("review"), id, gen, verdict: Verdict, summary, scope?, commit: Sha, findings: z.array(z.string()) }).strict();
 const FindingBlock = z.object({ t: z.literal("finding"), id, gen, review: z.string(), severity: Severity, path: RepoPath, line, endLine?,
   side, alsoAt, title, body, suggestion?, commit: Sha }).strict();         // no status field: initially open
@@ -1314,7 +1314,7 @@ How to read this stream:
   "meta": {
     "id": "p_k3m9qa", "rev": 1, "gen": "ghx/0.1.0", "risk": "medium",
     "riskNote": "Clients that sign without a documentId now get a verification error instead of silent acceptance.",
-    "components": ["reactor", "shared"], "revertPolicy": "revert-safe", "revertNote": null, "revertWith": [],
+    "components": ["reactor", "shared"], "alsoTouched": [], "revertPolicy": "revert-safe", "revertNote": null, "revertWith": [],
     "testing": [
       {"kind": "unit", "command": "pnpm --filter @powerhousedao/reactor test -- signature", "result": "pass", "notes": "4 new cases: unbound and cross-document signatures"},
       {"kind": "integration", "command": "pnpm --filter @powerhousedao/reactor-api test", "result": "pass"},

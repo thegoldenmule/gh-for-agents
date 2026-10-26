@@ -68,7 +68,10 @@ The agent writes the PR as data (`ghx pr create --input pr.json`):
 ```
 
 `ghx` checks the title format and length, the description length, and that
-each test can be re-run. It checks the components against `.github/ghx.json`.
+each test can be re-run. It checks the components against `.github/ghx.json`
+and the diff: every component the PR touches must be listed. A PR that touches
+more than 5 lists its 5 primary components, and `ghx` records the rest in the
+hidden block (`alsoTouched`), shown as `Components: a, b, c, d, e (+21 more)`.
 It then renders a short body:
 
 ```markdown
