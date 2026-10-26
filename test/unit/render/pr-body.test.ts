@@ -298,3 +298,38 @@ describe('parsePrBody', () => {
     assert.equal(parsePrBody('').footer, null);
   });
 });
+
+describe('alsoTouched (06)', () => {
+  const input = readInput('footer-null.input.json');
+
+  test('toPrBlock keeps a non-empty alsoTouched and omits an empty one', () => {
+    assert.deepEqual(toPrBlock(input, { ...META, alsoTouched: ['ci', 'vetra'] }).alsoTouched, ['ci', 'vetra']);
+    assert.ok(!('alsoTouched' in toPrBlock(input, { ...META, alsoTouched: [] })));
+    assert.ok(!('alsoTouched' in toPrBlock(input, META)));
+  });
+
+  test('the strict PrBlock rejects an empty alsoTouched', () => {
+    const block = toPrBlock(input, META);
+    assert.throws(
+      () => renderPrBody({ ...block, alsoTouched: [] }, TRAILER),
+      (e: unknown) => isGhxError(e, 'INTERNAL'),
+    );
+  });
+
+  test('the trailer shows the count after the declared components; the names stay in the block', () => {
+    const block = toPrBlock(input, { ...META, alsoTouched: ['ci', 'vetra'] });
+    assert.equal(
+      renderTrailer(block),
+      'Risk: trivial · Components: docs (+2 more) · Revert: revert-safe · Tests: 1/1 pass (build)',
+    );
+    const body = renderPrBody(block, TRAILER);
+    const parsed = parsePrBody(body, { footer: DEFAULT_FOOTER });
+    assert.equal(parsed.trailer, renderTrailer(block));
+    const read = readPrBlock(body);
+    assert.equal(read.status, 'ok');
+    if (read.status === 'ok') {
+      assert.deepEqual(read.block.alsoTouched, ['ci', 'vetra']);
+      assert.deepEqual(prBodyDrift(body, read.block, TRAILER, block.title), []);
+    }
+  });
+});

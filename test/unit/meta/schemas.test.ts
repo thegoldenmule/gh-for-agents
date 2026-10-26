@@ -15,6 +15,7 @@ import {
   readBlocks,
   readPrBlock,
 } from '../../../src/meta/schemas.ts';
+import { prMetaOf } from '../../../src/pr/status/output.ts';
 import { assertExportable } from '../schemas/_exportable.ts';
 
 const body = (f: string) => readFileSync(join(import.meta.dirname, '../../fixtures/bodies', f), 'utf8');
@@ -198,4 +199,18 @@ test('readPrBlock: first valid wins, extras warn DUPLICATE_BLOCK; v2 gives SCHEM
     ['SCHEMA_NEWER'],
   );
   assert.equal(readPrBlock('plain').status, 'absent');
+});
+
+test('06: the pr block takes an optional alsoTouched; prMetaOf reports it, [] when absent', () => {
+  const wide = { ...pr, alsoTouched: ['connect', 'ci'] };
+  assert.ok(PrBlock.safeParse(wide).success);
+  assert.ok(!PrBlock.safeParse({ ...pr, alsoTouched: [] }).success);
+  const read = readPrBlock(`Text.\n\n${encodeBlock(wide)}`);
+  assert.equal(read.status, 'ok');
+  if (read.status !== 'ok') return;
+  assert.deepEqual(read.block.alsoTouched, ['connect', 'ci']);
+  assert.deepEqual(prMetaOf(read.block).alsoTouched, ['connect', 'ci']);
+  const plain = readPrBlock(`Text.\n\n${encodeBlock(pr)}`);
+  assert.equal(plain.status, 'ok');
+  if (plain.status === 'ok') assert.deepEqual(prMetaOf(plain.block).alsoTouched, []);
 });

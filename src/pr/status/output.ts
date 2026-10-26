@@ -14,6 +14,7 @@ export function prMetaOf(b: PrBlockRead): PrMeta {
     risk: b.risk,
     riskNote: b.riskNote ?? null,
     components: [...b.components],
+    alsoTouched: [...(b.alsoTouched ?? [])],
     revertPolicy: b.revertPolicy,
     revertNote: b.revertNote ?? null,
     revertWith: [...(b.revertWith ?? [])],

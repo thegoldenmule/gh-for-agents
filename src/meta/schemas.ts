@@ -65,6 +65,8 @@ export const PrBlock = z.strictObject({
   risk: Risk,
   riskNote: Text.optional(),
   components: z.array(ComponentName).min(1),
+  /** Touched by the diff but not in `components` (06); absent when none. */
+  alsoTouched: z.array(ComponentName).min(1).optional(),
   revertPolicy: RevertPolicy,
   revertNote: Text.optional(),
   revertWith: z.array(PrRef).min(1).max(10).optional(),
@@ -138,6 +140,7 @@ export const PrBlockRead = z.looseObject({
   risk: RiskRead,
   riskNote: z.string().optional(),
   components: z.array(ComponentRead),
+  alsoTouched: z.array(ComponentRead).optional(),
   revertPolicy: RevertPolicyRead,
   revertNote: z.string().optional(),
   revertWith: z.array(PrRef).optional(),

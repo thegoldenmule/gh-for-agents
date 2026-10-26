@@ -42,6 +42,7 @@
       "reactor",
       "shared"
     ],
+    "alsoTouched": [],
     "revertPolicy": "revert-safe",
     "revertNote": null,
     "revertWith": [],

@@ -17,6 +17,8 @@ export const PrMeta = z.object({
   risk: RiskRead,
   riskNote: z.string().nullable(),
   components: z.array(z.string()),
+  /** Components the diff touched beyond `components`, recorded by ghx (06); [] when none. */
+  alsoTouched: z.array(z.string()),
   revertPolicy: RevertPolicyRead,
   revertNote: z.string().nullable(),
   revertWith: z.array(PrRef),
