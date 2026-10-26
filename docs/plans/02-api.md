@@ -221,6 +221,7 @@ const PrCreateInput = z.object({ title: z.string(), description: z.string(),
 Network warnings:
 - `COMPONENTS_UNUSED`: a declared component has no changed paths.
 - `COMPONENTS_UNCHECKED`: over 300 files and no local checkout **[G-300]**.
+- `COMPONENTS_ALSO_TOUCHED`: over 5 touched components; those outside `components` are recorded as `alsoTouched` (06).
 
 ### 2.2 Rendering
 
