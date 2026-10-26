@@ -39,7 +39,7 @@ function data(p: Partial<CreateNetworkData> = {}): CreateNetworkData {
 }
 
 test('a clean PR has no issues and no warnings', () => {
-  assert.deepEqual(createNetworkRules(input(), config, data()), { issues: [], warnings: [] });
+  assert.deepEqual(createNetworkRules(input(), config, data()), { issues: [], warnings: [], alsoTouched: [] });
 });
 
 test('components.undeclared_touched names the component and its files', () => {
@@ -155,4 +155,92 @@ test('canonicalRef and touchedComponents', () => {
   assert.equal(canonicalRef('A/B#12', 'o/r'), 'a/b#12');
   const t = touchedComponents(['packages/shared/a.ts', 'libs/common/b.ts', 'docs/x.md'], config.components);
   assert.deepEqual([...t], [['shared', ['packages/shared/a.ts', 'libs/common/b.ts']]]);
+});
+
+// 06: wide PRs, where the diff touches more components than `components` holds.
+const wide = ConfigSchema.parse({
+  version: 1,
+  components: Object.fromEntries(
+    ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((n) => [
+      n,
+      { paths: [`${n}/**`], ...(n === 'g' ? { minRisk: 'high' } : {}) },
+    ]),
+  ),
+});
+const wideFiles = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((n) => `${n}/x.ts`);
+
+test('wide, list full: the other touched components are alsoTouched, in config order, with a warning', () => {
+  const r = createNetworkRules(
+    input({ components: ['e', 'd', 'c', 'b', 'a'], risk: 'high', riskNote: 'x' }),
+    wide,
+    data({ changedFiles: wideFiles }),
+  );
+  assert.deepEqual(r.issues, []);
+  assert.deepEqual(r.alsoTouched, ['f', 'g']);
+  assert.deepEqual(r.warnings, [
+    {
+      code: 'COMPONENTS_ALSO_TOUCHED',
+      message: 'The PR also touches 2 components beyond the 5 declared; recorded as alsoTouched: f, g.',
+    },
+  ]);
+});
+
+test('wide, list not full: one undeclared_touched issue with the count and the first three names', () => {
+  const r = createNetworkRules(input({ components: ['a', 'b'] }), wide, data({ changedFiles: wideFiles }));
+  assert.deepEqual(r.alsoTouched, []);
+  assert.deepEqual(r.issues, [
+    {
+      path: 'components',
+      code: 'components.undeclared_touched',
+      message:
+        'the PR touches 7 components, more than components can list (5); declare the 5 primary ones and ghx records the rest as alsoTouched (undeclared: c, d, e, +2 more)',
+    },
+  ]);
+});
+
+test('risk.below_component_floor also covers alsoTouched', () => {
+  const r = createNetworkRules(
+    input({ components: ['a', 'b', 'c', 'd', 'e'], risk: 'medium', riskNote: 'x' }),
+    wide,
+    data({ changedFiles: wideFiles }),
+  );
+  assert.deepEqual(r.issues, [
+    {
+      path: 'risk',
+      code: 'risk.below_component_floor',
+      message: "risk 'medium' is below the floor set by g (high), which the PR also touches, in .github/ghx.json",
+    },
+  ]);
+});
+
+test('touching 5 or fewer: a full list padded with an unrelated component still must declare the touched one', () => {
+  const r = createNetworkRules(
+    input({ components: ['a', 'b', 'c', 'd', 'f'] }),
+    wide,
+    data({ changedFiles: ['a/x.ts', 'b/x.ts', 'c/x.ts', 'd/x.ts', 'e/x.ts'] }),
+  );
+  assert.deepEqual(r.alsoTouched, []);
+  assert.deepEqual(
+    r.issues.map((i) => i.code),
+    ['components.undeclared_touched'],
+  );
+  assert.match(r.issues[0]?.message ?? '', /add 'e' to components/);
+  assert.deepEqual(
+    r.warnings.map((w) => w.code),
+    ['COMPONENTS_UNUSED'],
+  );
+});
+
+test('COMPONENTS_ALSO_TOUCHED lists at most three names', () => {
+  const many = ConfigSchema.parse({
+    version: 1,
+    components: Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`c${i}`, { paths: [`c${i}/**`] }])),
+  });
+  const r = createNetworkRules(
+    input({ components: ['c0', 'c1', 'c2', 'c3', 'c4'] }),
+    many,
+    data({ changedFiles: Array.from({ length: 12 }, (_, i) => `c${i}/x.ts`) }),
+  );
+  assert.equal(r.alsoTouched.length, 7);
+  assert.match(r.warnings[0]?.message ?? '', /touches 7 components .*: c5, c6, c7, \+4 more\.$/);
 });

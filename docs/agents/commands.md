@@ -279,7 +279,7 @@ Open a PR from validated JSON: compact body, hidden ghx block, exact read-back
 
 write, single document, timeout 2m (max 10m).
 
-Write the PR object with your file tool and pass --input pr.json. Draft and stackedOn are derived from the base. Fails with every input issue at once (VALIDATION), DUPLICATE_PR when the head already has an open PR.
+Write the PR object with your file tool and pass --input pr.json. Draft and stackedOn are derived from the base. components lists every component the diff touches; past 5, list the 5 primary ones and ghx records the rest (alsoTouched). Fails with every input issue at once (VALIDATION), DUPLICATE_PR when the head already has an open PR.
 
 Flags:
 
@@ -307,7 +307,7 @@ Patch a ghx PR: re-validated, block rev+1, retarget or draft toggle, exact read-
 
 write, single document, timeout 2m (max 10m).
 
-Write the patch with your file tool and pass --input patch.json; only the fields to change. DESCRIPTION_DRIFT when the visible text was edited in the UI (include it, or --discard-ui-edits); NO_BLOCK unless "adopt": true with the full object. GH_FORBIDDEN unless you have write access or opened the PR yourself (GitHub lets authors edit their own PRs). CONCURRENT_EDIT when the title or body changed since the read; GitHub has no If-Match, so an edit made in the moment between the final re-read and the PATCH is still overwritten.
+Write the patch with your file tool and pass --input patch.json; only the fields to change. DESCRIPTION_DRIFT when the visible text was edited in the UI (include it, or --discard-ui-edits); NO_BLOCK unless "adopt": true with the full object. components follows pr create: past 5 touched, the 5 primary ones (ghx records the rest). GH_FORBIDDEN unless you have write access or opened the PR yourself (GitHub lets authors edit their own PRs). CONCURRENT_EDIT when the title or body changed since the read; GitHub has no If-Match, so an edit made in the moment between the final re-read and the PATCH is still overwritten.
 
 Flags:
 

@@ -18,7 +18,13 @@ export const PrCreateInput = z
     testing: z.array(TestingItem).min(1).max(MAX_TESTING_ITEMS),
     risk: Risk,
     riskNote: OneLine(160).optional().describe('Required for medium and high risk'),
-    components: z.array(ComponentName).min(1).max(MAX_COMPONENTS).describe('Components from .github/ghx.json'),
+    components: z
+      .array(ComponentName)
+      .min(1)
+      .max(MAX_COMPONENTS)
+      .describe(
+        'Components from .github/ghx.json: every one the diff touches; past 5, the 5 primary ones (ghx records the rest as alsoTouched)',
+      ),
     revertPolicy: RevertPolicy,
     revertNote: OneLine(200).optional().describe('Required for revert-with-followup and forward-fix-only'),
     revertWith: z.array(PrRef).max(10).optional().describe('Required (≥1) for coordinated'),

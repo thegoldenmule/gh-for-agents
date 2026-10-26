@@ -13,7 +13,14 @@ import { type PrBlockRead, readPrBlock } from '../../meta/schemas.ts';
 import { parsePrBody, prBodyDrift, renderPrBody, toPrBlock } from '../../render/pr-body.ts';
 import { isLocalTarget } from '../create/plan.ts';
 import { changedFiles, PUSH_PERMISSIONS, runPreflight } from '../create/preflight.ts';
-import { canonicalRef, collectRefs, createNetworkRules, createRules, validationError } from '../create/rules.ts';
+import {
+  alsoTouchedFloor,
+  canonicalRef,
+  collectRefs,
+  createNetworkRules,
+  createRules,
+  validationError,
+} from '../create/rules.ts';
 import { PrCreateInput, type PrEditInput } from '../create/schema.ts';
 import { fetchPrSnapshot, openChildren, type PrSnapshot } from './snapshot.ts';
 
@@ -87,7 +94,7 @@ export interface EditPlan {
 function noBlock(ref: string, why: string, details: Record<string, unknown> | null, adoptable = true): GhxError {
   return new GhxError('NO_BLOCK', `${ref} ${why}.`, {
     hint: adoptable
-      ? 'Adopt it: pass the full object (title, description, testing, risk, components, revertPolicy) with "adopt": true.'
+      ? 'Adopt it: pass the full object (title, description, testing, risk, components, revertPolicy) with "adopt": true. components takes up to 5; past that, the 5 primary ones (ghx records the rest).'
       : 'Upgrade ghx; this version cannot rewrite a newer block.',
     ...(details === null ? {} : { details }),
   });
@@ -265,6 +272,14 @@ export async function planEdit(env: EditEnv): Promise<EditPlan> {
   });
   issues.push(...net.issues);
   warnings.push(...net.warnings);
+  // 06: derived again from the diff; when the diff is unknown, the block's record stands.
+  let alsoTouched = net.alsoTouched;
+  if (files.files === null) {
+    alsoTouched = (block?.alsoTouched ?? []).filter(
+      (n) => Object.hasOwn(config.components, n) && !input.components.includes(n),
+    );
+    issues.push(...alsoTouchedFloor(input, config, alsoTouched));
+  }
   if (issues.length > 0) throw validationError(issues);
 
   const baseChanged = input.base !== pr.baseRefName;
@@ -288,8 +303,8 @@ export async function planEdit(env: EditEnv): Promise<EditPlan> {
   // Render. rev+1 only when the block or body changes, so re-running the same edit is a no-op.
   const blockId = block?.id ?? newId('pr', ctx.random);
   let rev = block === null ? 1 : block.rev + 1;
-  let body = renderPrBody(toPrBlock(input, { id: blockId, rev }), config.render);
-  if (block !== null && sameAsBefore(input, block, config, pr.body)) {
+  let body = renderPrBody(toPrBlock(input, { id: blockId, rev, alsoTouched }), config.render);
+  if (block !== null && sameAsBefore(input, alsoTouched, block, config, pr.body)) {
     rev = block.rev;
     body = pr.body;
   }
@@ -308,9 +323,16 @@ export async function planEdit(env: EditEnv): Promise<EditPlan> {
 }
 
 /** True when re-rendering the merged object with the block's own rev and gen gives the current body. */
-function sameAsBefore(input: PrCreateInput, block: PrBlockRead, config: GhxConfig, body: string): boolean {
+function sameAsBefore(
+  input: PrCreateInput,
+  alsoTouched: readonly string[],
+  block: PrBlockRead,
+  config: GhxConfig,
+  body: string,
+): boolean {
   try {
-    return renderPrBody(toPrBlock(input, { id: block.id, rev: block.rev, gen: block.gen }), config.render) === body;
+    const meta = { id: block.id, rev: block.rev, gen: block.gen, alsoTouched };
+    return renderPrBody(toPrBlock(input, meta), config.render) === body;
   } catch (e) {
     // An old gen the strict encoder rejects (INTERNAL) means the block is rewritten anyway.
     if (e instanceof GhxError) return false;

@@ -43,6 +43,8 @@ export interface CreatePlan {
   /** --batch: the input index of the batch item this one is stacked on (its PR does not exist yet). */
   stackedOnItem: number | null;
   blockId: string;
+  /** Touched components past the full `components` list (06), for the block. */
+  alsoTouched: string[];
   warnings: Warning[];
   /** Network VALIDATION issues; the caller throws them (single) or collects them across items (batch). */
   issues: IssueDetail[];
@@ -170,6 +172,7 @@ export async function planCreate(input: PrCreateInput, env: PlanEnv): Promise<Cr
     draftDerived,
     stackedOnItem,
     blockId: newId('pr', ctx.random),
+    alsoTouched: net.alsoTouched,
     warnings,
     issues,
   };
@@ -183,7 +186,7 @@ export function renderPlan(
 ): { input: PrCreateInput; body: string } {
   const input =
     stackedOn === undefined ? plan.input : { ...plan.input, refs: { ...(plan.input.refs ?? {}), stackedOn } };
-  const body = renderPrBody(toPrBlock(input, { id: plan.blockId }), config.render);
+  const body = renderPrBody(toPrBlock(input, { id: plan.blockId, alsoTouched: plan.alsoTouched }), config.render);
   return { input, body };
 }
 

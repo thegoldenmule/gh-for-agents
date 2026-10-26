@@ -51,6 +51,7 @@ export default defineCommand({
   summary: 'Open a PR from validated JSON: compact body, hidden ghx block, exact read-back',
   description:
     'Write the PR object with your file tool and pass --input pr.json. Draft and stackedOn are derived from the base. ' +
+    'components lists every component the diff touches; past 5, list the 5 primary ones and ghx records the rest (alsoTouched). ' +
     'Fails with every input issue at once (VALIDATION), DUPLICATE_PR when the head already has an open PR.',
   kind: 'write',
   input: Input,

@@ -10,7 +10,7 @@ import { GhxError, type IssueDetail } from '../../core/errors.ts';
 import { suggest } from '../../core/suggest.ts';
 import { riskRank } from '../../schemas/pr.ts';
 import { matchesGlob } from '../../util/glob.ts';
-import type { PrCreateInput } from './schema.ts';
+import { MAX_COMPONENTS, type PrCreateInput } from './schema.ts';
 
 export const TITLE_MAX_CODE_POINTS = 72;
 export const DESCRIPTION_MAX_LINES = 3;
@@ -340,17 +340,15 @@ function testingRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDet
 }
 
 // ── risk, revert, components, base, refs ─────────────────────────────────
-function riskRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDetail[] {
-  const out: IssueDetail[] = [];
-  if ((input.risk === 'medium' || input.risk === 'high') && input.riskNote === undefined) {
-    out.push(
-      issue('riskNote', 'risk.note_required', `risk '${input.risk}' needs riskNote: what could break, for whom`),
-    );
-  }
+/** The highest minRisk rank among `names` (-1 when none sets one) and the components that set it. */
+function riskFloor(
+  names: readonly string[],
+  components: CreateRulesConfig['components'],
+): { floor: number; setters: string[] } {
   let floor = -1;
   const setters: string[] = [];
-  for (const name of input.components) {
-    const minRisk = ctx.config.components[name]?.minRisk;
+  for (const name of names) {
+    const minRisk = components[name]?.minRisk;
     if (minRisk === undefined) continue;
     const r = riskRank(minRisk);
     if (r > floor) {
@@ -359,6 +357,17 @@ function riskRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDetail
     }
     if (r === floor) setters.push(`${name} (${minRisk})`);
   }
+  return { floor, setters };
+}
+
+function riskRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDetail[] {
+  const out: IssueDetail[] = [];
+  if ((input.risk === 'medium' || input.risk === 'high') && input.riskNote === undefined) {
+    out.push(
+      issue('riskNote', 'risk.note_required', `risk '${input.risk}' needs riskNote: what could break, for whom`),
+    );
+  }
+  const { floor, setters } = riskFloor(input.components, ctx.config.components);
   if (floor > riskRank(input.risk)) {
     out.push(
       issue(
@@ -460,6 +469,8 @@ export interface CreateNetworkData {
 export interface NetworkRulesResult {
   issues: IssueDetail[];
   warnings: Warning[];
+  /** Touched components past a full `components` list, in config order (06); the block's `alsoTouched`. */
+  alsoTouched: string[];
 }
 
 /** Every PR or issue ref in the input with its issue path, for the existence lookup. */
@@ -505,7 +516,31 @@ export function touchedComponents(
   return out;
 }
 
-/** components.undeclared_touched, refs.stack_mismatch, refs.not_found; warnings COMPONENTS_UNUSED / _UNCHECKED. */
+/** risk.below_component_floor for the components only ghx recorded: they are not in input.components. */
+export function alsoTouchedFloor(
+  input: CreateRulesInput,
+  config: Pick<CreateRulesConfig, 'components'>,
+  names: readonly string[],
+): IssueDetail[] {
+  const { floor, setters } = riskFloor(names, config.components);
+  if (floor <= riskRank(input.risk)) return [];
+  return [
+    issue(
+      'risk',
+      'risk.below_component_floor',
+      `risk '${input.risk}' is below the floor set by ${setters.join(', ')}, which the PR also touches, in .github/ghx.json`,
+    ),
+  ];
+}
+
+/** The first three names, then a count: bounded however many there are. */
+const firstThree = (names: readonly string[]): string =>
+  names.slice(0, 3).join(', ') + (names.length > 3 ? `, +${names.length - 3} more` : '');
+
+/**
+ * components.undeclared_touched, risk.below_component_floor for alsoTouched, refs.stack_mismatch,
+ * refs.not_found; warnings COMPONENTS_UNUSED / _UNCHECKED / _ALSO_TOUCHED.
+ */
 export function createNetworkRules(
   input: CreateRulesInput,
   config: Pick<CreateRulesConfig, 'components'>,
@@ -513,6 +548,7 @@ export function createNetworkRules(
 ): NetworkRulesResult {
   const issues: IssueDetail[] = [];
   const warnings: Warning[] = [];
+  let alsoTouched: string[] = [];
 
   if (data.changedFiles === null) {
     warnings.push({
@@ -522,16 +558,35 @@ export function createNetworkRules(
     });
   } else {
     const touched = touchedComponents(data.changedFiles, config.components);
-    for (const [name, files] of touched) {
-      if (input.components.includes(name)) continue;
-      const shown = files.slice(0, 3).join(', ') + (files.length > 3 ? `, +${files.length - 3} more` : '');
+    const undeclared = [...touched.keys()].filter((n) => !input.components.includes(n));
+    // 06: a diff that touches more components than the list holds fills the list; ghx records the rest.
+    const wide = touched.size > MAX_COMPONENTS;
+    if (undeclared.length > 0 && wide && input.components.length >= MAX_COMPONENTS) {
+      alsoTouched = undeclared;
+      warnings.push({
+        code: 'COMPONENTS_ALSO_TOUCHED',
+        message: `The PR also touches ${undeclared.length} component${undeclared.length === 1 ? '' : 's'} beyond the ${input.components.length} declared; recorded as alsoTouched: ${firstThree(undeclared)}.`,
+      });
+      issues.push(...alsoTouchedFloor(input, config, undeclared));
+    } else if (undeclared.length > 0 && wide) {
       issues.push(
         issue(
           'components',
           'components.undeclared_touched',
-          `the PR changes ${name} (${shown}); add '${name}' to components`,
+          `the PR touches ${touched.size} components, more than components can list (${MAX_COMPONENTS}); declare the ${MAX_COMPONENTS} primary ones and ghx records the rest as alsoTouched (undeclared: ${firstThree(undeclared)})`,
         ),
       );
+    } else {
+      for (const name of undeclared) {
+        const files = touched.get(name) ?? [];
+        issues.push(
+          issue(
+            'components',
+            'components.undeclared_touched',
+            `the PR changes ${name} (${firstThree(files)}); add '${name}' to components`,
+          ),
+        );
+      }
     }
     const unused = input.components.filter((n) => config.components[n]?.paths !== undefined && !touched.has(n));
     if (unused.length > 0) {
@@ -567,7 +622,7 @@ export function createNetworkRules(
   for (const { path, ref } of collectRefs(input)) {
     if (missing.has(ref)) issues.push(issue(path, 'refs.not_found', `${ref} does not exist`));
   }
-  return { issues, warnings };
+  return { issues, warnings, alsoTouched };
 }
 
 /** The `VALIDATION` error for a non-empty issue list, shaped like validateInput's (src/cli/args.ts). */

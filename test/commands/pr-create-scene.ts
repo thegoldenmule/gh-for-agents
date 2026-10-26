@@ -84,6 +84,8 @@ export interface SceneOptions {
   readback?: { title?: string; body?: string };
   /** Serve the config through the contents API (remote). Default true. */
   remoteConfig?: boolean;
+  /** The config served remotely. Default CONFIG. */
+  config?: unknown;
 }
 
 export interface Scene {
@@ -129,7 +131,7 @@ export function scene(o: SceneOptions = {}): Scene {
     gh.on(
       (a) => label({ argv: a, env: {}, at: 0 }) === 'config',
       ok({
-        content: Buffer.from(JSON.stringify(CONFIG)).toString('base64'),
+        content: Buffer.from(JSON.stringify(o.config ?? CONFIG)).toString('base64'),
         encoding: 'base64',
         url: 'https://api.github.com/repos/octo/demo/contents/.github/ghx.json?ref=main',
       }),
