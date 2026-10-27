@@ -312,11 +312,14 @@ const flakyCases: FlakyCase[] = [
     name: 'no-runner: GitHub cancelled it before any runner picked it up (recorded row)',
     kind: 'no-runner',
     score: 'high',
-    job: red(101, 'e2e', {
+    // No log: none was written, and a fetch would fail the test (no rule for it).
+    job: {
+      id: 101,
+      runId: 500,
+      name: 'e2e',
       conclusion: 'cancelled',
       row: { ...noRunnerRow(), id: 101, run_id: 500, name: 'e2e', head_sha: H },
-      log: undefined,
-    }),
+    },
   },
 ];
 
