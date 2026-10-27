@@ -416,7 +416,7 @@ function wrapped(top: string, sub: string, args: readonly string[], repo: string
     case 'pr ready':
       return {
         suggestion: prCmd('pr', 'edit', '--input', 'ready.json'),
-        hint: `ready.json is {"draft": ${has(args, '--undo') ? 'true' : 'false'}}`,
+        hint: `ready.json is {"draft": ${has(args, '--undo') ? 'true' : 'false'}}; a PR without a ghx block also needs "adopt": true and the full object`,
       };
     case 'pr merge':
       return { suggestion: prCmd('pr', 'merge'), hint: 'policy-checked, pinned to the head SHA' };
@@ -445,10 +445,44 @@ function wrapped(top: string, sub: string, args: readonly string[], repo: string
   }
 }
 
+/**
+ * ghx commands agents guess that do not exist (`ci logs`), with the command that does the job. They are
+ * not gh commands, so the refusal carries no `wrapped` name and the hook never sees them.
+ */
+function guessed(top: string, sub: string, args: readonly string[], repo: string | undefined): Wrapped | undefined {
+  const sel = firstPositional(args);
+  const R = repo !== undefined ? ['-R', repo] : [];
+  switch (`${top} ${sub}`) {
+    case 'ci log':
+    case 'ci logs':
+    case 'ci view':
+      return {
+        suggestion: ['ghx', 'ci', 'why', sel ?? '<pr|run:<id>>', ...R],
+        hint: 'the failing step, error lines and failed tests of the head SHA, read from the jobs-logs API; run:<id> reads one workflow run',
+        ...(sel !== undefined && /^\d+$/.test(sel) ? { alternatives: [['ghx', 'ci', 'why', `run:${sel}`, ...R]] } : {}),
+      };
+    case 'ci watch':
+    case 'ci checks':
+    case 'ci status':
+      return {
+        suggestion: ['ghx', 'ci', 'wait', sel ?? '<pr>', ...R],
+        hint: 'run it with run_in_background: true; it returns once CI settles or first fails, with a diagnosis. For a one-off snapshot use ghx pr status',
+        alternatives: [['ghx', 'pr', 'status', sel ?? '<pr>', ...R]],
+      };
+    default:
+      return undefined;
+  }
+}
+
 function wrappedError(top: string, sub: string, w: Wrapped): GhxError {
   return new GhxError('USAGE_UNKNOWN_COMMAND', `'ghx ${top} ${sub}' is not a ghx command.`, {
     hint: `Use: ${w.suggestion.join(' ')} (${w.hint}).`,
-    details: { suggestion: w.suggestion, ...(w.alternatives ? { alternatives: w.alternatives } : {}) },
+    details: {
+      suggestion: w.suggestion,
+      // The command name, like every other USAGE_UNKNOWN_COMMAND's did-you-mean list.
+      suggestions: [w.suggestion.slice(1, 3).join(' ')],
+      ...(w.alternatives ? { alternatives: w.alternatives } : {}),
+    },
   });
 }
 
@@ -547,6 +581,8 @@ export function decide(tokens: readonly string[]): Decision {
 
   const w = wrapped(top, sub, args, repo);
   if (w) return { kind: 'refuse', error: wrappedError(top, sub, w), wrapped: `${top} ${sub}` };
+  const guess = guessed(top, sub, args, repo);
+  if (guess) return { kind: 'refuse', error: wrappedError(top, sub, guess) };
 
   if (ALLOWED_READS[top]?.includes(sub)) {
     const globals: Partial<GlobalOptions> = { ...g.globals, ...(repo !== undefined ? { repo } : {}) };

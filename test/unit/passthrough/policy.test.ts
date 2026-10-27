@@ -265,9 +265,16 @@ describe('wrapped commands are refused with the replacement argv', () => {
     assert.deepEqual(e.details?.alternatives, [['ghx', 'pr', 'status', '12']]);
   });
 
-  test('pr ready names the patch; --undo flips it', () => {
-    assert.match(refused(decide(['pr', 'ready', '1'])).hint ?? '', /\{"draft": false\}/);
+  test('pr ready names the patch; --undo flips it; a PR without a block needs adopt', () => {
+    const hint = refused(decide(['pr', 'ready', '1'])).hint ?? '';
+    assert.match(hint, /\{"draft": false\}/);
+    assert.match(hint, /"adopt": true/);
     assert.match(refused(decide(['pr', 'ready', '1', '--undo'])).hint ?? '', /\{"draft": true\}/);
+  });
+
+  test('a wrapped refusal also lists the ghx command in details.suggestions', () => {
+    assert.deepEqual(refused(decide(['pr', 'view', '12'])).details?.suggestions, ['pr status']);
+    assert.deepEqual(refused(decide(['run', 'watch', '9'])).details?.suggestions, ['ci wait']);
   });
 
   test('the 02 §6.2 example verbatim', () => {
@@ -415,6 +422,57 @@ describe('usage refusals (exit 2)', () => {
       const e = refused(decide(argv));
       assert.equal(e.code, 'USAGE_UNKNOWN_FLAG', argv.join(' '));
       assert.match(e.hint ?? '', /\{owner\}\/\{repo\}/);
+    }
+  });
+});
+
+describe('guessed ghx commands point at the command that exists', () => {
+  const GUESSED: [argv: string[], suggestion: string[], alternatives?: string[][]][] = [
+    [
+      ['ci', 'logs'],
+      ['ghx', 'ci', 'why', '<pr|run:<id>>'],
+    ],
+    [
+      ['ci', 'logs', '--help'],
+      ['ghx', 'ci', 'why', '<pr|run:<id>>'],
+    ],
+    [
+      ['ci', 'log', '12', '-R', 'o/r'],
+      ['ghx', 'ci', 'why', '12', '-R', 'o/r'],
+      [['ghx', 'ci', 'why', 'run:12', '-R', 'o/r']],
+    ],
+    [
+      ['ci', 'view', 'o/r#3'],
+      ['ghx', 'ci', 'why', 'o/r#3'],
+    ],
+    [['ci', 'watch', '12'], ['ghx', 'ci', 'wait', '12'], [['ghx', 'pr', 'status', '12']]],
+    [['ci', 'status'], ['ghx', 'ci', 'wait', '<pr>'], [['ghx', 'pr', 'status', '<pr>']]],
+  ];
+  for (const [argv, suggestion, alternatives] of GUESSED) {
+    test(argv.join(' '), () => {
+      const d = decide(argv);
+      const e = refused(d);
+      assert.equal(e.code, 'USAGE_UNKNOWN_COMMAND');
+      assert.equal(e.message, `'ghx ${argv.slice(0, 2).join(' ')}' is not a ghx command.`);
+      assert.deepEqual(e.details?.suggestion, suggestion);
+      assert.deepEqual(e.details?.suggestions, [suggestion.slice(1, 3).join(' ')]);
+      assert.deepEqual(e.details?.alternatives, alternatives);
+      assert.ok(e.hint?.startsWith(`Use: ${suggestion.join(' ')} (`), e.hint);
+      assert.equal(d.kind === 'refuse' && d.wrapped, undefined, 'not a gh command: the hook never sees it');
+    });
+  }
+
+  test('ghx ci logs and ghx help ci logs refuse with the ci why hint, without calling gh', async () => {
+    for (const argv of [
+      ['ci', 'logs', '12'],
+      ['help', 'ci', 'logs'],
+    ]) {
+      const fake = new FakeGh();
+      const r = await runInProcess(argv, { gh: fake });
+      assert.equal(r.exitCode, EXIT.USAGE, r.stdout);
+      assert.equal(r.json.error.code, 'USAGE_UNKNOWN_COMMAND');
+      assert.match(r.json.error.hint, /^Use: ghx ci why /);
+      assert.equal(fake.calls.length, 0);
     }
   });
 });
