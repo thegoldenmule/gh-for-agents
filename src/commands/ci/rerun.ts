@@ -119,7 +119,7 @@ export default defineCommand({
     const ref = subject.arg;
     const headSha = subject.headSha;
     if (target.kind === 'pr') assertExpectHead(ref, headSha, input.expectHead);
-    else assertRunCommit(target.runId, headSha, input.expectHead);
+    else if (target.kind === 'run') assertRunCommit(target.runId, headSha, input.expectHead);
 
     const classifyInput = {
       repo,
