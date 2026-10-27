@@ -228,6 +228,21 @@ test('--expect-head that is not the head is HEAD_MOVED (exit 9) before any run i
   assert.equal(ok.exitCode, EXIT.OK, ok.stdout);
 });
 
+test('--brief: target, head, what was rerun (run, workflow, jobs, method), skipped with reasons, next', async () => {
+  const fake = scene(world([red(101, 'test'), red(201, 'build', { runId: 600, workflowId: 6, workflow: 'Build' })]), {
+    600: { status: 'in_progress', conclusion: null },
+  });
+  const r = await rerun(fake, ['--brief']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(r.json, {
+    target: 'o/r#7',
+    headSha: H,
+    rerun: [{ runId: 500, workflow: 'CI', jobs: ['test'], method: 'failed-jobs' }],
+    skipped: [{ runId: 600, workflow: 'Build', reason: 'RUN_IN_PROGRESS' }],
+    next: ['ghx ci wait o/r#7'],
+  });
+});
+
 test('--dry-run halts before the POST with wouldRun and the plan as preview', async () => {
   const fake = scene(world([red(101, 'test')]));
   const r = await rerun(fake, ['--dry-run']);

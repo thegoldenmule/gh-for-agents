@@ -1169,7 +1169,8 @@ const FailingJob = z.object({ workflow: z.string(), job: z.string(), jobId: z.nu
   tests: z.array(z.string()).max(30), errors: z.array(z.string()).max(20), exitLine: z.string().nullable(),
   excerpt: z.string(),                // ≤ --excerpt-lines (default 20, cap 60), ≤ 2,000 chars
   logPath: z.string().nullable(), logBytes: z.number().nullable(), sameOnMain: SameOnMain, flake: Flake });
-const CiWhyOutput = z.object({ ref: PrRef.nullable(), target: z.string(), headSha: Sha, ci: CiSummary, failing: z.array(FailingJob),
+const CiWhyOutput = z.object({ ref: PrRef.nullable(), target: z.string(), headSha: Sha, ci: CiSummary,
+  failing: z.array(FailingJob.extend({ firstError: z.string().nullable() })),   // errors[0], else exitLine (ci wait's form)
   nonActionsFailing: z.array(Check),
   suspicious: z.array(z.object({ workflow: z.string(), job: z.string(), jobId: z.number(), step: z.string(),
     reason: z.enum(["key-step-skipped","no-tests-ran"]) })),          // §6 misleading green
@@ -1177,6 +1178,8 @@ const CiWhyOutput = z.object({ ref: PrRef.nullable(), target: z.string(), headSh
 ```
 
 With the defaults, 5 jobs fit under 16 KB; the spill is the safety net.
+
+`--brief` keeps `target`, `headSha`, `ci.state`, `ci.counts`, and per failing job `job`, `step`, `firstError`, `tests`, `sameOnMain.verdict`, `flake.score`, `flake.signals` and `logPath`, plus `next`.
 
 **Log processing:**
 1. Fetch the raw job log over REST.
@@ -1221,7 +1224,7 @@ Reruns failed jobs of completed runs for the current head only. §5.4 found 44 r
 - **Nothing to rerun:** the error is `WORKFLOW_INVALID`, `NO_FAILED_RUNS`, `RUN_IN_PROGRESS` or `RERUN_LIMIT`, in that order of precedence. `WORKFLOW_INVALID` (9) names each rejected file and run page and says to fix the file, commit and push; waiting or an override cannot help, and the push restarts every run. (`--job` matching none of the red jobs stays `NO_FAILED_RUNS`, with their names.) GitHub rejects a rerun while any job of the run is still going, so `RUN_IN_PROGRESS`'s hint says what to do: `ghx ci wait <target> --until settled` with `run_in_background: true` (`<target>` is the PR, or `run:<id> -R o/r`), then the same `ci rerun`.
 - **Hint:** a rerun reuses the original merge ref. After a base change, use `ci retrigger`.
 
-Output: `{ref, target, headSha, rerun: [{runId, workflow, jobs, previousAttempt, url, flake}], skipped: [{runId, workflow, reason, message?, url?}], next: ["ghx ci wait <target>"], warnings}`. `ref` is null for `run:<id>`.
+Output: `{ref, target, headSha, rerun: [{runId, workflow, jobs, previousAttempt, url, flake}], skipped: [{runId, workflow, reason, message?, url?}], next: ["ghx ci wait <target>"], warnings}`. `ref` is null for `run:<id>`. `--brief` keeps `target`, `headSha`, `rerun[]`'s `runId`, `workflow`, `jobs` and `method`, `skipped[]`'s `runId`, `workflow`, `reason` and `message`, and `next` (`--dry-run`'s envelope is never projected).
 
 gh calls:
 1. Rollup **[G-SHA]** (for `run:<id>`: `GET actions/runs/{id}` and its jobs, read once).

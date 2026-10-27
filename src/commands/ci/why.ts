@@ -6,7 +6,13 @@
 // and runs GitHub rejected before any job ran (src/ci/invalid-runs.ts). Green jobs whose ci.keySteps step
 // was skipped go to suspicious.
 import { z } from 'zod';
-import { createDiagnoser, DIAGNOSIS_BUDGET_MS, DIAGNOSIS_MAX_JOBS, isDiagnosable } from '../../ci/diagnose.ts';
+import {
+  compactDiagnosis,
+  createDiagnoser,
+  DIAGNOSIS_BUDGET_MS,
+  DIAGNOSIS_MAX_JOBS,
+  isDiagnosable,
+} from '../../ci/diagnose.ts';
 import { wildcard } from '../../ci/flake.ts';
 import { invalidRunNext, isInvalidRunCheck } from '../../ci/invalid-runs.ts';
 import { findSuspicious, Suspicious } from '../../ci/key-steps.ts';
@@ -22,6 +28,9 @@ import { PrRef, Sha } from '../../schemas/common.ts';
 /** Time kept back from the command deadline for the output, so a slow diagnosis ends partial, not in TIMEOUT. */
 const OUTPUT_MARGIN_MS = 10_000;
 
+/** A diagnosed job, plus its first error (the first extracted error, else the exit line) as ci wait gives it. */
+const WhyJob = FailingJob.extend({ firstError: FailingJob.shape.exitLine });
+
 const Output = z.object({
   /** owner/repo#N for a PR; null for a run or branch target. */
   ref: PrRef.nullable(),
@@ -29,7 +38,7 @@ const Output = z.object({
   target: z.string(),
   headSha: Sha,
   ci: CiSummary,
-  failing: z.array(FailingJob),
+  failing: z.array(WhyJob),
   nonActionsFailing: z.array(Check),
   suspicious: z.array(Suspicious),
   omitted: z.number().int().min(0),
@@ -114,6 +123,21 @@ export default defineCommand({
   output: Output,
   needs: { repo: 'inferred', config: 'optional' },
   timeout: { defaultMs: 120_000, maxMs: 300_000 },
+  brief: [
+    'target',
+    'headSha',
+    'ci.state',
+    'ci.counts',
+    'failing[].job',
+    'failing[].step',
+    'failing[].firstError',
+    'failing[].tests',
+    'failing[].sameOnMain.verdict',
+    'failing[].flake.score',
+    'failing[].flake.signals',
+    'failing[].logPath',
+    'next',
+  ],
   replaces: [
     'gh run view <run-id> --log',
     'gh run view <run-id> --log-failed',
@@ -188,7 +212,7 @@ export default defineCommand({
       target: s.target,
       headSha: s.headSha,
       ci: s.summary,
-      failing: d.jobs,
+      failing: d.jobs.map((j) => ({ ...j, firstError: compactDiagnosis(j).firstError })),
       nonActionsFailing: red.filter((c) => !isDiagnosable(c)),
       suspicious,
       omitted: d.omitted,

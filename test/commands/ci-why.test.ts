@@ -221,6 +221,41 @@ test('a job GitHub cancelled before any runner picked it up (recorded): no-runne
   r.fake.expectNoCall((a) => a.some((x) => x.endsWith('/logs')));
 });
 
+test('--brief: target, head, CI state and counts, and per failing job its step, first error, tests, verdicts and log', async () => {
+  const job = recordedJob('vitest');
+  const r = await why(
+    {
+      slug: 'vitest-dev/vitest',
+      number: 9001,
+      headSha: 'b10cd584c28c1c145bcc4a47afe65357999cd46a',
+      jobs: [job, { ...passing(119784717000, 'lint'), runId: job.runId }],
+    },
+    ['--brief'],
+  );
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(Object.keys(r.json).sort(), ['ci', 'failing', 'headSha', 'next', 'target']);
+  assert.deepEqual(Object.keys(r.json.ci).sort(), ['counts', 'state']);
+  assert.equal(r.json.target, 'vitest-dev/vitest#9001');
+  assert.equal(r.json.ci.counts.fail, 1);
+  const [f] = r.json.failing;
+  assert.deepEqual(Object.keys(f).sort(), ['firstError', 'flake', 'job', 'logPath', 'sameOnMain', 'step', 'tests']);
+  assert.deepEqual(f.step, { number: 8, name: 'Test E2E' });
+  assert.equal(typeof f.firstError, 'string');
+  assert.ok(f.tests.includes('test/watch/snapshot-review.test.ts > updates accepted snapshots'));
+  assert.deepEqual(f.sameOnMain, { verdict: 'no-main-run' });
+  assert.deepEqual(f.flake, { score: 'none', signals: [] });
+  assert.ok(existsSync(f.logPath));
+});
+
+test('firstError is the first extracted error, else the exit line (as ci wait gives it)', async () => {
+  const r = await why({ slug: 'o/r', number: 3, headSha: sha('a'), jobs: [failing(1, 'test', ['src/a.test.ts > a'])] });
+  const f = r.json.failing[0];
+  assert.equal(f.firstError, f.errors[0] ?? f.exitLine);
+  assert.ok(f.firstError);
+  const none = await why({ slug: 'o/r', number: 4, headSha: sha('a'), jobs: [noRunnerJob()] });
+  assert.equal(none.json.failing[0].firstError, null);
+});
+
 test('a PR that does not exist is PR_NOT_FOUND, exit 5', async () => {
   const fake = new FakeGh();
   install(fake, { slug: 'o/missing', number: 404, headSha: sha('a'), jobs: [] });
