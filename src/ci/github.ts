@@ -60,7 +60,10 @@ export const ActionsRun = z.object({
   status: z.string().nullable(),
   conclusion: z.string().nullable(),
   workflow_id: z.number().int(),
+  /** The workflow's name; for a workflow file GitHub could not parse, its path. */
+  name: z.string().nullish(),
   path: z.string().nullish(),
+  html_url: z.string().nullish(),
   run_attempt: z.number().int().nullish(),
   created_at: z.string(),
   run_started_at: z.string().nullish(),

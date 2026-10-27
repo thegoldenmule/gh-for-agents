@@ -48,6 +48,8 @@ export interface World {
   shaRuns?: Record<string, unknown>[];
   /** .github/ghx.json in the repo; null answers 404. */
   config?: Record<string, unknown> | null;
+  /** Runs GitHub rejected before any job ran (failed, no job): rollup check suites, runs listing, empty jobs. */
+  rejected?: { id: number; path: string; conclusion?: string }[];
 }
 
 export const sha = (c: string): string => c.repeat(40);
@@ -187,6 +189,7 @@ export function rollupData(w: World): unknown {
                 commit: {
                   oid: w.headSha,
                   statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false, endCursor: null }, nodes } },
+                  checkSuites: { nodes: (w.rejected ?? []).map((r) => rejectedSuite(w, r)) },
                 },
               },
             ],
@@ -194,6 +197,41 @@ export function rollupData(w: World): unknown {
         },
       },
     },
+  };
+}
+
+/** A rejected run as a GraphQL check suite: completed, failed, no check run. */
+function rejectedSuite(w: World, r: NonNullable<World['rejected']>[number]): unknown {
+  return {
+    status: 'COMPLETED',
+    conclusion: (r.conclusion ?? 'failure').toUpperCase(),
+    checkRuns: { totalCount: 0 },
+    workflowRun: {
+      databaseId: r.id,
+      url: `https://github.com/${w.slug}/actions/runs/${r.id}`,
+      createdAt: '2026-10-22T10:59:00Z',
+      event: 'push',
+      file: { path: r.path },
+      workflow: { databaseId: 9, name: 'ci' },
+    },
+  };
+}
+
+/** A rejected run's REST row: named after its file, failed at creation. */
+export function rejectedRun(w: World, r: NonNullable<World['rejected']>[number]): Record<string, unknown> {
+  return {
+    id: r.id,
+    name: r.path,
+    head_sha: w.headSha,
+    head_branch: 'main',
+    event: 'push',
+    status: 'completed',
+    conclusion: r.conclusion ?? 'failure',
+    workflow_id: 9,
+    path: r.path,
+    html_url: `https://github.com/${w.slug}/actions/runs/${r.id}`,
+    run_attempt: 1,
+    created_at: '2026-10-22T10:59:00Z',
   };
 }
 
@@ -264,6 +302,10 @@ export function install(fake: FakeGh, w: World): FakeGh {
   }
   for (const runId of new Set(w.jobs.map((j) => j.runId))) {
     fake.on(at(`${base}/actions/runs/${runId}`), okJson(prRun(w, runId)));
+  }
+  for (const r of w.rejected ?? []) {
+    fake.on(at(`${base}/actions/runs/${r.id}`), okJson(rejectedRun(w, r)));
+    fake.on(at(`${base}/actions/runs/${r.id}/jobs`), okJson({ total_count: 0, jobs: [] }));
   }
   const wfs = new Set([...w.jobs.map((j) => j.workflowId ?? 5), ...Object.keys(w.mainRuns ?? {}).map(Number)]);
   for (const wf of wfs) {

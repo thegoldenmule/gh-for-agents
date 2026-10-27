@@ -57,3 +57,27 @@ test('green (ci-why/green): exit 0 with failing: []', async () => {
   assert.equal(out.ci.state, 'green');
   assert.deepEqual(out.failing, []);
 });
+
+test('a workflow GitHub rejected (ci-why/workflow-invalid, recorded run 40518894617): red, named, with the fix', async () => {
+  const r = await run('ci-why/workflow-invalid', ['run:40518894617', '-R', 'thegoldenmule/gh-for-agents']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout + r.stderr);
+  const out = Output.parse(JSON.parse(r.stdout));
+  const url = 'https://github.com/thegoldenmule/gh-for-agents/actions/runs/40518894617';
+  assert.equal(out.ci.state, 'red');
+  assert.deepEqual(
+    out.ci.failing.map((c) => [c.name, c.runId, c.jobId, c.conclusion, c.url]),
+    [['.github/workflows/ci.yml', 40518894617, null, 'failure', url]],
+  );
+  assert.deepEqual(out.failing, [], 'no job, so no job log to diagnose');
+  assert.deepEqual(
+    out.nonActionsFailing.map((c) => c.name),
+    ['.github/workflows/ci.yml'],
+  );
+  assert.deepEqual(out.next, [
+    `Fix .github/workflows/ci.yml: GitHub rejected it before any job ran. Read the error on ${url}, then commit and push.`,
+  ]);
+  assert.deepEqual(
+    out.warnings?.map((w) => w.code),
+    ['WORKFLOW_INVALID'],
+  );
+});

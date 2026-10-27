@@ -3,7 +3,17 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
-import { install, notFoundJson, okJson, sha, vitestLog, type WJob, type World, why } from './ci-why-world.ts';
+import {
+  install,
+  notFoundJson,
+  okJson,
+  rejectedRun,
+  sha,
+  vitestLog,
+  type WJob,
+  type World,
+  why,
+} from './ci-why-world.ts';
 
 const RUN = 37948190914;
 
@@ -207,4 +217,72 @@ test('a branch that does not exist is REF_NOT_FOUND, exit 5', async () => {
   const r = await why(w, ['branch:nope', '-R', 'o/run'], { ...noPr, fake });
   assert.equal(r.exitCode, EXIT.NOT_FOUND, r.stdout);
   assert.equal(r.json.error.code, 'REF_NOT_FOUND');
+});
+
+// --- runs GitHub rejected before any job ran (an invalid workflow file) ---
+
+const BAD = 40518894617;
+const badFix = (slug: string) =>
+  `Fix .github/workflows/ci.yml: GitHub rejected it before any job ran. Read the error on https://github.com/${slug}/actions/runs/${BAD}, then commit and push.`;
+
+test('branch:main with a rejected workflow (and nothing else): red, listed, no-checks never', async () => {
+  const w = world([], { headSha: H, rejected: [{ id: BAD, path: '.github/workflows/ci.yml' }] });
+  w.shaRuns = [rejectedRun(w, { id: BAD, path: '.github/workflows/ci.yml' })];
+  const fake = install(new FakeGh(), w);
+  fake.on(
+    (a) => a.some((x) => x.split('?')[0] === 'repos/o/run/branches/main'),
+    okJson({ name: 'main', commit: { sha: H } }),
+  );
+  const r = await why(w, ['branch:main', '-R', 'o/run'], { ...noPr, fake });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.ci.state, 'red');
+  assert.deepEqual(
+    r.json.ci.failing.map((c: { name: string; runId: number; jobId: null }) => [c.name, c.runId, c.jobId]),
+    [['.github/workflows/ci.yml', BAD, null]],
+  );
+  assert.deepEqual(r.json.failing, []);
+  assert.equal(r.json.nonActionsFailing[0].url, `https://github.com/o/run/actions/runs/${BAD}`);
+  assert.deepEqual(r.json.next, [badFix('o/run')]);
+  assert.deepEqual(
+    r.json.warnings.map((x: { code: string }) => x.code),
+    ['WORKFLOW_INVALID'],
+  );
+});
+
+test('a PR whose head has a rejected workflow beside a failing job: both red, the job diagnosed', async () => {
+  const w = world(red, { rejected: [{ id: BAD, path: '.github/workflows/ci.yml' }] });
+  const r = await why(w);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.ci.state, 'red');
+  assert.deepEqual(
+    r.json.ci.failing.map((c: { name: string }) => c.name),
+    ['test', '.github/workflows/ci.yml'],
+  );
+  assert.deepEqual(
+    r.json.failing.map((f: { job: string }) => f.job),
+    ['test'],
+  );
+  assert.deepEqual(
+    r.json.nonActionsFailing.map((c: { name: string; workflow: string }) => [c.name, c.workflow]),
+    [['.github/workflows/ci.yml', 'ci']],
+  );
+  assert.equal(r.json.next[0], badFix('o/run'));
+  assert.ok(r.json.warnings.some((x: { code: string }) => x.code === 'WORKFLOW_INVALID'));
+  assert.equal(r.fake.calls.filter((c) => c.argv.some((a) => a.includes(`/runs/${BAD}/jobs`))).length, 0);
+});
+
+test('a PR whose only run was rejected is red, not no-checks', async () => {
+  const w = world([], { rejected: [{ id: BAD, path: '.github/workflows/ci.yml', conclusion: 'startup_failure' }] });
+  const r = await why(w);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.ci.state, 'red');
+  assert.equal(r.json.ci.counts.fail, 1);
+  assert.equal(r.json.ci.failing[0].conclusion, 'startup_failure');
+});
+
+test('a PR with no runs at all stays no-checks', async () => {
+  const r = await why(world([]));
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.ci.state, 'no-checks');
+  assert.equal(r.json.warnings, undefined);
 });

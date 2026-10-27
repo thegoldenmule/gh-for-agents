@@ -9,8 +9,9 @@ import { formatPrRef } from '../gh/refs.ts';
 import { enrichNotFound, type ResolvedRepo } from '../gh/repo.ts';
 import type { RepoRef } from '../gh/types.ts';
 import type { Check, CiSummary } from '../schemas/ci.ts';
-import { checkRunBucket, checkRunStatus, ignoreRuleFor, type WorkflowRunInfo } from './checks.ts';
+import { checkRunBucket, checkRunStatus, ignoreRuleFor, normaliseContext, type WorkflowRunInfo } from './checks.ts';
 import { type ActionsJob, ActionsRun, fetchRun, listRunJobs } from './github.ts';
+import { invalidFromRun, invalidRunNode, invalidRunWarning, isInvalidRun } from './invalid-runs.ts';
 import { fetchCiSnapshot, snapshotSummary } from './snapshot.ts';
 import { summariseCi } from './summary.ts';
 import { branchPath } from './wait/fetch.ts';
@@ -104,9 +105,36 @@ async function prSubject(ctx: Context, resolved: ResolvedRepo, number: number, i
   };
 }
 
-/** Checks from job lists, ci.ignore applied, with the summary over them. */
-function fromJobs(repo: RepoRef, headSha: string, jobs: readonly ActionsJob[], ignore: IgnoreRules) {
-  const all = jobs.map((j) => jobCheck(j, repo));
+/**
+ * Runs GitHub rejected before any job ran (no job, failed), each as the red check the rollup path makes
+ * (invalid-runs.ts), warned WORKFLOW_INVALID.
+ */
+function rejectedChecks(
+  ctx: Pick<Context, 'warn'>,
+  repo: RepoRef,
+  headSha: string,
+  runs: Map<number, ActionsJob[]>,
+  rows: Iterable<ActionsRun>,
+): Check[] {
+  const out: Check[] = [];
+  for (const run of rows) {
+    if (!isInvalidRun(run.status, run.conclusion, runs.get(run.id)?.length ?? 0)) continue;
+    const c = normaliseContext(invalidRunNode(invalidFromRun(run, repo)), { repo, headSha }).check;
+    ctx.warn(invalidRunWarning(c));
+    out.push(c);
+  }
+  return out;
+}
+
+/** Checks from job lists (plus rejected runs), ci.ignore applied, with the summary over them. */
+function fromJobs(
+  repo: RepoRef,
+  headSha: string,
+  jobs: readonly ActionsJob[],
+  ignore: IgnoreRules,
+  rejected: readonly Check[] = [],
+) {
+  const all = [...jobs.map((j) => jobCheck(j, repo)), ...rejected];
   const checks = all.filter((c) => !ignoreRuleFor(c, ignore));
   const ignored = all.filter((c) => ignoreRuleFor(c, ignore)).map((c) => c.name);
   return { checks, summary: summariseCi({ headSha, checks, ignored }) };
@@ -134,7 +162,13 @@ async function runSubject(
     target: target.raw,
     headSha: run.head_sha,
     defaultBranch: await defaultBranchOf(ctx.gh, repo),
-    ...fromJobs(repo, run.head_sha, jobs, ignore),
+    ...fromJobs(
+      repo,
+      run.head_sha,
+      jobs,
+      ignore,
+      rejectedChecks(ctx, repo, run.head_sha, new Map([[runId, jobs]]), [run]),
+    ),
     runs: { [String(runId)]: { workflowId: run.workflow_id } },
     jobsByRun: new Map([[runId, jobs]]),
     runRows: new Map([[runId, run]]),
@@ -196,7 +230,13 @@ async function branchSubject(
     target: pinned.raw,
     headSha,
     defaultBranch: await defaultBranchOf(ctx.gh, repo),
-    ...fromJobs(repo, headSha, [...jobsByRun.values()].flat(), ignore),
+    ...fromJobs(
+      repo,
+      headSha,
+      [...jobsByRun.values()].flat(),
+      ignore,
+      rejectedChecks(ctx, repo, headSha, jobsByRun, rows),
+    ),
     runs: Object.fromEntries(rows.map((r) => [String(r.id), { workflowId: r.workflow_id }])),
     jobsByRun,
     runRows: new Map(rows.map((r) => [r.id, r])),

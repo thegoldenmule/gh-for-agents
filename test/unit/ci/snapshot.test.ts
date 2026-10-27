@@ -2,6 +2,7 @@
 // test/commands/ (03's ci-snapshot.test.ts) because there is no command yet; it drives createGh directly.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { normaliseRollup } from '../../../src/ci/checks.ts';
 import { type CiCommit, completeRollup, fetchCiSnapshot, snapshotSummary } from '../../../src/ci/snapshot.ts';
 import { isGhxError } from '../../../src/core/errors.ts';
 import { CiSummary } from '../../../src/schemas/ci.ts';
@@ -283,4 +284,85 @@ test('completeRollup re-queries once on an oid mismatch, then reports CI_SHA_MIS
     still.warnings.map((w) => w.code),
     ['CI_SHA_MISMATCH'],
   );
+});
+
+test('completeRollup appends a run GitHub rejected (a failed suite with no check run) and warns WORKFLOW_INVALID', async () => {
+  const env = ciEnv();
+  const suite = (status: string, conclusion: string | null, runs: number, id: number | null) => ({
+    status,
+    conclusion,
+    checkRuns: { totalCount: runs },
+    workflowRun:
+      id === null
+        ? null
+        : {
+            databaseId: id,
+            url: `https://github.com/o/r/actions/runs/${id}`,
+            createdAt: '2026-10-22T10:00:00Z',
+            event: 'push',
+            file: { path: `.github/workflows/w${id}.yml` },
+            workflow: { databaseId: id, name: `w${id}` },
+          },
+  });
+  const firstPage = {
+    ...commitOf(SHA_C, [statusCtx('a', 'SUCCESS')], false, null),
+    checkSuites: {
+      nodes: [
+        suite('COMPLETED', 'FAILURE', 0, 1), // rejected
+        suite('COMPLETED', 'STARTUP_FAILURE', 0, 2), // rejected
+        suite('COMPLETED', 'FAILURE', 3, 3), // failed jobs: in the rollup already
+        suite('COMPLETED', 'ACTION_REQUIRED', 0, 4), // awaiting approval, not rejected
+        suite('QUEUED', null, 0, 5),
+        suite('COMPLETED', 'FAILURE', 0, null), // another app's suite
+        null,
+      ],
+    },
+  } as CiCommit;
+  const warnings: { code: string; message: string }[] = [];
+  const r = await completeRollup({
+    gh: env.gh,
+    repo: repoOf('o/r'),
+    number: 1,
+    headSha: SHA_C,
+    firstPage,
+    warn: (w) => warnings.push(w),
+  });
+  assert.equal(r.forHeadSha, true);
+  if (!r.forHeadSha) return;
+  const checks = normaliseRollup(r.nodes, { repo: repoOf('o/r'), headSha: SHA_C }).checks;
+  assert.deepEqual(
+    checks.map((c) => [c.name, c.workflow, c.kind, c.bucket, c.conclusion, c.runId, c.jobId, c.url]),
+    [
+      ['a', null, 'status', 'pass', 'success', null, null, `https://github.com/o/r/commit/${SHA_C}/checks`],
+      [
+        '.github/workflows/w1.yml',
+        'w1',
+        'actions',
+        'fail',
+        'failure',
+        1,
+        null,
+        'https://github.com/o/r/actions/runs/1',
+      ],
+      [
+        '.github/workflows/w2.yml',
+        'w2',
+        'actions',
+        'fail',
+        'startup_failure',
+        2,
+        null,
+        'https://github.com/o/r/actions/runs/2',
+      ],
+    ],
+  );
+  assert.deepEqual(
+    warnings.map((w) => w.code),
+    ['WORKFLOW_INVALID', 'WORKFLOW_INVALID'],
+  );
+  assert.match(
+    warnings[0]?.message ?? '',
+    /\.github\/workflows\/w1\.yml.*https:\/\/github\.com\/o\/r\/actions\/runs\/1$/,
+  );
+  assert.equal(r.queries, 0);
 });

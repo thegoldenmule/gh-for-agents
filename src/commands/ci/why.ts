@@ -2,11 +2,13 @@
 // in one call. A PR is read through the rollup for its head SHA [G-SHA]; a run through actions/runs/{id}
 // and its jobs; a branch as every workflow's newest run on its head commit (src/ci/subject.ts). Each
 // failing Actions job is diagnosed through the jobs API [G-LOGS] by src/ci/diagnose.ts (never
-// `gh run view --log`). Red checks outside Actions go to nonActionsFailing; green jobs whose
-// ci.keySteps step was skipped go to suspicious.
+// `gh run view --log`). Red checks with no job log go to nonActionsFailing: commit statuses, other apps,
+// and runs GitHub rejected before any job ran (src/ci/invalid-runs.ts). Green jobs whose ci.keySteps step
+// was skipped go to suspicious.
 import { z } from 'zod';
 import { createDiagnoser, DIAGNOSIS_BUDGET_MS, DIAGNOSIS_MAX_JOBS, isDiagnosable } from '../../ci/diagnose.ts';
 import { wildcard } from '../../ci/flake.ts';
+import { invalidRunNext, isInvalidRunCheck } from '../../ci/invalid-runs.ts';
 import { findSuspicious, Suspicious } from '../../ci/key-steps.ts';
 import { readSubject } from '../../ci/subject.ts';
 import { isRed } from '../../ci/summary.ts';
@@ -160,7 +162,10 @@ export default defineCommand({
       maxJobs: input.maxJobs,
       budgetMs: Math.max(0, Math.min(DIAGNOSIS_BUDGET_MS, remaining)),
     });
-    const runIds = new Set(s.checks.flatMap((c) => (c.kind === 'actions' && c.runId !== null ? [c.runId] : [])));
+    // A rejected run has no job, so no key step to check.
+    const runIds = new Set(
+      s.checks.flatMap((c) => (c.kind === 'actions' && c.runId !== null && !isInvalidRunCheck(c) ? [c.runId] : [])),
+    );
     const { suspicious } = await findSuspicious({
       gh: ctx.gh,
       repo,
@@ -170,7 +175,7 @@ export default defineCommand({
       warn: ctx.warn,
     });
 
-    const next: string[] = [];
+    const next: string[] = invalidRunNext(red.filter(isInvalidRunCheck));
     if (s.summary.state === 'pending') next.push(`ghx ci wait ${s.arg}`);
     // A branch spans several runs, and ci rerun takes a PR or one run: one suggestion per run.
     const flakyRuns = [...new Set(d.jobs.filter((j) => j.flake.candidate).map((j) => j.runId))];

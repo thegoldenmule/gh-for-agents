@@ -18,6 +18,7 @@ import {
   isDiagnosable,
 } from '../ci/diagnose.ts';
 import { countWorkflows } from '../ci/github.ts';
+import { isInvalidRunCheck } from '../ci/invalid-runs.ts';
 import { findSuspicious } from '../ci/key-steps.ts';
 import { analyzeJob } from '../ci/logs/analyze.ts';
 import { type CiSnapshot, snapshotSummary } from '../ci/snapshot.ts';
@@ -287,7 +288,12 @@ async function ciFacts(o: CiSummaryOptions, summary: CiSummary): Promise<CiFacts
       : null;
   const keySteps = o.config.keySteps ?? [];
   if (keySteps.length === 0) return { workflowsTotal, keyStepsSkipped: [] };
-  const runIds = [...new Set(o.ci.checks.flatMap((c) => (c.kind === 'actions' && c.runId !== null ? [c.runId] : [])))];
+  // A rejected run has no job, so no key step to check.
+  const runIds = [
+    ...new Set(
+      o.ci.checks.flatMap((c) => (c.kind === 'actions' && c.runId !== null && !isInvalidRunCheck(c) ? [c.runId] : [])),
+    ),
+  ];
   const found = await findSuspicious({ gh: o.gh, repo: o.repo, runIds, keySteps, warn: o.warn });
   // A run whose jobs could not be read fails KEY_STEP_SKIPPED closed (04, key steps).
   return {

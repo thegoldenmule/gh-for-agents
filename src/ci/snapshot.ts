@@ -12,6 +12,13 @@ import type { Gh } from '../gh/index.ts';
 import type { RepoRef } from '../gh/types.ts';
 import type { Check, CiSummary, ExpectedCheck } from '../schemas/ci.ts';
 import { type IgnoreRule, normaliseRollup, RollupContext, type WorkflowRunInfo } from './checks.ts';
+import {
+  CHECK_SUITE_FIELDS,
+  invalidFromSuites,
+  invalidRunNode,
+  invalidRunWarning,
+  RollupSuite,
+} from './invalid-runs.ts';
 import { summariseCi } from './summary.ts';
 
 /** Contexts per page, and the page bound (500 checks). */
@@ -23,10 +30,14 @@ const CHECK_RUN_FIELDS =
   'checkSuite{app{slug} workflowRun{databaseId event file{path} workflow{databaseId name}}}';
 const STATUS_CONTEXT_FIELDS = 'context state targetUrl createdAt isRequired(pullRequestNumber:$number)';
 
-/** The commit selection for the CI rollup. Needs `$number:Int!` and `$after:String` in the operation. */
+/**
+ * The commit selection for the CI rollup. Needs `$number:Int!` and `$after:String` in the operation. The
+ * check suites find runs GitHub rejected before any job ran, which the rollup never lists (invalid-runs.ts).
+ */
 export const CI_COMMIT_FIELDS =
   `oid statusCheckRollup{contexts(first:${CONTEXTS_PAGE},after:$after){pageInfo{hasNextPage endCursor} ` +
-  `nodes{__typename ... on CheckRun{${CHECK_RUN_FIELDS}} ... on StatusContext{${STATUS_CONTEXT_FIELDS}}}}}`;
+  `nodes{__typename ... on CheckRun{${CHECK_RUN_FIELDS}} ... on StatusContext{${STATUS_CONTEXT_FIELDS}}}}} ` +
+  CHECK_SUITE_FIELDS;
 
 export const CI_SNAPSHOT_QUERY =
   'query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){' +
@@ -43,6 +54,8 @@ export const CiCommit = z.object({
       }),
     })
     .nullable(),
+  /** Absent in a reply recorded before ghx read check suites: no rejected run is found. */
+  checkSuites: z.object({ nodes: z.array(RollupSuite.nullable()) }).nullish(),
 });
 export type CiCommit = z.infer<typeof CiCommit>;
 
@@ -172,6 +185,8 @@ export type CompletedRollup =
  * Finish a rollup a caller started in its own query [G-SHA]: if the first page's commit is not the head,
  * re-query once (02 §4.3 step 3); then follow `hasNextPage` up to MAX_CONTEXT_PAGES, bailing out if the head
  * moves between pages. A rollup that never matches the head warns CI_SHA_MISMATCH and has `forHeadSha:false`.
+ * Runs GitHub rejected before any job ran (the first page's check suites) are appended as red checks,
+ * each warned WORKFLOW_INVALID.
  */
 export async function completeRollup(o: CompleteRollupOptions): Promise<CompletedRollup> {
   const fetchPage: RollupPageFetcher =
@@ -219,6 +234,11 @@ export async function completeRollup(o: CompleteRollupOptions): Promise<Complete
     if (next.headSha !== headSha || next.commit?.oid !== headSha) return mismatch(next.commit?.oid);
     nodes.push(...rollupNodes(next.commit));
     page = next.commit.statusCheckRollup?.contexts.pageInfo;
+  }
+  for (const run of invalidFromSuites(first.checkSuites?.nodes, o.repo)) {
+    const node = invalidRunNode(run);
+    o.warn?.(invalidRunWarning({ name: node.name, runId: run.runId, url: run.url, conclusion: run.conclusion }));
+    nodes.push(node);
   }
   return { forHeadSha: true, headSha, nodes, truncated, queries };
 }

@@ -4,7 +4,7 @@
     "graphql",
     "--include",
     "-f",
-    "query=query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){defaultBranchRef{name} pullRequest(number:$number){number state headRefOid headRefName baseRefName commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{__typename ... on CheckRun{databaseId name status conclusion startedAt completedAt detailsUrl isRequired(pullRequestNumber:$number) checkSuite{app{slug} workflowRun{databaseId event file{path} workflow{databaseId name}}}} ... on StatusContext{context state targetUrl createdAt isRequired(pullRequestNumber:$number)}}}}}}}}}}",
+    "query=query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){defaultBranchRef{name} pullRequest(number:$number){number state headRefOid headRefName baseRefName commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{__typename ... on CheckRun{databaseId name status conclusion startedAt completedAt detailsUrl isRequired(pullRequestNumber:$number) checkSuite{app{slug} workflowRun{databaseId event file{path} workflow{databaseId name}}}} ... on StatusContext{context state targetUrl createdAt isRequired(pullRequestNumber:$number)}}}} checkSuites(first:50){nodes{status conclusion checkRuns(first:0){totalCount} workflowRun{databaseId url createdAt event file{path} workflow{databaseId name}}}}}}}}}}",
     "-f",
     "name=node",
     "-F",

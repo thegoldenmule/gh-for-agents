@@ -246,3 +246,41 @@ test('the smoke scenario (test/fixtures/gh/smoke/pr-status) replays the worked e
   assert.equal(r.json.merge.ready, true);
   assert.equal(r.json.ci.failing[0].sameOnMain.verdict, 'same-tests');
 });
+
+test('a workflow GitHub rejected before any job ran makes CI red (not no-checks), named, with a warning', async () => {
+  const pr = workedPr({}, { contexts: [] }) as { commits: { nodes: { commit: Record<string, unknown> }[] } };
+  const url = `https://github.com/${REPO.owner}/${REPO.name}/actions/runs/40518894617`;
+  (pr.commits.nodes[0] as { commit: Record<string, unknown> }).commit.checkSuites = {
+    nodes: [
+      { status: 'QUEUED', conclusion: null, checkRuns: { totalCount: 0 }, workflowRun: null },
+      {
+        status: 'COMPLETED',
+        conclusion: 'FAILURE',
+        checkRuns: { totalCount: 0 },
+        workflowRun: {
+          databaseId: 40518894617,
+          url,
+          createdAt: '2026-10-22T09:00:00Z',
+          event: 'pull_request',
+          file: { path: '.github/workflows/ci.yml' },
+          workflow: { databaseId: 9001, name: 'ci' },
+        },
+      },
+    ],
+  };
+  const r = await run(['pr', 'status', REF], install(undefined, { pr }));
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.ci.state, 'red');
+  assert.deepEqual(
+    r.json.ci.failing.map((c: { name: string; jobId: null; runId: number; url: string }) => [
+      c.name,
+      c.jobId,
+      c.runId,
+      c.url,
+    ]),
+    [['.github/workflows/ci.yml', null, 40518894617, url]],
+  );
+  assert.ok(r.json.ci.next.includes(`ghx ci why ${REF}`));
+  assert.ok(r.json.warnings.some((w: { code: string }) => w.code === 'WORKFLOW_INVALID'));
+  assert.ok(r.json.merge.blockers.some((b: { code: string }) => b.code === 'CI_RED'));
+});
