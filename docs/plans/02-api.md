@@ -887,7 +887,8 @@ The envelope:
 ```
 
 - A non-zero gh exit becomes `GH_FAILED` (7) with the envelope in `details`.
-- `pr diff` failing with HTTP 406 becomes `DIFF_TOO_LARGE`, with a hint to run a local `git diff` **[G-300]**.
+- `pr diff` failing with HTTP 406 becomes `DIFF_TOO_LARGE`, with a hint to run a local `git diff`, or for names only `ghx pr diff N --name-only` or `ghx api "repos/{owner}/{repo}/pulls/N/files?per_page=100" --paginate --slurp` **[G-300]**.
+- `pr diff N --name-only` (N a PR number or URL) needs no diff: on the 406, ghx lists `pulls/N/files` (paged, up to GitHub's 3,000 files) and returns the names one per line, as gh prints them, in an envelope whose `argv` is that `gh api` path, with the warning `DIFF_NAMES_FROM_FILES_API`. A branch selector, or more than 3,000 files, stays `DIFF_TOO_LARGE`.
 - `run list --commit <sha>` (or `-c`): gh matches full SHAs only, so a short one lists nothing. When the cwd checkout is the target repo, ghx expands it with `git rev-parse --verify <sha>^{commit}` and warns `COMMIT_EXPANDED` (the envelope has no notes field); otherwise it refuses with `REF_NOT_FOUND` (5), naming `git rev-parse` and `ghx api repos/{owner}/{repo}/commits/<sha>`.
 - `ghx api --help` (or `-h`, anywhere before `--`) cannot pass the GET check, so it answers with ghx's passthrough help, the same document as `ghx help api`: the accepted `ghx api <endpoint>` form. Other allowlisted reads pass `--help` to gh.
 

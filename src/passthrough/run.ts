@@ -10,6 +10,7 @@ import { type ErrorDetails, GhxError } from '../core/errors.ts';
 import { byteLength, DEFAULT_MAX_BYTES } from '../core/output.ts';
 import { apiShape } from '../gh/guard.ts';
 import { GhFailure } from '../gh/index.ts';
+import { tryParseTargetRef } from '../gh/refs.ts';
 import type { ResolvedRepo } from '../gh/repo.ts';
 import { DEFAULT_HOST, type RepoRef, repoArg, repoSlug, sameRepo } from '../gh/types.ts';
 import type { PassthroughPlan } from './policy.ts';
@@ -160,7 +161,13 @@ export function passthroughSpec(name: readonly string[]): AnyCommandSpec {
           ...(e.failure.status !== undefined ? { status: e.failure.status } : {}),
         };
         if (e.failure.code === 'GH_TOO_LARGE' && input.name.join(' ') === 'pr diff') {
-          throw diffTooLarge(input.args, details, e);
+          const names = await namesFromFilesApi(input.args, resolved?.repo, ctx);
+          if (names === null) throw diffTooLarge(input.args, details, e);
+          ctx.warn({
+            code: 'DIFF_NAMES_FROM_FILES_API',
+            message: `gh pr diff --name-only exceeded GitHub's 300-file diff limit (HTTP 406); the ${names.count} names came from the ${names.path} API instead.`,
+          });
+          return { passthrough: await buildEnvelope(['api', names.path], 0, names.text, '', cap, spill) };
         }
         throw new GhxError('GH_FAILED', e.message, {
           hint: `gh exited ${res.exitCode}; its stderr is in details.passthrough.stderr.`,
@@ -225,15 +232,47 @@ async function expandCommit(
   return out;
 }
 
-/** `pr diff` past GitHub's 300-file limit (HTTP 406, G-300): point at a local diff. */
+/** pulls/N/files pages of 100: GitHub lists at most 3,000 files [G-300]. */
+const FILE_PAGES = 30;
+
+/**
+ * `pr diff --name-only` past the 300-file diff limit: the names from `pulls/N/files`, which pages past it,
+ * one per line like gh prints them. Null when that cannot stand in: no --name-only, a selector that is not
+ * a PR number or URL (a branch), no repo, or more than the 3,000 files GitHub lists.
+ */
+async function namesFromFilesApi(
+  args: readonly string[],
+  repo: RepoRef | undefined,
+  ctx: Pick<Context, 'gh'>,
+): Promise<{ text: string; count: number; path: string } | null> {
+  const flags = args.slice(2);
+  const dd = flags.indexOf('--');
+  if (!(dd === -1 ? flags : flags.slice(0, dd)).includes('--name-only')) return null;
+  const sel = firstPositional(flags);
+  const target = sel === undefined ? undefined : tryParseTargetRef(sel);
+  const r = target?.kind === 'pr' ? (target.repo ?? repo) : undefined;
+  if (target === undefined || r === undefined) return null;
+  const path = `repos/${r.owner}/${r.name}/pulls/${target.number}/files`;
+  const files = await ctx.gh.api(
+    { path, repo: r, paginate: { maxPages: FILE_PAGES, perPage: 100 } },
+    z.array(z.object({ filename: z.string() })),
+    { notFound: 'PR_NOT_FOUND' },
+  );
+  if (files.notModified) throw new GhxError('INTERNAL', 'GET pulls/files returned 304.');
+  if (files.truncated) return null;
+  return { text: files.data.map((f) => `${f.filename}\n`).join(''), count: files.data.length, path };
+}
+
+/** `pr diff` past GitHub's 300-file limit (HTTP 406, G-300): point at a local diff and the files API. */
 function diffTooLarge(args: readonly string[], details: ErrorDetails, cause: unknown): GhxError {
   const sel = firstPositional(args.slice(2));
   const n = sel !== undefined ? (/^#?(\d+)$/.exec(sel)?.[1] ?? /\/pull\/(\d+)/.exec(sel)?.[1]) : undefined;
   const suggestion = n !== undefined ? ['git', 'fetch', 'origin', `pull/${n}/head`] : undefined;
+  const names = `For file names only: ghx pr diff ${n ?? '<pr>'} --name-only, or ghx api "repos/{owner}/{repo}/pulls/${n ?? '<pr>'}/files?per_page=100" --paginate --slurp.`;
   const hint =
     n !== undefined
-      ? `Diff locally: git fetch origin pull/${n}/head && git diff --stat origin/<base>...FETCH_HEAD (ghx pr status ${n} names the base).`
-      : 'Diff locally in a checkout: git diff --stat origin/<base>...origin/<head>.';
+      ? `Diff locally: git fetch origin pull/${n}/head && git diff --stat origin/<base>...FETCH_HEAD (ghx pr status ${n} names the base). ${names}`
+      : `Diff locally in a checkout: git diff --stat origin/<base>...origin/<head>. ${names}`;
   return new GhxError('DIFF_TOO_LARGE', "The PR diff exceeds GitHub's 300-file limit (HTTP 406).", {
     hint,
     details: { ...details, ...(suggestion ? { suggestion } : {}) },
