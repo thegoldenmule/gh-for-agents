@@ -8,6 +8,8 @@ import { defineCommand } from '../../src/core/command.ts';
 import { GhxError } from '../../src/core/errors.ts';
 import { DryRunHalt } from '../../src/gh/index.ts';
 import { runInProcess } from '../helpers/harness.ts';
+import { isQ1, q1Reply } from '../unit/pr/snapshot-fixture.ts';
+import { install, REF, run, SLUG } from './pr-status-world.ts';
 
 let runs = 0;
 
@@ -104,11 +106,10 @@ test('the projection runs before the byte bound: a trimmed document fits, a larg
 });
 
 test('a final-mode stream projects its summary on stdout; the events file keeps the full summary', async () => {
-  const r = await runInProcess(['test', 'tick', '--count', '1', '--interval-ms', '0', '--fields', 'ticks']);
+  const r = await runInProcess(['test', 'tick', '--count', '1', '--interval-ms', '0', '--fields', 'ticks,eventsPath']);
   assert.equal(r.exitCode, 0, r.stdout);
-  assert.deepEqual(r.json, { ticks: 1 });
-  const tick = await runInProcess(['test', 'tick', '--count', '1', '--interval-ms', '0']);
-  const last = readFileSync(tick.json.eventsPath, 'utf8').trim().split('\n').at(-1) ?? '';
+  assert.deepEqual(Object.keys(r.json), ['ticks', 'eventsPath']);
+  const last = readFileSync(r.json.eventsPath, 'utf8').trim().split('\n').at(-1) ?? '';
   assert.equal(JSON.parse(last).outcome, 'ok', 'the events file is never projected');
 });
 
@@ -132,4 +133,18 @@ test('--help and --schema show the brief preset; the global --brief line names t
   const flags = g.json.globalFlags as string[];
   assert.ok(flags.some((f) => f.startsWith('--fields <string>')));
   assert.ok(flags.some((f) => f.startsWith('--brief') && f.includes('t doc') && !f.includes('t write')));
+});
+
+test('pr status A B --brief: each entry keeps ref and the preset; a failed entry stays whole', async () => {
+  const fake = install();
+  fake.on((argv) => isQ1(argv) && argv.includes('number=3302'), q1Reply(null));
+  const r = await run(['pr', 'status', REF, `${SLUG}#3302`, '--brief'], fake);
+  const [ok, failed] = r.json.results;
+  assert.equal(ok.ref, REF);
+  assert.equal(typeof ok.merge.ready, 'boolean');
+  assert.equal(typeof ok.ci.counts.pass, 'number');
+  assert.equal(ok.title, undefined, 'outside the preset');
+  assert.equal(ok.feedback.reviews, undefined);
+  assert.deepEqual(Object.keys(failed), ['selector', 'ref', 'error']);
+  assert.equal(failed.error.code, 'PR_NOT_FOUND');
 });
