@@ -7,16 +7,12 @@ import { z } from 'zod';
 import { type Context, defineCommand } from '../../core/command.ts';
 import { ExitCode } from '../../core/exit.ts';
 import { DEFAULT_MAX_BYTES } from '../../core/output.ts';
-import { COMPARE_BUDGET_MS } from '../../pr/ci-summary.ts';
-import { checkSelectors, readStatuses, statusesExitCode } from '../../pr/status/batch.ts';
+import { checkSelectors, type PrShare, readStatuses, statusesExitCode } from '../../pr/status/batch.ts';
 import { loadPrStatus } from '../../pr/status/compose.ts';
 import { statusOutput } from '../../pr/status/output.ts';
 import { PrStatusCommandOutput, type PrStatusOutput, STATUS_MAX_PRS } from '../../pr/status/schema.ts';
 import { prContext, rethrowNotFound } from '../../pr/status/target.ts';
 import { fitStatus, fitStatuses } from '../../pr/status/truncate.ts';
-
-/** Time kept back from the deadline for the output, so a slow comparison ends partial, not in TIMEOUT. */
-const OUTPUT_MARGIN_MS = 10_000;
 
 const Input = z.strictObject({
   pr: z
@@ -83,33 +79,39 @@ export default defineCommand({
       return fitStatus(await readStatus(ctx, only, opts), DEFAULT_MAX_BYTES, ctx.project);
     }
     checkSelectors(input.pr);
-    const results = await readStatuses(ctx, input.pr, (selector) => readStatus(ctx, selector, opts));
+    const results = await readStatuses(ctx, input.pr, (selector, share) => readStatus(ctx, selector, opts, share));
     return { results: fitStatuses(results, DEFAULT_MAX_BYTES, ctx.project) };
   },
 });
 
-/** One PR's status before the size budget; a not-found for a cwd-inferred repo gets the 02 §1.2 hint. */
+/**
+ * One PR's status before the size budget; a not-found for a cwd-inferred repo gets the 02 §1.2 hint. The
+ * mergeable retry and the main comparison are cut to fit the deadline (the PR's share of it with several
+ * PRs), so a slow PR ends with mergeable UNKNOWN or a partial comparison rather than in TIMEOUT.
+ */
 async function readStatus(
   ctx: Context,
   selector: string,
   o: { compareMain: boolean; waitMergeable: boolean },
+  share: PrShare = { deadline: ctx.deadline, signal: ctx.signal },
 ): Promise<PrStatusOutput> {
   const { resolved, number, config, configMissing, warnings } = await prContext(ctx, selector);
-  const remaining = ctx.deadline === undefined ? Infinity : ctx.deadline - ctx.clock.monotonic() - OUTPUT_MARGIN_MS;
+  // The share's signal also kills this PR's gh children; repo and config reads above stay shared.
+  const gh = share.signal === ctx.signal ? ctx.gh : (ctx.gh.withSignal?.(share.signal) ?? ctx.gh);
   let state: Awaited<ReturnType<typeof loadPrStatus>>;
   try {
     state = await loadPrStatus({
-      gh: ctx.gh,
+      gh,
       clock: ctx.clock,
       artifacts: ctx.artifacts,
-      signal: ctx.signal,
+      signal: share.signal,
       repo: resolved.repo,
       number,
       config,
       configMissing,
       waitMergeable: o.waitMergeable,
       compareMain: o.compareMain,
-      compareBudgetMs: Math.max(0, Math.min(COMPARE_BUDGET_MS, remaining)),
+      deadline: share.deadline,
     });
   } catch (e) {
     rethrowNotFound(e, resolved, number, 'status');

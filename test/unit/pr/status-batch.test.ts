@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { ExitCode } from '../../../src/core/exit.ts';
 import { byteLength, DEFAULT_MAX_BYTES } from '../../../src/core/output.ts';
-import { mapLimit, statusesExitCode } from '../../../src/pr/status/batch.ts';
+import { BATCH_MARGIN_MS, mapLimit, shareMs, statusesExitCode } from '../../../src/pr/status/batch.ts';
 import { type PrStatusErrorEntry, PrStatusOutput } from '../../../src/pr/status/schema.ts';
 import { fitStatus, fitStatuses } from '../../../src/pr/status/truncate.ts';
 
@@ -46,6 +46,17 @@ test('mapLimit keeps argument order and never runs more than the limit at once',
   });
   assert.deepEqual(out, [50, 10, 40, 20, 30, 0, 60]);
   assert.equal(peak, 3);
+});
+
+test('shareMs: the time left (less the margin) split over the waves still to run', () => {
+  const at = (now: number, deadline: number | undefined) => ({ clock: { monotonic: () => now }, deadline }) as never;
+  const left = 120_000 - BATCH_MARGIN_MS;
+  assert.equal(shareMs(at(0, 120_000), 10), left / 2, '10 PRs: 2 waves of 5');
+  assert.equal(shareMs(at(0, 120_000), 5), left, '5 PRs: 1 wave');
+  assert.equal(shareMs(at(30_000, 120_000), 5), left - 30_000, 'a later PR gets what the fast ones left');
+  assert.equal(shareMs(at(0, 120_000), 0), left);
+  assert.equal(shareMs(at(119_000, 120_000), 3), 0, 'never negative');
+  assert.equal(shareMs(at(0, undefined), 10), undefined);
 });
 
 test('exit: 0 all read, 7 some failed, the first error’s own code when all failed', () => {

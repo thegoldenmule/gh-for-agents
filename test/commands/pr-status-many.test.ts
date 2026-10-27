@@ -6,9 +6,10 @@ import { test } from 'node:test';
 import { byteLength } from '../../src/core/output.ts';
 import { PrStatusErrorEntry, PrStatusOutput } from '../../src/pr/status/schema.ts';
 import { EXIT } from '../contract/exit-table.ts';
-import type { FakeGh } from '../helpers/fake-gh.ts';
-import { isQ1, q1Reply } from '../unit/pr/snapshot-fixture.ts';
-import { install, REF, run, SLUG, workedPr } from './pr-status-world.ts';
+import { FakeClock } from '../helpers/fake-clock.ts';
+import { FakeGh } from '../helpers/fake-gh.ts';
+import { isMergeable, isQ1, mergeableReply, q1Reply } from '../unit/pr/snapshot-fixture.ts';
+import { install, NOW, REF, run, SLUG, workedPr } from './pr-status-world.ts';
 
 const REF2 = `${SLUG}#3302`;
 const page = (nodes: unknown[]) => ({ pageInfo: { hasNextPage: false, endCursor: null }, nodes });
@@ -159,4 +160,80 @@ test('--brief: content it does not select is never cut, and no FEEDBACK_OMITTED 
     assert.equal(e.feedback.counts.omitted, 0, 'feedback.counts is the fold’s');
     assert.ok(!e.warnings.some((w: { code: string }) => w.code === 'FEEDBACK_OMITTED'));
   }
+});
+
+// Every PR is read within its share of the deadline (02 §4.4 Reads): the mergeable retry and the main comparison
+// are cut to fit it, and a PR still reading when its share ends becomes a TIMEOUT entry. The batch never fails.
+
+const TEN = Array.from({ length: 10 }, (_, i) => 3301 + i);
+const isMergeableFor = (n: number) => (argv: string[]) => isMergeable(argv) && argv.includes(`number=${n}`);
+
+/** Ten PRs of the worked example; `slow` start with mergeable UNKNOWN, answered by `mergeable`. */
+function tenPrs(clock: FakeClock, slow: number[], mergeable: Parameters<FakeGh['on']>[1]) {
+  const fake = install(new FakeGh({ clock }));
+  for (const n of TEN) {
+    const unknown = slow.includes(n) ? { mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' } : {};
+    fake.on(isQ1For(n), q1Reply(workedPr({ number: n, url: `https://github.com/${SLUG}/pull/${n}`, ...unknown })));
+    if (slow.includes(n)) fake.on(isMergeableFor(n), mergeable);
+  }
+  return fake;
+}
+
+/** stdout's document, or the spilled file's when ten PRs do not fit 16 KB. */
+const docOf = (r: { json: { spilled?: boolean; path?: string } }) =>
+  r.json.spilled ? JSON.parse(readFileSync(r.json.path as string, 'utf8')) : r.json;
+
+/** Run while advancing the fake clock; `elapsed` is the fake time the call took. */
+async function runTimed(argv: string[], fake: FakeGh, clock: FakeClock) {
+  let done = false;
+  const p = run(argv, fake, { clock }).finally(() => {
+    done = true;
+  });
+  await clock.runUntil(() => done, { stepMs: 250, maxMs: 600_000 });
+  return { ...(await p), elapsed: clock.monotonic() };
+}
+
+test('10 PRs, 2 never settle mergeable: the retry fits the share, all 10 are read within the deadline', async () => {
+  const clock = new FakeClock(NOW);
+  const slow = [3302, 3307];
+  const fake = tenPrs(clock, slow, mergeableReply('UNKNOWN'));
+  // 15 s is less than one full 20 s mergeable retry: before shares, the whole call ended in TIMEOUT.
+  const r = await runTimed(['pr', 'status', ...TEN.map((n) => `${SLUG}#${n}`), '--timeout', '15s'], fake, clock);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout.slice(0, 500));
+  assert.ok(r.elapsed < 15_000, `${r.elapsed} ms`);
+  const results = docOf(r).results;
+  assert.deepEqual(
+    results.map((e: { number: number }) => e.number),
+    TEN,
+  );
+  for (const e of results) {
+    if (slow.includes(e.number)) {
+      assert.deepEqual([e.merge.mergeable, e.merge.settled, e.merge.ready], ['UNKNOWN', false, false]);
+      assert.ok(e.warnings.some((w: { code: string }) => w.code === 'MERGEABLE_UNKNOWN'));
+    } else {
+      assert.deepEqual([e.merge.mergeable, e.merge.settled], ['MERGEABLE', true], String(e.number));
+      assert.equal(e.ci.failing.length, 1, 'the comparison ran');
+    }
+  }
+});
+
+test('a PR whose read hangs becomes a TIMEOUT entry when its share ends; the other 9 are read', async () => {
+  const clock = new FakeClock(NOW);
+  const fake = tenPrs(clock, [3305], { exitCode: 0, stdout: '', stderr: '', hang: true });
+  const r = await runTimed(['pr', 'status', ...TEN.map((n) => `${SLUG}#${n}`), '--timeout', '40s'], fake, clock);
+  assert.equal(r.exitCode, EXIT.GH_FAILED, r.stdout.slice(0, 500));
+  assert.ok(r.elapsed < 40_000, `${r.elapsed} ms`);
+  const results = docOf(r).results;
+  const failed = results[4];
+  PrStatusErrorEntry.parse(failed);
+  assert.equal(failed.selector, `${SLUG}#3305`);
+  assert.equal(failed.ref, `${SLUG}#3305`);
+  assert.equal(failed.error.code, 'TIMEOUT');
+  assert.match(failed.error.hint, /ghx pr status powerhouse-inc\/powerhouse#3305/);
+  // (40 s − 2 s margin) over 2 waves of 5.
+  assert.equal(failed.error.details.deadlineMs, 19_000);
+  assert.deepEqual(
+    results.filter((e: { error?: unknown }) => !e.error).map((e: { number: number }) => e.number),
+    TEN.filter((n) => n !== 3305),
+  );
 });
