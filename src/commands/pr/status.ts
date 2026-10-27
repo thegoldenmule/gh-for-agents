@@ -27,7 +27,7 @@ const Input = z.strictObject({
   waitMergeable: z
     .boolean()
     .default(true)
-    .describe('Retry an UNKNOWN mergeable for up to 20 s; --no-wait-mergeable reads it once'),
+    .describe('Retry an UNKNOWN mergeable for up to 20 s (less near the deadline); --no-wait-mergeable reads it once'),
 });
 
 export default defineCommand({
@@ -37,8 +37,10 @@ export default defineCommand({
     'Answers "can this PR land, and what is left" in one call. merge.ready is exactly what ghx pr merge would ' +
     'decide now (same policy engine); merge.blockers say why not. CI is reported for the head SHA only. ' +
     'Feedback from all three GitHub sources is folded; bodies are capped, and the full text is in ghx pr feedback. ' +
-    `Several PRs (up to ${STATUS_MAX_PRS}) give {results: [...]}, one object per PR in argument order, read concurrently; ` +
-    'a PR that cannot be read is {selector, ref, error} there, and the exit is 7 when some failed.',
+    `Several PRs (up to ${STATUS_MAX_PRS}) give {results: [...]}, one object per PR in argument order, read concurrently, ` +
+    'each within its share of the deadline. A PR that cannot be read, or not within its share (TIMEOUT), is ' +
+    '{selector, ref, error} there, and the exit is 7 when some failed. With --fields or --brief, the 16 KB ' +
+    'budget is measured on what they keep.',
   kind: 'read',
   input: Input,
   positionals: ['pr'],

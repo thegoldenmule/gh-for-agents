@@ -58,6 +58,7 @@ There is no `--json`, `--jq`, `--web`, `--watch` or pager. Every output has a fi
 - `warnings` is always kept. Each `results[]` element also keeps `selector`, `ref`, `target`, `error` and its own `warnings`, so a failed entry of `pr status N M` stays `{selector, ref, error}`, never `{}`.
 - A selected object or array is kept whole. A key absent from the document is omitted; a `null` on the way stays `null` (`meta.rev` on a PR without a block gives `meta: null`).
 - Error documents and the `--dry-run` envelope are never projected. The exit code comes from the full output.
+- A command that bounds its own output (`pr status`'s 16 KB budget) measures the projected document, not the whole one: content the paths do not select is never cut, and cuts are counted and reported (`omitted`, `FEEDBACK_OMITTED`) only for selected content. The command still returns the whole document; the runner projects it once (projecting twice changes nothing).
 - `ci wait --stream` (NDJSON) refuses `--fields`/`--brief` with `VALIDATION`; in the default mode the summary on stdout is projected and the events file keeps it whole.
 
 ### 1.2 Repo and PR resolution [G-CWD]
@@ -416,6 +417,7 @@ const PrStatusOutput = z.object({ ref: PrRef, url: z.string(), number: z.number(
 - **Truncation.**
   - Per-item caps: description 1,000, comment 500, finding 600, summary 400.
   - If the document is still over 16 KB, ghx drops resolved-finding bodies, then the oldest comment bodies, counts them in `omitted`, and adds a hint pointing to `pr feedback`.
+  - Under `--fields` or `--brief` the 16 KB is measured on the projected document (§1.1), so only selected feedback is cut: `--fields feedback.comments[].body` keeps every body (at its per-item cap) when the projection fits, and `--brief` never cuts feedback.
   - The 01 spill is the safety net.
   - With several PRs the 16 KB is shared (§4.4).
 
@@ -445,7 +447,7 @@ All calls use the read-mode client, `gh graphql` and `gh api` GET only.
    - viewer, repo merge settings and default branch;
    - `rateLimit`.
 3. **[G-SHA]** Assert rollup oid == `headRefOid`. On mismatch, re-query once; then warn `CI_SHA_MISMATCH` with state `pending`.
-4. **[G-UNKNOWN]** Unless `--no-wait-mergeable`, re-query `mergeable` with backoff 1, 2, 3, 4, 5, 5 s (≤20 s). If it stays unknown, set `settled:false` and warn. If the head changes, restart once.
+4. **[G-UNKNOWN]** Unless `--no-wait-mergeable`, re-query `mergeable` with backoff 1, 2, 3, 4, 5, 5 s (≤20 s, and at most half the time left before the deadline, in whole steps). If it stays unknown, set `settled:false` and warn `MERGEABLE_UNKNOWN`. If the head changes, restart once.
 5. **GraphQL Q2:** parent, children and precondition-ref aliases. Verify `addressed` commits via `compare/<commit>...<head>` (≤10).
 6. **Expected set and ETA** (§11.3, §11.6), from cache.
 7. **Shared-with-main** for failing Actions checks, unless `--no-compare-main`. At most 5 jobs: `actions/jobs/{id}` and logs **[G-LOGS]**, plus the main run, jobs and logs.
@@ -470,8 +472,9 @@ This replaces shell loops of `gh pr view` / `gh pr checks` (or `ghx pr status`) 
   ```
 
   An error entry is the §1.3 error envelope plus the `selector` it was given and its `ref` (`owner/repo#N` once the repo resolved, else `null`). `ref` is the one key both kinds share.
-- **Reads.** Every selector is parsed before anything is fetched. The PRs are then read concurrently, 5 at a time, each exactly as a single `pr status` reads it (§4.3), with its own `CWD_REPO_MISMATCH` and `CONFIG_MISSING` warnings. Repo resolution and config are fetched once per repo.
-- **Failures.** A selector that fails (not found, forbidden, invalid config, …) becomes its error entry, and the rest are still read. A deadline or a signal still ends the whole call (`TIMEOUT`, `INTERRUPTED`).
+- **Reads.** Every selector is parsed before anything is fetched. The PRs are then read concurrently, 5 at a time, each as a single `pr status` reads it (§4.3), with its own `CWD_REPO_MISMATCH` and `CONFIG_MISSING` warnings. Repo resolution and config are fetched once per repo.
+- **Time.** Each PR reads within its share of the deadline: when it starts, the time left (less 2 s for the output) split over the waves still to run, `ceil(unfinished PRs / 5)`. Ten PRs at the 120 s default start with about 59 s each, and time a fast PR leaves goes to the PRs after it. Within its share, the mergeable retry (§4.3 step 4) and the main comparison are cut to fit, so a slow PR still reports what is known: `merge.mergeable: "UNKNOWN"`, `settled: false` and `MERGEABLE_UNKNOWN`, or `DIAGNOSIS_PARTIAL` with `sameOnMain: null`. The default timeout does not grow with the PR count; pass `--timeout` (up to 5 m) for many slow PRs.
+- **Failures.** A selector that fails (not found, forbidden, invalid config, …) becomes its error entry, and the rest are still read. A PR still reading when its share ends becomes a `TIMEOUT` error entry (`details.deadlineMs` is the share), and the others are kept. The command's own deadline or a signal still ends the whole call (`TIMEOUT`, `INTERRUPTED`).
 - **Exit**, as `pr create --batch` (§2.4): 0 when every entry is a PR; 7 when some are errors; when all are, the first entry's own code (5 for `PR_NOT_FOUND`).
 - **Size.** The 16 KB bound covers the whole document. Each PR is fitted alone first (§4.1 Truncation). If the sum is over, the budget is water-filled: error entries and PRs within an equal share keep their size, and the rest are fitted to an equal split of what is left. A PR's non-feedback core (about 4 KB) is never cut, so more than 3 or 4 PRs can still exceed 16 KB. The 01 spill then applies, and it exits 0 even when an entry is an error: read the spilled file, or narrow the output with `--fields`.
 
