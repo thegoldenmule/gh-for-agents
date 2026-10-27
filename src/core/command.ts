@@ -60,6 +60,8 @@ interface BaseSpec<I extends z.ZodObject> {
    * against the output schema by test/unit/core/fields.test.ts. Without it, --brief is refused.
    */
   brief?: readonly string[];
+  /** Where a --fields or --brief error sends the caller for the field list. Default: `See ghx <name> --schema.` */
+  fieldsHint?: string;
   /** 'required': JSON must come from --input (USAGE_INPUT_MISSING otherwise). Default 'optional'. */
   jsonInput?: 'required' | 'optional';
   /**

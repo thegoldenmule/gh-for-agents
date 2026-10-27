@@ -217,6 +217,8 @@ export interface PassthroughPlan {
   inject: 'flag' | 'positional' | 'placeholders' | 'none';
   /** --max-bytes, so the inline cap fits the caller's bound. */
   maxBytes?: number;
+  /** --fields was given: parsed JSON stays inline at any size, since the projection runs before the bound. */
+  projected?: boolean;
 }
 
 export type Decision =
@@ -232,15 +234,35 @@ interface Globals {
   maxBytes?: number;
 }
 
-/** Take ghx's own output flags (--pretty, --max-bytes N, --timeout D) out of the gh argv. */
+/**
+ * Take ghx's own output flags (--pretty, --max-bytes N, --timeout D, --fields P, --brief) out of the gh
+ * argv, up to a bare `--` (after it every token is gh's). gh has no --fields or --brief flag (2.x), so
+ * neither is ever forwarded: the runner projects the envelope (--fields passthrough.json[].headSha) or
+ * refuses --brief, before gh runs.
+ */
 function takeGhxGlobals(tokens: readonly string[]): Globals {
   const rest: string[] = [];
   const globals: Partial<GlobalOptions> = {};
   let maxBytes: number | undefined;
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i] as string;
+    if (t === '--') {
+      rest.push(...tokens.slice(i));
+      break;
+    }
     if (t === '--pretty') {
       globals.pretty = true;
+      continue;
+    }
+    if (t === '--brief') {
+      globals.brief = true;
+      continue;
+    }
+    const f = /^--fields(?:=(.*))?$/.exec(t);
+    if (f) {
+      // A missing value is an empty path list: parseFields makes it VALIDATION.
+      const value = f[1] ?? tokens[++i] ?? '';
+      globals.fields = [...(globals.fields ?? []), value];
       continue;
     }
     const m = /^--(max-bytes|timeout)(?:=(.*))?$/.exec(t);
@@ -563,7 +585,11 @@ function guarded(plan: PassthroughPlan, g: Globals): Decision {
   }
   return {
     kind: 'run',
-    plan: { ...plan, ...(g.maxBytes !== undefined ? { maxBytes: g.maxBytes } : {}) },
+    plan: {
+      ...plan,
+      ...(g.maxBytes !== undefined ? { maxBytes: g.maxBytes } : {}),
+      ...(g.globals.fields !== undefined ? { projected: true } : {}),
+    },
     globals: g.globals,
   };
 }

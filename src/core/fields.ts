@@ -260,14 +260,12 @@ export function checkFields(spec: AnyCommandSpec, paths: readonly FieldPath[]): 
   const scope = perResult
     ? 'Fields of each results[] element (other top-level keys are always kept)'
     : 'Top-level fields';
-  throw fieldsError(
-    issues,
-    `${issues[0]?.message}. ${scope}: ${top.join(', ')}. See ghx ${commandName(spec)} --schema.`,
-    {
-      fields: top,
-    },
-  );
+  throw fieldsError(issues, `${issues[0]?.message}. ${scope}: ${top.join(', ')}. ${seeFields(spec)}`, {
+    fields: top,
+  });
 }
+
+const seeFields = (spec: AnyCommandSpec): string => spec.fieldsHint ?? `See ghx ${commandName(spec)} --schema.`;
 
 export interface FieldOptions {
   fields?: readonly string[] | undefined;
@@ -283,7 +281,7 @@ export function fieldProjection(spec: AnyCommandSpec, o: FieldOptions): ((doc: u
   if (o.brief) {
     if (!spec.brief || spec.brief.length === 0) {
       throw new GhxError('USAGE_UNKNOWN_FLAG', `'ghx ${commandName(spec)}' has no flag '--brief'.`, {
-        hint: `This command has no brief preset; pick fields with --fields (see ghx ${commandName(spec)} --schema).`,
+        hint: `This command has no brief preset; pick fields with --fields. ${seeFields(spec)}`,
         details: { flag: '--brief', suggestions: ['--fields'] },
       });
     }

@@ -99,6 +99,34 @@ describe('allowlisted reads run', () => {
     assert.equal(d.plan.maxBytes, 20000);
   });
 
+  test('--fields (spaced, =, repeated) and --brief are ghx flags: never in the gh argv', () => {
+    const d = run(
+      decide([
+        'run',
+        'list',
+        '--json',
+        'headSha,status',
+        '--fields',
+        'passthrough.json[].headSha',
+        '--brief',
+        '--fields=passthrough.exitCode',
+      ]),
+    );
+    assert.deepEqual(d.plan.args, ['run', 'list', '--json', 'headSha,status']);
+    assert.deepEqual(d.globals, { fields: ['passthrough.json[].headSha', 'passthrough.exitCode'], brief: true });
+    assert.equal(d.plan.projected, true);
+    const api = run(decide(['api', 'repos/{owner}/{repo}/pulls', '--fields', 'passthrough.json[].number']));
+    assert.deepEqual(api.plan.args, ['api', 'repos/{owner}/{repo}/pulls']);
+    assert.deepEqual(api.globals.fields, ['passthrough.json[].number']);
+    assert.equal(run(decide(['run', 'list'])).plan.projected, undefined);
+  });
+
+  test('after a bare --, every token is gh’s, ghx-looking flags included', () => {
+    const d = run(decide(['search', 'issues', '--pretty', '--', '--fields', '-label:bug']));
+    assert.deepEqual(d.plan.args, ['search', 'issues', '--', '--fields', '-label:bug']);
+    assert.deepEqual(d.globals, { pretty: true });
+  });
+
   test('every 02 §10 read is in the guard allowlist', () => {
     for (const [group, subs] of Object.entries(ALLOWED_READS)) {
       for (const sub of subs) assert.ok(isReadAllowed([group, sub]), `${group} ${sub}`);

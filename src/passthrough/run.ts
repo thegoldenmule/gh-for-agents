@@ -36,6 +36,7 @@ const Input = z.object({
   args: z.array(z.string()).min(1),
   inject: z.enum(['flag', 'positional', 'placeholders', 'none']),
   maxBytes: z.number().int().optional(),
+  projected: z.boolean().optional(),
 });
 
 /** The inline cap for json/text: the bound minus the envelope's reserve. */
@@ -94,7 +95,7 @@ async function buildEnvelope(
   exitCode: number,
   stdout: string,
   stderr: string,
-  cap: number,
+  cap: { json: number; text: number },
   spill: (content: string, ext: 'json' | 'txt') => Promise<string>,
 ): Promise<Envelope> {
   const env: Envelope = { argv: ['gh', ...argv], exitCode, stdoutBytes: byteLength(stdout) };
@@ -106,8 +107,8 @@ async function buildEnvelope(
       parsed = undefined;
     }
   }
-  if (parsed && byteLength(JSON.stringify(parsed.value)) <= cap) env.json = parsed.value;
-  else if (!parsed && byteLength(JSON.stringify(stdout)) <= cap) env.text = stdout;
+  if (parsed && byteLength(JSON.stringify(parsed.value)) <= cap.json) env.json = parsed.value;
+  else if (!parsed && byteLength(JSON.stringify(stdout)) <= cap.text) env.text = stdout;
   else env.stdoutPath = await spill(stdout, parsed ? 'json' : 'txt');
   if (stderr.trim() !== '') env.stderr = stderrTail(stderr);
   return env;
@@ -125,6 +126,8 @@ export function passthroughSpec(name: readonly string[]): AnyCommandSpec {
     needs: { repo: 'optional' },
     timeout: { defaultMs: 120_000, maxMs: 600_000 },
     output: passthroughOutput,
+    fieldsHint:
+      "Passthrough has no --schema: its fields are passthrough.{argv, exitCode, json, text, stdoutPath, stdoutBytes, stderr}, and paths under passthrough.json (gh's parsed output) are not checked, e.g. --fields passthrough.json[].headSha. gh's own --json <fields> and --jq select inside gh's output.",
     async run(input, ctx) {
       const needsRepo =
         input.inject === 'flag' ||
@@ -136,7 +139,9 @@ export function passthroughSpec(name: readonly string[]): AnyCommandSpec {
       const envMax = ctx.env.GHX_MAX_BYTES;
       const maxBytes =
         input.maxBytes ?? (envMax !== undefined && /^\d+$/.test(envMax) ? Number(envMax) : DEFAULT_MAX_BYTES);
-      const cap = inlineCap(maxBytes);
+      // Under --fields the runner projects before it bounds (and spills if the projection is still too big),
+      // so JSON stays inline at any size; a projection cannot reach into a stdoutPath file.
+      const cap = { json: input.projected ? Infinity : inlineCap(maxBytes), text: inlineCap(maxBytes) };
       const spill = async (content: string, ext: 'json' | 'txt'): Promise<string> => {
         const sha = createHash('sha256').update(content).digest('hex').slice(0, 12);
         const ref = await ctx.artifacts.write({

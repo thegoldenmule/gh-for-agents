@@ -194,6 +194,7 @@ async function refuseUnknown(
             ? `${API_USAGE}; GET only, so no -X, -f/-F, --input or graphql; {owner}/{repo} in the endpoint is filled from the resolved repo`
             : `ghx ${name} [gh flags and arguments]; see gh ${name} --help for them`,
         output: '{passthrough:{argv, exitCode, json?, text?, stdoutPath?, stdoutBytes, stderr?}}',
+        fields: '--fields passthrough.json[].<key> keeps parts of the envelope (ghx takes it; gh never sees it)',
       },
       out,
     );
