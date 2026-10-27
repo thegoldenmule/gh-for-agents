@@ -361,7 +361,7 @@ The protocol (02 §11.0): `ghx ci wait <pr>` runs in the background and prints o
     - `--flaky` with a `same-sha-passed` job reruns only that job, with `flake` evidence in the output;
     - `--flaky` with no candidates gives `NO_FLAKY_CANDIDATES`, exit 9;
     - `--dry-run` halts before the POST with `wouldRun`;
-    - the error precedence is `NO_FAILED_RUNS` > `RUN_IN_PROGRESS` > `RERUN_LIMIT`.
+    - the error precedence is `WORKFLOW_INVALID` > `NO_FAILED_RUNS` > `RUN_IN_PROGRESS` > `RERUN_LIMIT`.
   - `test/regression/rerun-already-running.test.ts` (R18, the verbatim §3.1 strings).
 
 **M5.2 `feat(ci): ghx ci retrigger <pr>`**

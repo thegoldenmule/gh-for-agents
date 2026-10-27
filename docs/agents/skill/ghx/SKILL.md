@@ -39,8 +39,8 @@ Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then co
 
 - stdout is one JSON document. Errors are `{"error":{"code","message","hint","details"}}` with a non-zero exit. Follow `hint`; don't retry blindly.
 - Big outputs (logs, diffs) come back as file paths. Read the file; don't fetch it again.
-- `--brief` (pr status, ci wait, pr create, pr merge, pr feedback) keeps the fields you'd otherwise extract. Errors are never trimmed.
-- With several PRs, `pr status` exits 7 if some `results[]` entries are `error`. Read the document.
+- `--brief` (pr status, pr create, pr merge, pr feedback, ci wait, ci why, ci rerun) keeps the fields you'd otherwise extract. Errors are never trimmed.
+- With several PRs, `pr status` exits 7 if some `results[]` entries are `error`. Read the document. A slow PR can be a `TIMEOUT` entry while the rest are read; re-run it alone or raise `--timeout`.
 
 ### Exit codes
 
@@ -56,7 +56,7 @@ Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then co
 | 7 | gh or API failure after retries, permission, rate limit | Retry later, or fix access |
 | 8 | Deadline exceeded | Retry |
 | 9 | GitHub state forbids it now: head moved, conflict, CI pending | Change the state, then retry |
-| 10 | `ci wait`: CI is red | Read the diagnosis; fix it, or `ghx ci rerun <pr> --flaky`. `reason: "workflow-invalid"`: GitHub rejected a workflow file; fix it as `next` says |
+| 10 | `ci wait`: CI is red | Read the diagnosis; fix it, or `ghx ci rerun <pr> --flaky` (that also covers jobs that never got a runner, flake `no-runner`). `reason: "workflow-invalid"`: GitHub rejected a workflow file; fix it as `next` says |
 | 11 | `ci wait`: red, but every failure so far is also red on main | Under the default first-failure, other checks may still be running: run `ghx ci wait <pr> --until mergeable` before merging |
 | 12 | `ci wait`: the head moved, or the PR closed or merged | Re-read with `ghx pr status` |
 | 13 | `ci wait`: no checks registered | If `reason` is `merge-conflict`, merge the base and push. Otherwise check the triggers, or `ghx ci retrigger <pr>` |

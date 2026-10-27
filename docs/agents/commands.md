@@ -35,7 +35,7 @@ Rerun failed jobs of completed runs on the PR head, or of one run (--flaky: only
 
 write, single document, timeout 2m (max 5m).
 
-Reruns the failed jobs of completed Actions runs for the current PR head, or of one run (run:<id>, for CI without a PR, such as main). The run id pins a run target to its commit; --expect-head checks it. Runs still in progress are skipped (RUN_IN_PROGRESS) and runs at ci.maxRerunAttempts (RERUN_LIMIT, default 3). --job reruns matching jobs; --flaky only jobs with flake evidence (NO_FLAKY_CANDIDATES if none), never widening to a real failure: one job per run at a time, the rest DEFERRED until that run completes. A rerun reuses the original merge ref: after a base change, use ghx ci retrigger.
+Reruns the failed jobs of completed Actions runs for the current PR head, or of one run (run:<id>, for CI without a PR, such as main). The run id pins a run target to its commit; --expect-head checks it. Runs still in progress are skipped (RUN_IN_PROGRESS) and runs at ci.maxRerunAttempts (RERUN_LIMIT, default 3). --job reruns matching jobs; --flaky only jobs with flake evidence (NO_FLAKY_CANDIDATES if none), never widening to a real failure: one job per run at a time, the rest DEFERRED until that run completes. A run GitHub rejected before any job ran is never rerun (WORKFLOW_INVALID): fix the file and push. A rerun reuses the original merge ref: after a base change, use ghx ci retrigger.
 
 Flags:
 
@@ -452,12 +452,12 @@ One object: description, block, merge readiness, CI for the head, feedback, prec
 
 read, single document, timeout 2m (max 5m).
 
-Answers "can this PR land, and what is left" in one call. merge.ready is exactly what ghx pr merge would decide now (same policy engine); merge.blockers say why not. CI is reported for the head SHA only. Feedback from all three GitHub sources is folded; bodies are capped, and the full text is in ghx pr feedback. Several PRs (up to 10) give {results: [...]}, one object per PR in argument order, read concurrently; a PR that cannot be read is {selector, ref, error} there, and the exit is 7 when some failed.
+Answers "can this PR land, and what is left" in one call. merge.ready is exactly what ghx pr merge would decide now (same policy engine); merge.blockers say why not. CI is reported for the head SHA only. Feedback from all three GitHub sources is folded; bodies are capped, and the full text is in ghx pr feedback. Several PRs (up to 10) give {results: [...]}, one object per PR in argument order, read concurrently, each within its share of the deadline. A PR that cannot be read, or not within its share (TIMEOUT), is {selector, ref, error} there, and the exit is 7 when some failed. With --fields or --brief, the 16 KB budget is measured on what they keep.
 
 Flags:
 
 - `--compare-main` (default `true`): Compare failing checks with the default branch; --no-compare-main skips it
-- `--wait-mergeable` (default `true`): Retry an UNKNOWN mergeable for up to 20 s; --no-wait-mergeable reads it once
+- `--wait-mergeable` (default `true`): Retry an UNKNOWN mergeable for up to 20 s (less near the deadline); --no-wait-mergeable reads it once
 
 Input: Flags and positionals only; --input file.json is also accepted.
 

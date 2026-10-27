@@ -48,7 +48,7 @@ The grammar is `ghx <noun> <verb> [selector…] [flags]`, where noun ∈ `pr`, `
 | `--timeout <dur>` | all | 01's deadline with per-command default and max. `ci wait` has its own rules (§11.1) |
 | `--schema`, `--pretty`, `--max-bytes` | all | As defined in 01 |
 | `--fields <paths>` | every JSON-emitting command, passthrough reads included (§10) | Keep only these leaves of the output, nesting intact. Comma-separated dot paths, repeatable; `key[]` maps over an array: `--fields state,head.sha,ci.counts,merge.blockers[].code`. Projection rule below |
-| `--brief` | commands that declare a preset (`pr status`, `ci wait`, `pr create`, `pr merge`, `pr feedback`) | The command's preset `--fields` list, shown as `brief` in `--help` and `--schema`. Elsewhere, passthrough included, it is `USAGE_UNKNOWN_FLAG`. With `--fields` it selects the union |
+| `--brief` | commands that declare a preset (`pr status`, `pr create`, `pr merge`, `pr feedback`, `ci wait`, `ci why`, `ci rerun`) | The command's preset `--fields` list, shown as `brief` in `--help` and `--schema`. Elsewhere, passthrough included, it is `USAGE_UNKNOWN_FLAG`. With `--fields` it selects the union |
 
 There is no `--json`, `--jq`, `--web`, `--watch` or pager. Every output has a fixed, typed schema (§3.1, §9.9); `--fields` and `--brief` cut it down, they never reshape it.
 
@@ -80,7 +80,7 @@ stdout takes exactly one of three shapes:
 2. **NDJSON, only for `ci wait --stream`** (a human-directed watch, not the agent path, §11.0). Each line is `{type, seq, at, …}`. The last line is always `summary` or `error`. Each line is at most 4,096 bytes.
 3. **Spill.** If a document would exceed the bound, stdout is `{"spilled": true, "path", "bytes", "command"}` with exit 0.
 
-`--fields`/`--brief` (§1.1) project the document before the bound is applied, so a projection that fits is printed and a spilled file holds the projected document. Command-level fitting (`pr status` caps feedback to 16 KB) still runs first, inside the command, on the full document.
+`--fields`/`--brief` (§1.1) project the document before the bound is applied, so a projection that fits is printed and a spilled file holds the projected document. Command-level fitting (`pr status` caps feedback to 16 KB, `ci wait` compacts its summary) runs inside the command and measures the projected document, so it only cuts what will be printed.
 
 Errors are `{"error": {"code", "message", "hint", "details"}}`. All four keys are always present, with `null` when empty. The exit code is non-zero (§6).
 
@@ -145,7 +145,7 @@ const SameOnMain = z.object({ verdict: z.enum(["same-tests","same-step","differe
   mainBranch: z.string(), mainRunId: z.number().nullable(), mainSha: Sha.nullable(), mainRunAt: Iso.nullable(),
   prTests: z.array(z.string()).max(30), mainTests: z.array(z.string()).max(30), newTests: z.array(z.string()).max(30) });
 const Flake = z.object({ candidate: z.boolean(), score: z.enum(["high","medium","low","none"]),
-  signals: z.array(z.object({ kind: z.enum(["same-sha-passed","main-intermittent","known-flaky","infra-error"]), detail: z.string() })) });
+  signals: z.array(z.object({ kind: z.enum(["same-sha-passed","main-intermittent","known-flaky","infra-error","no-runner"]), detail: z.string() })) });
 const FailingCheck = Check.extend({ sameOnMain: SameOnMain.nullable(), flake: Flake.nullable() });  // null = not computed
 const ExpectedCheck = z.object({ name: z.string(), workflow: z.string().nullable(),
   source: z.enum(["required","config","baseline"]), state: z.enum(["missing","reported","absent"]) });
