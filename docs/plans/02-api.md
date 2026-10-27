@@ -47,8 +47,18 @@ The grammar is `ghx <noun> <verb> [selector…] [flags]`, where noun ∈ `pr`, `
 | `--expect-head <sha>` | `pr merge`, `pr review`, `ci rerun`, `ci retrigger` | Refuses with `HEAD_MOVED` unless the head is this SHA (7–40 hex) **[G-SHA]** |
 | `--timeout <dur>` | all | 01's deadline with per-command default and max. `ci wait` has its own rules (§11.1) |
 | `--schema`, `--pretty`, `--max-bytes` | all | As defined in 01 |
+| `--fields <paths>` | every JSON-emitting command (not passthrough) | Keep only these leaves of the output, nesting intact. Comma-separated dot paths, repeatable; `key[]` maps over an array: `--fields state,head.sha,ci.counts,merge.blockers[].code`. Projection rule below |
+| `--brief` | commands that declare a preset (`pr status`, `ci wait`, `pr create`, `pr merge`, `pr feedback`) | The command's preset `--fields` list, shown as `brief` in `--help` and `--schema`. Elsewhere it is `USAGE_UNKNOWN_FLAG`. With `--fields` it selects the union |
 
-There is no `--json`, `--jq`, `--web`, `--watch` or pager. Every output has a fixed, typed schema (§3.1, §9.9).
+There is no `--json`, `--jq`, `--web`, `--watch` or pager. Every output has a fixed, typed schema (§3.1, §9.9); `--fields` and `--brief` cut it down, they never reshape it.
+
+**Projection rule.** If the document has a top-level `results` array, field paths resolve against each element and other top-level keys are kept; otherwise against the document. Details:
+
+- Paths are checked against the output schema (`--schema` `output`, or `summary` for `ci wait`) before the command reads input or calls gh, so a typo fails as `VALIDATION` and never follows a write. The hint names the valid top-level keys (the element keys for a `results` document), the nearest match, and the fix for a path through an array without `[]` (`ci.failing.name` → `ci.failing[].name`) or one written with a `results[].` prefix.
+- `warnings` is always kept. Each `results[]` element also keeps `selector`, `ref`, `target`, `error` and its own `warnings`, so a failed entry of `pr status N M` stays `{selector, ref, error}`, never `{}`.
+- A selected object or array is kept whole. A key absent from the document is omitted; a `null` on the way stays `null` (`meta.rev` on a PR without a block gives `meta: null`).
+- Error documents and the `--dry-run` envelope are never projected. The exit code comes from the full output.
+- `ci wait --stream` (NDJSON) refuses `--fields`/`--brief` with `VALIDATION`; in the default mode the summary on stdout is projected and the events file keeps it whole.
 
 ### 1.2 Repo and PR resolution [G-CWD]
 
@@ -68,6 +78,8 @@ stdout takes exactly one of three shapes:
 1. **One bounded JSON document.** It includes `ref` where applicable and `warnings: {code, message}[]`. Commands stay small by design: items are truncated (`truncated: true`) and logs go to artifact files (§6). The bound is 01's `maxBytes`, default **16 KB**.
 2. **NDJSON, only for `ci wait --stream`** (a human-directed watch, not the agent path, §11.0). Each line is `{type, seq, at, …}`. The last line is always `summary` or `error`. Each line is at most 4,096 bytes.
 3. **Spill.** If a document would exceed the bound, stdout is `{"spilled": true, "path", "bytes", "command"}` with exit 0.
+
+`--fields`/`--brief` (§1.1) project the document before the bound is applied, so a projection that fits is printed and a spilled file holds the projected document. Command-level fitting (`pr status` caps feedback to 16 KB) still runs first, inside the command, on the full document.
 
 Errors are `{"error": {"code", "message", "hint", "details"}}`. All four keys are always present, with `null` when empty. The exit code is non-zero (§6).
 
