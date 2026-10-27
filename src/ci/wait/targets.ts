@@ -50,7 +50,9 @@ export function parseCiTarget(
   const s = raw.trim();
   const refuse = (kind: CiTargetKind): never => {
     const takes = allow.map((k) => FORMS[k]).join(', ');
-    throw badTarget(raw, command, allow, `${command} does not take ${FORMS[kind]}; it takes ${takes}.`);
+    // A branch spans runs: ci why lists them, each a run:<id> this command may take.
+    const why = kind === 'branch' && allow.includes('run') ? ` ghx ci why ${s} names the branch head's runs.` : '';
+    throw badTarget(raw, command, allow, `${command} does not take ${FORMS[kind]}; it takes ${takes}.${why}`);
   };
   if (s.startsWith(BRANCH_PREFIX)) {
     const rest = s.slice(BRANCH_PREFIX.length);
@@ -75,7 +77,7 @@ export function parseCiTarget(
   if (t === undefined) {
     const hint =
       BARE_BRANCH.test(s) && allow.includes('branch')
-        ? `For a branch, say so: ${command} branch:${s} (a branch has no mergeable state; --until mergeable takes a PR).`
+        ? `For a branch, say so: ghx ${command} branch:${s} (a branch has no mergeable state; --until mergeable takes a PR).`
         : undefined;
     throw badTarget(raw, command, allow, hint);
   }

@@ -452,4 +452,5 @@ test('a run URL is a run target; a branch is not a ci rerun target', async () =>
   assert.equal(branch.exitCode, EXIT.USAGE);
   assert.equal(branch.json.error.code, 'USAGE_BAD_SELECTOR');
   assert.match(branch.json.error.hint, /ci rerun does not take branch:.*it takes a PR .*run:<id>/);
+  assert.match(branch.json.error.hint, /ghx ci why branch:main names the branch head's runs/);
 });
