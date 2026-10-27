@@ -40,6 +40,17 @@ export default defineCommand({
   positionals: ['pr'],
   needs: { repo: 'inferred', config: 'required' },
   timeout: { defaultMs: 180_000, maxMs: 600_000 },
+  brief: [
+    'ref',
+    'merged',
+    'alreadyMerged',
+    'method',
+    'headSha',
+    'mergeCommit',
+    'mergedAt',
+    'plan.blockers[].code',
+    'next',
+  ],
   replaces: ['gh pr merge', 'gh pr merge --match-head-commit', 'gh api -X PUT repos/{owner}/{repo}/pulls/{n}/merge'],
   examples: [
     { argv: 'ghx pr merge 3301 -R powerhouse-inc/powerhouse --expect-head 9f2c4e1', note: 'Merge, pinned to 9f2c4e1' },

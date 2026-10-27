@@ -50,6 +50,7 @@ export default defineCommand({
   output: PrFeedbackOutput,
   needs: { repo: 'inferred', config: 'optional' },
   timeout: { defaultMs: 60_000, maxMs: 300_000 },
+  brief: ['ref', 'headSha', 'feedback.counts', 'openFindings', 'artifactPath'],
   replaces: [
     'gh pr view --comments',
     'gh api repos/{o}/{r}/pulls/{n}/comments',

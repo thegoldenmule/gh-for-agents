@@ -59,6 +59,7 @@ export default defineCommand({
   needs: { repo: 'inferred', config: 'required' },
   jsonInput: 'required',
   timeout: { defaultMs: 120_000, maxMs: 600_000 },
+  brief: ['ref', 'number', 'url', 'draft', 'head.sha', 'next'],
   replaces: ['gh pr create'],
   examples: [
     { argv: 'ghx pr create -R octo/demo --input -', note: 'or --input pr.json', input: EXAMPLE },
