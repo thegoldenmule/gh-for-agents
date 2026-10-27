@@ -55,6 +55,11 @@ interface BaseSpec<I extends z.ZodObject> {
   /** Raw gh invocations this command replaces, for help, refusal hints and the steering hook. */
   replaces?: readonly string[];
   examples?: readonly CommandExample[];
+  /**
+   * The --brief preset: --fields paths (src/core/fields.ts) an agent reads after this command, checked
+   * against the output schema by test/unit/core/fields.test.ts. Without it, --brief is refused.
+   */
+  brief?: readonly string[];
   /** 'required': JSON must come from --input (USAGE_INPUT_MISSING otherwise). Default 'optional'. */
   jsonInput?: 'required' | 'optional';
   /**
