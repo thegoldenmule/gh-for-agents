@@ -888,6 +888,7 @@ The envelope:
 
 - A non-zero gh exit becomes `GH_FAILED` (7) with the envelope in `details`.
 - `pr diff` failing with HTTP 406 becomes `DIFF_TOO_LARGE`, with a hint to run a local `git diff` **[G-300]**.
+- `ghx api --help` (or `-h`, anywhere before `--`) cannot pass the GET check, so it answers with ghx's passthrough help, the same document as `ghx help api`: the accepted `ghx api <endpoint>` form. Other allowlisted reads pass `--help` to gh.
 
 Justification:
 - **Agents need these reads.** They use unwrapped reads all the time: `pr diff` (88 calls), `pr list` (59), `issue view` (20), `run list` (296) and `api` GETs (~300) (§2.1, §2.4). Refusing them would push agents back to raw `gh` and pipes.

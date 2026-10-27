@@ -13,7 +13,7 @@ import {
   runCommandWith,
 } from '../core/runner.ts';
 import { suggest } from '../core/suggest.ts';
-import { ALLOWED_NAMES } from '../passthrough/policy.ts';
+import { ALLOWED_NAMES, API_USAGE } from '../passthrough/policy.ts';
 import { deriveInterface, parseCommandArgv } from './args.ts';
 import { commandHelp, globalHelp } from './help.ts';
 import type { Registry } from './registry.ts';
@@ -30,6 +30,12 @@ const done = (exitCode: number): RunOutcome => ({ exitCode, forced: false });
 
 /** Schema output is documentation, so it is never spilled (final review decisions); errors stay bounded. */
 const unbounded = (o: OutputOptions): OutputOptions => ({ ...o, maxBytes: Number.POSITIVE_INFINITY });
+
+/** A --help or -h before any `--`. */
+function wantsHelp(argv: readonly string[]): boolean {
+  const dd = argv.indexOf('--');
+  return (dd === -1 ? argv : argv.slice(0, dd)).some((t) => t === '--help' || t === '-h');
+}
 
 function leadingWords(argv: readonly string[]): string[] {
   const out: string[] = [];
@@ -115,6 +121,8 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<Ru
     }
 
     const hit = words.length > 0 ? await deps.registry.resolve(words) : undefined;
+    // `ghx api --help`: gh's own help cannot pass the GET check, so it gets passthrough help (02 §10).
+    if (!hit && words[0] === 'api' && wantsHelp(argv)) return done(await refuseUnknown(['api'], deps, out));
     if (!hit) {
       const handler = deps.onUnknown ?? defaultOnUnknown;
       const r = await handler(argv, { names: await deps.registry.names() });
@@ -181,7 +189,10 @@ async function refuseUnknown(
         name,
         passthrough: true,
         summary: `Not a ghx command: ghx ${name} runs gh ${name} through passthrough, an allowlisted gh read.`,
-        usage: `ghx ${name} [gh flags and arguments]; see gh ${name} --help for them`,
+        usage:
+          name === 'api'
+            ? `${API_USAGE}; GET only, so no -X, -f/-F, --input or graphql; {owner}/{repo} in the endpoint is filled from the resolved repo`
+            : `ghx ${name} [gh flags and arguments]; see gh ${name} --help for them`,
         output: '{passthrough:{argv, exitCode, json?, text?, stdoutPath?, stdoutBytes, stderr?}}',
       },
       out,

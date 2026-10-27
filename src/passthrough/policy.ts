@@ -496,6 +496,9 @@ function writeRefused(what: string, reason: string, hint: string): GhxError {
 const WRITE_HINT =
   'ghx passes through reads only; writes go through validated ghx commands (ghx --help). Ask the user to run it if it is needed.';
 
+/** The `ghx api` form passthrough accepts: the refusal hint and `ghx api --help` (src/cli/run.ts). */
+export const API_USAGE = 'ghx api <endpoint> with only -H, -q/--jq, --paginate, --slurp, -i, --hostname or --cache';
+
 /** `gh api`: GET only, no fields, no graphql, nothing ghx cannot parse. */
 function decideApi(args: string[], g: Globals): Decision {
   if (args.some((a) => a === '-R' || a.startsWith('--repo') || /^-R./.test(a))) {
@@ -515,7 +518,7 @@ function decideApi(args: string[], g: Globals): Decision {
       error: writeRefused(
         what,
         'ghx cannot verify it is a GET (an unrecognised flag, a missing value or endpoint, an extra argument, or --)',
-        'Use: ghx api <endpoint> with only -H, -q/--jq, --paginate, --slurp, -i, --hostname or --cache.',
+        `Use: ${API_USAGE}.`,
       ),
     };
   }

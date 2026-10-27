@@ -21,3 +21,21 @@ test('ghx help still refuses wrapped and unknown commands', async () => {
   const unknown = await runInProcess(['help', 'nope', 'never']);
   assert.equal(unknown.json.error.code, 'USAGE_UNKNOWN_COMMAND');
 });
+
+test('ghx api --help (or -h) is passthrough help naming the GET-only form, not PASSTHROUGH_WRITE_REFUSED', async () => {
+  for (const argv of [
+    ['api', '--help'],
+    ['api', '-h'],
+    ['api', 'repos/{owner}/{repo}/pulls', '--help'],
+  ]) {
+    const r = await runInProcess(argv);
+    assert.equal(r.exitCode, 0, r.stdout);
+    assert.equal(r.json.name, 'api');
+    assert.equal(r.json.passthrough, true);
+    assert.match(r.json.usage, /^ghx api <endpoint> with only -H, .*GET only/);
+    assert.deepEqual(r.calls, []);
+  }
+  assert.equal((await runInProcess(['help', 'api'])).json.usage, (await runInProcess(['api', '-h'])).json.usage);
+  const bare = await runInProcess(['api']);
+  assert.equal(bare.json.error.code, 'PASSTHROUGH_WRITE_REFUSED', 'no endpoint and no help is still refused');
+});

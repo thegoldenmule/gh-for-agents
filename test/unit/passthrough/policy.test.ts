@@ -505,7 +505,10 @@ describe('unknown commands', () => {
 describe('refused argv never reaches gh (through runCli)', () => {
   const rows: [string[], number][] = [
     ...WRAPPED.map(([argv]) => [argv, EXIT.USAGE] as [string[], number]),
-    ...[...WRITES, ...API_WRITES].map((argv) => [argv, EXIT.POLICY] as [string[], number]),
+    // `api … --help` is refused by decide() but answered by runCli with passthrough help: exit 0, no gh call.
+    ...[...WRITES, ...API_WRITES].map(
+      (argv) => [argv, argv[0] === 'api' && argv.includes('--help') ? EXIT.OK : EXIT.POLICY] as [string[], number],
+    ),
     [['run', 'download', '1'], EXIT.USAGE],
     [['pr', 'list', '--web'], EXIT.USAGE],
     [['frobnicate'], EXIT.USAGE],
