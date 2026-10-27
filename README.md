@@ -27,14 +27,14 @@ These are the v1 commands, specified in [02-api](docs/plans/02-api.md).
 | --- | --- |
 | `pr create` | Opens a PR from validated JSON and renders a short body. `--batch` opens several. |
 | `pr edit` | Patches a PR's structured fields and re-renders the body, with the same validation. |
-| `pr status` | Returns one object: description, metadata, merge state, CI for the head SHA, feedback and blockers. |
+| `pr status` | Returns one object: description, metadata, merge state, CI for the head SHA, feedback and blockers. Several PRs (`pr status 12 13 14`) return `{results: […]}`. |
 | `pr feedback` | Merges feedback from all three GitHub sources into one list, with bots kept separate. |
 | `pr comment`, `pr review` | Post structured comments and reviews. |
 | `pr resolve` | Records a status on feedback items, such as addressed or wontfix. |
 | `pr merge` | Merges according to the repo's policy, with the head SHA pinned. Overrides need a reason. |
-| `ci why` | Diagnoses a failing run in one call, including runs still in progress. |
-| `ci wait` | Waits for CI to finish, then prints one JSON summary. The caller never sets a duration. |
-| `ci rerun`, `ci retrigger` | Rerun failed jobs, or trigger CI again. |
+| `ci why` | Diagnoses a failing run in one call, including runs still in progress. Takes a PR, `run:<id>`, or `branch:main` for every failing workflow on main's head. |
+| `ci wait` | Waits for CI to finish, then prints one JSON summary. The caller never sets a duration. Takes PRs, `branch:<name>[@sha]` or `run:<id>`. |
+| `ci rerun`, `ci retrigger` | Rerun failed jobs (of a PR's head or of `run:<id>`), or trigger CI again. |
 | `doctor` | Checks the setup: `gh` version and features, auth, git, the target repo and its config. |
 | `init` | Writes a starter `.github/ghx.json`, with components inferred from the workspace. |
 | `version` | Prints the `ghx` version, Node version and platform, with no `gh` calls. |
@@ -44,6 +44,11 @@ These are the v1 commands, specified in [02-api](docs/plans/02-api.md).
 Raw `gh` commands that `ghx` wraps are refused, and the error names the `ghx`
 command to use instead. A short list of read-only `gh` commands still runs, with
 its output wrapped in JSON.
+
+Every JSON command takes `--fields a.b,c[].d` to keep only the parts the agent
+needs, and `pr status`, `ci wait`, `pr create`, `pr merge` and `pr feedback`
+take `--brief` for the fields agents usually extract. Errors are never trimmed.
+This replaces the `| jq` and `| head -c` that agents otherwise add.
 
 ## Example
 
@@ -72,7 +77,9 @@ each test can be re-run. It checks the components against `.github/ghx.json`
 and the diff: every component the PR touches must be listed. A PR that touches
 more than 5 lists its 5 primary components, and `ghx` records the rest in the
 hidden block (`alsoTouched`), shown as `Components: a, b, c, d, e (+21 more)`.
-It then renders a short body:
+A Claude Code footer appended to `description` is stripped with a
+`FOOTER_STRIPPED` warning, since `ghx` renders its own. It then renders a short
+body:
 
 ```markdown
 The primary write path signed actions without binding documentId.
@@ -96,7 +103,9 @@ outcome.
 
 Every v1 command exists, along with passthrough for read-only `gh` commands.
 Agent acceptance hasn't run yet: it means scoring the Claude Code sessions of
-three real PRs worked on with `ghx` (`scripts/acceptance/score.ts`). The build
+three real PRs worked on with `ghx` (`scripts/acceptance/score.ts`). Multi-PR
+`pr status`, `--fields`/`--brief` and the `run:<id>` and `branch:` CI targets
+came from reading how agents used `ghx` in its first week on a real monorepo. The build
 order is in [04-build-coordination](docs/plans/04-build-coordination.md).
 
 ## Install
@@ -125,7 +134,9 @@ a Node.js you own (nvm or fnm) rather than `sudo`.
 
 `ghx install` adds the PreToolUse hook to `~/.claude/settings.json` and the
 CLAUDE.md snippet to `~/.claude/CLAUDE.md`. Enforcement is per repo: the hook
-blocks raw `gh` writes and suggests `ghx` reads only in repos that have
+blocks raw `gh` writes and denies wrapped `gh` reads, naming the `ghx`
+replacement so the agent runs it without stopping (`GHX_HOOK_MODE=ask` turns that
+into a permission prompt). It does this only in repos that have
 `.github/ghx.json`, and stays silent elsewhere. It keeps your other settings and
 backs up each file it changes. It's safe to run again, and `ghx uninstall`
 removes only what it added. Use `--scope project` to install into a repo's
