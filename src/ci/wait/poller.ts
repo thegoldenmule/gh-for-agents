@@ -5,6 +5,8 @@
 // reads which suites the statusCheckRollup holds: the rollup is the one canonical check set (04), and
 // REST also lists suites it leaves out (a `dynamic` copilot review), which are dropped.
 // After two consecutive REST failures, one GraphQL query per tick (with rateLimit{}) takes over.
+// A run target (run:<id>) reads actions/runs/{id} and its latest jobs instead, both conditional: the jobs
+// carry their run, so no suite mapping is needed, and there is no GraphQL fallback (a failed tick retries).
 import { z } from 'zod';
 import { rethrowControlFlow } from '../../core/control-flow.ts';
 import { GhxError } from '../../core/errors.ts';
@@ -20,6 +22,8 @@ import { branchPath } from './fetch.ts';
 const PullRest = z.object({
   number: z.number().int(),
   state: z.string(),
+  /** false: the PR conflicts with its base; null: GitHub has not computed it yet. */
+  mergeable: z.boolean().nullish(),
   merged: z.boolean().nullish(),
   merged_at: z.string().nullish(),
   head: z.object({ sha: z.string() }),
@@ -55,6 +59,31 @@ const StatusRest = z.object({
 });
 
 type CheckRunRest = z.infer<typeof CheckRunRest>;
+
+const RunRest = z.object({
+  id: z.number().int(),
+  name: z.string().nullish(),
+  head_sha: z.string(),
+  head_branch: z.string().nullish(),
+  event: z.string().nullish(),
+  status: z.string().nullable(),
+  conclusion: z.string().nullable(),
+  workflow_id: z.number().int(),
+  path: z.string().nullish(),
+  run_attempt: z.number().int().nullish(),
+});
+
+const RunJobRest = z.object({
+  id: z.number().int(),
+  name: z.string(),
+  status: z.string(),
+  conclusion: z.string().nullable(),
+  started_at: z.string().nullish(),
+  completed_at: z.string().nullish(),
+  html_url: z.string().nullish(),
+  workflow_name: z.string().nullish(),
+});
+const RunJobsRest = z.object({ total_count: z.number().int(), jobs: z.array(RunJobRest) });
 
 /** Check-run pages read per tick, each conditional (500 checks, like the GraphQL snapshot). */
 export const MAX_CHECK_RUN_PAGES = 5;
@@ -167,7 +196,10 @@ const FallbackBranchData = z.object({
 });
 
 // ── Public types ──────────────────────────────────────────────────────────
-export type PollTarget = { kind: 'pr'; number: number } | { kind: 'branch'; branch: string };
+export type PollTarget =
+  | { kind: 'pr'; number: number }
+  | { kind: 'branch'; branch: string }
+  | { kind: 'run'; runId: number };
 
 export interface PullInfo {
   number: number;
@@ -176,6 +208,17 @@ export interface PullInfo {
   baseRef: string;
   /** The repo default branch, when the response carried it. */
   defaultBranch: string | null;
+  /** CONFLICTING: no pull_request workflow runs until the conflict is resolved. */
+  mergeable: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN';
+}
+
+/** A run target's run as read this tick. */
+export interface RunInfo {
+  id: number;
+  /** queued, in_progress, completed, … (null: not reported). */
+  status: string | null;
+  attempt: number;
+  headBranch: string | null;
 }
 
 export interface EtagEntry {
@@ -200,6 +243,8 @@ export const emptyPollerState = (): PollerState => ({ etags: {}, suites: {}, sui
 export interface TickResult {
   /** PR targets: the PR as read this tick. */
   pull: PullInfo | null;
+  /** Run targets: the run as read this tick (a run still going may list every job done). */
+  run?: RunInfo | null;
   /** The target's current head (PR head or branch head); null when a branch no longer exists. */
   headSha: string | null;
   /** The commit whose CI was read. */
@@ -256,6 +301,31 @@ function pullInfo(p: z.infer<typeof PullRest>): PullInfo {
     headSha: p.head.sha,
     baseRef: p.base.ref,
     defaultBranch: p.base.repo?.default_branch ?? null,
+    mergeable: p.mergeable === false ? 'CONFLICTING' : p.mergeable === true ? 'MERGEABLE' : 'UNKNOWN',
+  };
+}
+
+/** A jobs-API row of a run target as a rollup node, carrying its run (checks.ts maps runId and workflow). */
+export function runJobNode(j: z.infer<typeof RunJobRest>, run: z.infer<typeof RunRest>): RollupContext {
+  return {
+    __typename: 'CheckRun',
+    databaseId: j.id,
+    name: j.name,
+    status: j.status.toUpperCase(),
+    conclusion: j.conclusion === null ? null : j.conclusion.toUpperCase(),
+    startedAt: j.started_at ?? null,
+    completedAt: j.completed_at ?? null,
+    detailsUrl: j.html_url ?? null,
+    isRequired: false,
+    checkSuite: {
+      app: { slug: 'github-actions' },
+      workflowRun: {
+        databaseId: run.id,
+        event: run.event ?? null,
+        file: run.path ? { path: run.path } : null,
+        workflow: { databaseId: run.workflow_id, name: j.workflow_name ?? run.name ?? '' },
+      },
+    },
   };
 }
 
@@ -409,10 +479,46 @@ export function createPoller(o: PollerOptions): Poller {
     }
   }
 
+  async function runTick(runId: number): Promise<TickResult> {
+    const counter = { calls: 0, changed: false };
+    const run = await conditional({ path: `repos/{owner}/{repo}/actions/runs/${runId}`, repo }, RunRest, counter, {
+      notFound: 'RUN_NOT_FOUND',
+    });
+    const jobsPath = `repos/{owner}/{repo}/actions/runs/${runId}/jobs`;
+    const first = await conditional(
+      { path: jobsPath, repo, fields: { filter: 'latest', per_page: 100 } },
+      RunJobsRest,
+      counter,
+      { notFound: 'RUN_NOT_FOUND' },
+    );
+    let jobs = first.jobs;
+    for (let page = 2; page <= MAX_CHECK_RUN_PAGES && jobs.length < first.total_count; page++) {
+      const more = await conditional(
+        { path: jobsPath, repo, fields: { filter: 'latest', per_page: 100, page } },
+        RunJobsRest,
+        counter,
+      );
+      if (more.jobs.length === 0) break;
+      jobs = [...jobs, ...more.jobs];
+    }
+    return {
+      pull: null,
+      run: { id: run.id, status: run.status, attempt: run.run_attempt ?? 1, headBranch: run.head_branch ?? null },
+      headSha: run.head_sha,
+      sha: run.head_sha,
+      nodes: jobs.map((j) => runJobNode(j, run)),
+      source: 'rest',
+      notModified: !counter.changed,
+      calls: counter.calls,
+      budget: gh.rateBudget('core'),
+    };
+  }
+
   async function restTick(sha: string | null, required: ReadonlySet<string>): Promise<TickResult> {
     const counter = { calls: 0, changed: false };
     let pull: PullInfo | null = null;
     let headSha: string | null;
+    if (o.target.kind === 'run') return runTick(o.target.runId);
     if (o.target.kind === 'pr') {
       pull = pullInfo(
         await conditional({ path: `repos/{owner}/{repo}/pulls/${o.target.number}`, repo }, PullRest, counter, {
@@ -506,6 +612,7 @@ export function createPoller(o: PollerOptions): Poller {
             headSha: pr.headRefOid,
             baseRef: pr.baseRefName,
             defaultBranch: d.repository?.defaultBranchRef?.name ?? null,
+            mergeable: 'UNKNOWN',
           };
         }
         return { headSha: pr.headRefOid, commit: pr.commits.nodes.at(-1)?.commit ?? null };
@@ -539,6 +646,7 @@ export function createPoller(o: PollerOptions): Poller {
         budget: rate ?? gh.rateBudget('graphql'),
       };
     }
+    if (o.target.kind === 'run') throw new Error('unreachable: run targets have no GraphQL fallback');
     const branch = o.target.branch;
     const probe = await branchLikeCommit(sha, branch);
     calls += probe.calls;
@@ -638,7 +746,8 @@ export function createPoller(o: PollerOptions): Poller {
           // Not found and rate limits are answers, not flaky transport: the caller handles them.
           if (isNotFound(e) || isRateLimited(e) || !(e instanceof GhFailure)) throw e;
           restFailures++;
-          if (restFailures < REST_FAILURES_BEFORE_FALLBACK) throw new TickFailed(e);
+          // A run has no GraphQL view of its jobs: every failure is a tick to retry.
+          if (restFailures < REST_FAILURES_BEFORE_FALLBACK || o.target.kind === 'run') throw new TickFailed(e);
           mode = 'graphql';
         }
       }

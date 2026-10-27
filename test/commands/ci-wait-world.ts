@@ -48,6 +48,16 @@ export interface SimPr {
   merged?: boolean;
   head: string;
   base?: string;
+  /** REST `mergeable`: false = conflicts with the base. Default null (not computed). */
+  mergeable?: boolean | null;
+}
+
+/** An explicit actions/runs/{id} row (by default derived from its jobs: completed once all are). */
+export interface SimRun {
+  status: 'queued' | 'in_progress' | 'completed';
+  conclusion?: string | null;
+  attempt?: number;
+  headBranch?: string;
 }
 
 export interface SimState {
@@ -59,6 +69,8 @@ export interface SimState {
   /** Check runs per commit. */
   checks: Record<string, SimJob[]>;
   statuses?: Record<string, SimStatus[]>;
+  /** actions/runs/{id} overrides (a run still going with every listed job done, a rerun's attempt). */
+  runs?: Record<number, SimRun>;
 }
 
 export interface SimOptions {
@@ -294,6 +306,7 @@ export class GitHubSim {
       return this.#conditional(argv, {
         number: n,
         state: pr.state,
+        mergeable: pr.mergeable ?? null,
         merged: pr.merged === true,
         merged_at: pr.merged ? this.iso(0) : null,
         head: { sha: pr.head },
@@ -390,7 +403,8 @@ export class GitHubSim {
       const rows = this.#allJobs()
         .filter((x) => x.job.runId === runId)
         .map((x) => this.jobRow(x.job, x.sha));
-      return this.#ok({ total_count: rows.length, jobs: rows });
+      if (rows.length === 0 && !st.runs?.[runId]) return this.#notFound();
+      return this.#conditional(argv, { total_count: rows.length, jobs: rows });
     }
     m = new RegExp(`^${repo}/actions/jobs/(\\d+)/logs$`).exec(path);
     if (m) {
@@ -412,18 +426,25 @@ export class GitHubSim {
     m = new RegExp(`^${repo}/actions/runs/(\\d+)$`).exec(path);
     if (m) {
       const runId = Number(m[1]);
-      const hit = this.#allJobs().find((x) => x.job.runId === runId);
-      if (!hit) return this.#notFound();
-      const wf = hit.job.workflowId ?? 5;
-      return this.#ok({
+      const jobs = this.#allJobs().filter((x) => x.job.runId === runId);
+      const hit = jobs[0];
+      const set = st.runs?.[runId];
+      if (!hit && !set) return this.#notFound();
+      const wf = hit?.job.workflowId ?? 5;
+      const done = jobs.every((x) => x.job.status === 'completed');
+      const status = set?.status ?? (done ? 'completed' : 'in_progress');
+      const failed = jobs.some((x) => x.job.status === 'completed' && (x.job.conclusion ?? 'success') !== 'success');
+      return this.#conditional(argv, {
         id: runId,
-        head_sha: hit.sha,
+        name: hit?.job.workflow ?? 'CI',
+        head_sha: hit?.sha ?? sha('e'),
+        head_branch: set?.headBranch ?? 'main',
         event: 'pull_request',
-        status: 'completed',
-        conclusion: 'failure',
+        status,
+        conclusion: status === 'completed' ? (set?.conclusion ?? (failed ? 'failure' : 'success')) : null,
         workflow_id: wf,
         path: `.github/workflows/w${wf}.yml`,
-        run_attempt: 1,
+        run_attempt: set?.attempt ?? 1,
         created_at: this.iso(0),
       });
     }

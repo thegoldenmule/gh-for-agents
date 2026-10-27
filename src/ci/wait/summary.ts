@@ -67,8 +67,12 @@ export function identicalCommand(c: CommandShape): string {
 
 export interface NextInput {
   outcome: Outcome;
-  /** A PR ref (owner/repo#N) for PR targets; null for branch targets. */
+  /** A PR ref (owner/repo#N) for PR targets; null for branch and run targets. */
   prRef: string | null;
+  /** What ci rerun takes for this target (the PR, or `run:<id> -R o/r`); defaults to prRef. */
+  rerunRef?: string | null;
+  /** no-checks on a PR that conflicts with this base branch: resolve the conflict, not retrigger. */
+  conflictBase?: string | null;
   headSha: string;
   /** The CI settled (a red that cannot change without a re-run). */
   settled: boolean;
@@ -78,7 +82,8 @@ export interface NextInput {
 
 export function nextFor(n: NextInput): string[] {
   const merge = n.prRef ? [`ghx pr merge ${n.prRef} --expect-head ${n.headSha.slice(0, 7)} --dry-run`] : [];
-  const rerunFlaky = n.prRef && n.flaky ? [`ghx ci rerun ${n.prRef} --flaky`] : [];
+  const rerun = n.rerunRef === undefined ? n.prRef : n.rerunRef;
+  const rerunFlaky = rerun && n.flaky ? [`ghx ci rerun ${rerun} --flaky`] : [];
   switch (n.outcome) {
     case 'green':
       return merge;
@@ -88,8 +93,12 @@ export function nextFor(n: NextInput): string[] {
       // An early red: the identical command continues to the next failure or to settle.
       return [...rerunFlaky, ...(n.settled ? [] : [n.identical])];
     case 'stalled':
-      return [n.identical, ...(n.prRef ? [`ghx ci rerun ${n.prRef}`] : [])];
+      return [n.identical, ...(rerun ? [`ghx ci rerun ${rerun}`] : [])];
     case 'no-checks':
+      // A retrigger cannot help a conflicting PR: merge the base in (or rebase), resolve, push.
+      if (n.prRef && n.conflictBase) {
+        return [`git fetch origin ${n.conflictBase} && git merge origin/${n.conflictBase}`, n.identical];
+      }
       return n.prRef ? [`ghx ci retrigger ${n.prRef}`, n.identical] : [n.identical];
     case 'closed':
     case 'superseded':

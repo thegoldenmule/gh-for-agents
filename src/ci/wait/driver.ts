@@ -2,6 +2,8 @@
 // binding, machine and state file. Per tick: poll (conditional REST), bind or re-bind, normalise,
 // observe, diagnose new failures (one diagnoser per SHA, 60 s budget per SHA), detect stalls, decide,
 // save. The loop sleeps until the earliest target is due, never past the unattended self-return.
+// A run target (run:<id>) is one workflow run's jobs: no expected set, and never settled while the run
+// itself is not completed. A PR that settles as no-checks while it conflicts with its base says so.
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { CiSection } from '../../config/sections/ci.ts';
@@ -61,7 +63,7 @@ import {
   type UntilMode,
   WAIT_DEFAULTS,
 } from './machine.ts';
-import { createPoller, type Poller, TickFailed, type TickResult } from './poller.ts';
+import { createPoller, type Poller, type PullInfo, TickFailed, type TickResult } from './poller.ts';
 import { detectStalls, settledAt, stallConfig } from './stall.ts';
 import { createWaitStore, type WaitState, type WaitStore } from './state.ts';
 import { aggregate, type CommandShape, compactTarget, fitDocument, identicalCommand, nextFor } from './summary.ts';
@@ -70,8 +72,10 @@ import {
   type HeadPolicy,
   headPolicy,
   parseWaitTarget,
+  targetArg,
   targetKey,
   targetLabel,
+  targetRepo,
   type WaitTarget,
 } from './targets.ts';
 
@@ -170,6 +174,8 @@ interface Run {
   waitStartedAt: number;
   restarts: number;
   jobs: Map<number, ActionsJob[]>;
+  /** PR targets: the PR as last read (its mergeable state explains a no-checks). */
+  pull: PullInfo | null;
 }
 
 export async function* runWait(
@@ -219,18 +225,24 @@ export async function* runWait(
 
   const parsed = o.targets.map(parseWaitTarget);
   if (o.until === 'mergeable') {
-    const branch = o.targets.filter((_, i) => parsed[i]?.kind === 'branch');
-    if (branch.length > 0) {
-      throw new GhxError('VALIDATION', `--until mergeable waits on PRs; ${branch.join(', ')} is a branch target.`, {
-        hint: 'Pass the PR (owner/repo#N), or use --until settled for a branch.',
-        details: { issues: [{ path: 'targets', code: 'invalid', message: 'branch targets have no mergeable state' }] },
-      });
+    const other = o.targets.filter((_, i) => parsed[i]?.kind !== 'pr');
+    if (other.length > 0) {
+      throw new GhxError(
+        'VALIDATION',
+        `--until mergeable waits on PRs; ${other.join(', ')} ${other.length === 1 ? 'is not a PR' : 'are not PRs'}.`,
+        {
+          hint: 'Pass the PR (owner/repo#N), or use --until settled for a branch or run target.',
+          details: {
+            issues: [{ path: 'targets', code: 'invalid', message: 'branch and run targets have no mergeable state' }],
+          },
+        },
+      );
     }
   }
   const runs: Run[] = [];
   let flagRepo: string | undefined;
   for (const given of parsed) {
-    const resolved = await ctx.repo({ ref: given.kind === 'pr' ? given.repo : undefined });
+    const resolved = await ctx.repo({ ref: targetRepo(given) });
     if (resolved.source === 'flag') flagRepo = repoSlug(resolved.repo);
     const repo = resolved.repo;
     const target = await fullSha(given, resolved);
@@ -272,7 +284,11 @@ export async function* runWait(
         gh: ctx.gh,
         repo,
         target:
-          target.kind === 'pr' ? { kind: 'pr', number: target.number } : { kind: 'branch', branch: target.branch },
+          target.kind === 'pr'
+            ? { kind: 'pr', number: target.number }
+            : target.kind === 'run'
+              ? { kind: 'run', runId: target.runId }
+              : { kind: 'branch', branch: target.branch },
         now: () => clock.now(),
         ...(seed ? { initial: seed } : {}),
       }),
@@ -292,6 +308,7 @@ export async function* runWait(
       waitStartedAt: clock.now(),
       restarts: 0,
       jobs: new Map(),
+      pull: null,
     });
   }
 
@@ -310,6 +327,11 @@ export async function* runWait(
       ),
     });
   const prRef = (r: Run) => (r.target.kind === 'pr' ? r.label : null);
+  /** The target ci rerun takes: the PR, or `run:<id> -R owner/repo`; a branch has none (one per run). */
+  const rerunRef = (r: Run) =>
+    r.target.kind === 'pr' ? r.label : r.target.kind === 'run' ? targetArg(r.target, r.repo) : null;
+  /** A PR whose no-checks is its merge conflict: GitHub runs no pull_request workflow until it is resolved. */
+  const conflicted = (r: Run) => (r.target.kind === 'pr' && r.pull?.mergeable === 'CONFLICTING' ? r.pull : null);
   const active = () => runs.filter((r) => r.summary === null);
   const save = (r: Run) => {
     if (!r.st) return;
@@ -359,6 +381,8 @@ export async function* runWait(
       next: nextFor({
         outcome,
         prRef: prRef(r),
+        rerunRef: rerunRef(r),
+        conflictBase: conflicted(r)?.baseRef ?? null,
         headSha: st.boundSha,
         settled: d?.settled ?? false,
         flaky: flaky.length > 0,
@@ -432,8 +456,11 @@ export async function* runWait(
       });
     }
     r.resumed = false;
-    const base = t.pull?.baseRef ?? (r.target.kind === 'branch' ? r.target.branch : 'main');
     const defaultBranch = t.pull?.defaultBranch ?? (await repoDefaultBranch(r));
+    // A run's ETA samples come from its workflow on the default branch (a feature branch has few).
+    const base =
+      t.pull?.baseRef ??
+      (r.target.kind === 'branch' ? r.target.branch : r.target.kind === 'run' ? defaultBranch : 'main');
     const expected = await expectedDefs(r, sha, base);
     return {
       v: 1,
@@ -469,6 +496,8 @@ export async function* runWait(
   }
 
   async function expectedDefs(r: Run, sha: string, base: string) {
+    // A run is its own jobs: other workflows' required or baseline checks are not part of it.
+    if (r.target.kind === 'run') return [];
     const degrade = (what: string, e: unknown) => {
       rethrowControlFlow(e);
       warn({
@@ -678,6 +707,9 @@ export async function* runWait(
     }
 
     const head = res.headSha;
+    if (res.pull) r.pull = res.pull;
+    // A run target's run still going: more jobs (or a rerun's new attempt) may come.
+    const open = res.run != null && res.run.status !== 'completed';
     if (r.st === null) {
       r.st = await bind(r, res.sha, res);
       res = { ...res, nodes: markRequired(res.nodes, requiredSet(r)) };
@@ -731,7 +763,7 @@ export async function* runWait(
       st.baselines,
       now,
     );
-    const ob = observe(st.machine, { checks, ignored: ignored.length, eta: estimate.eta, now }, cfg);
+    const ob = observe(st.machine, { checks, ignored: ignored.length, eta: estimate.eta, now, open }, cfg);
     st.machine = ob.state;
     st.settledAt = settledAt(checks);
     r.last = { checks, ignored, expected: ob.expected };
@@ -756,7 +788,7 @@ export async function* runWait(
     await ensureTimeouts(r, st, checks);
     const stalled = await stalls(r, st, checks, ob.expected);
     const diagnosis = (c: Check) => (c.jobId === null ? undefined : st.diagnoses[String(c.jobId)]);
-    const d = decide(st.machine, { checks, now: clock.now() }, { cfg, diagnosis, stalled });
+    const d = decide(st.machine, { checks, now: clock.now(), open }, { cfg, diagnosis, stalled });
     r.lastDecision = d;
     if (d) {
       if (d.gate) {
@@ -776,7 +808,17 @@ export async function* runWait(
           return;
         }
       } else {
-        finish(r, d.outcome, d.reason, d);
+        const conflict = d.outcome === 'no-checks' ? conflicted(r) : null;
+        if (conflict) {
+          warn({
+            code: 'MERGE_CONFLICT',
+            message:
+              `${r.label} conflicts with ${conflict.baseRef}, and GitHub runs no pull_request workflows on a ` +
+              `conflicting PR. Merge or rebase ${conflict.baseRef} into the head branch, resolve the conflicts and ` +
+              `push; then wait again: ${identical()}.`,
+          });
+        }
+        finish(r, d.outcome, conflict ? 'merge-conflict' : d.reason, d);
         return;
       }
     }

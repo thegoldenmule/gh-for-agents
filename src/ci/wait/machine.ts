@@ -62,6 +62,18 @@ export interface Observation {
   eta: Eta | null;
   /** Epoch ms. */
   now: number;
+  /**
+   * The source says more CI is coming although every listed check may be done: a run target whose run
+   * is not completed (jobs that `needs` others, a dynamic matrix, a rerun's new attempt). Never settled
+   * while open, and an open source with no checks yet is waiting, not no-checks.
+   */
+  open?: boolean;
+}
+
+/** An open source caps the phase: listed checks all done is not settled while the run goes on. */
+function openPhase(phase: CiPhase, open: boolean | undefined, checks: readonly Check[]): CiPhase {
+  if (!open || phase !== 'settled') return phase;
+  return checks.length === 0 ? 'registering' : 'running';
 }
 
 /** Events as yielded by the handler (the runner adds seq and at). */
@@ -172,6 +184,7 @@ export function observe(prev: MachineState, obs: Observation, cfg: MachineConfig
   const defs = consideredDefs(prev, cfg);
   const before = expectedState(defs, checks, agedOut);
   const othersSettled =
+    !obs.open &&
     checks.length > 0 &&
     !checks.some((c) => c.bucket === 'pending') &&
     !before.some((e) => e.state === 'missing' && e.source !== 'baseline');
@@ -186,7 +199,7 @@ export function observe(prev: MachineState, obs: Observation, cfg: MachineConfig
     }
   }
   const expected = expectedState(defs, checks, agedOut);
-  const phase = expectedPhase([...checks], expected);
+  const phase = openPhase(expectedPhase([...checks], expected), obs.open, checks);
   if (prev.phase !== null && prev.phase !== phase) {
     events.push({ type: 'phase', ...t, headSha, from: prev.phase, to: phase });
   }
@@ -260,7 +273,7 @@ export function redOutcome(
  */
 export function decide(
   state: MachineState,
-  obs: Pick<Observation, 'checks' | 'now'>,
+  obs: Pick<Observation, 'checks' | 'now' | 'open'>,
   o: {
     cfg: MachineConfig;
     diagnosis: (c: Check) => FailingJob | undefined;
@@ -270,12 +283,13 @@ export function decide(
   const { checks, now } = obs;
   const none = { failing: [] as Check[], stalled: [] as StalledCheck[], gate: false };
   if (checks.length === 0) {
+    if (obs.open) return null;
     return now - state.boundAt >= o.cfg.graceMs
       ? { outcome: 'no-checks', reason: 'grace', settled: false, ...none }
       : null;
   }
   const red = checks.filter(isRed);
-  const phase = expectedPhase([...checks], currentExpected(state, checks, o.cfg));
+  const phase = openPhase(expectedPhase([...checks], currentExpected(state, checks, o.cfg)), obs.open, checks);
   const settled = phase === 'settled';
   if (o.cfg.until === 'first-failure' && !settled) {
     const reported = new Set(state.reported);

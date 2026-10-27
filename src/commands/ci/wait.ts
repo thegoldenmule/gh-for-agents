@@ -20,13 +20,15 @@ const Input = z.strictObject({
     .array(z.string().min(1))
     .min(1)
     .max(10)
-    .describe('PR selectors (3198, owner/repo#3198, a PR URL), branch:<name> or branch:<name>@<sha>'),
+    .describe(
+      'PR selectors (3198, owner/repo#3198, a PR URL), branch:<name>, branch:<name>@<sha> or run:<id> (one workflow run; a run URL)',
+    ),
   until: z
     .enum(['first-failure', 'settled', 'mergeable'])
     .default('first-failure')
     .describe(
       'first-failure: return at the first new failure or settled green; settled: wait for everything; ' +
-        'mergeable: settled, then the merge CI gate (PR targets only)',
+        'mergeable: settled, then the merge CI gate (PR targets only; a branch or run is a usage error)',
     ),
   any: z.boolean().default(false).describe('Return when the first target reaches a terminal state'),
   onHeadChange: z
@@ -49,7 +51,7 @@ const Input = z.strictObject({
 
 export default defineStreamCommand({
   name: ['ci', 'wait'],
-  summary: 'Wait for CI on a PR or branch; one JSON summary, exit code = outcome (run in background)',
+  summary: 'Wait for CI on a PR, branch or workflow run; one JSON summary, exit code = outcome (run in background)',
   description: `${PROTOCOL} The summary is never spilled: it is compacted to 16 KB, and --max-bytes and GHX_MAX_BYTES are ignored.`,
   kind: 'read',
   input: Input,
@@ -82,12 +84,16 @@ export default defineStreamCommand({
     'merge.blockers',
     'next',
   ],
-  replaces: ['gh pr checks --watch', 'gh run watch', 'gh pr checks', 'gh run list'],
+  replaces: ['gh pr checks --watch', 'gh run watch <run-id>', 'gh pr checks', 'gh run list'],
   examples: [
     { argv: 'ghx ci wait 3301 -R powerhouse-inc/powerhouse', note: 'Run with run_in_background: true' },
     { argv: 'ghx ci wait owner/repo#12 --until settled', note: 'Wait for every check, not the first failure' },
     { argv: 'ghx ci wait owner/repo#12 --until mergeable', note: 'Settled CI, then the merge CI gate' },
     { argv: 'ghx ci wait branch:main@9f2c4e1 -R owner/repo', note: 'CI for one commit on a branch' },
+    {
+      argv: 'ghx ci wait run:40345582950 --until settled -R owner/repo',
+      note: 'One workflow run until it completes (e.g. after ghx ci rerun run:<id>)',
+    },
     { argv: 'ghx ci wait owner/repo#12 owner/repo#13 --any', note: 'Return at the first target that finishes' },
   ],
   exitCode: (s) => s.exitCode as ExitCode,

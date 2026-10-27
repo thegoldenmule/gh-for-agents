@@ -212,3 +212,23 @@ test('a failure is new only once per binding', () => {
   assert.equal(r1.newFailures.length, 1);
   assert.equal(tick(r1.state, [failed('a', 1), check('b')], 20).newFailures.length, 0);
 });
+
+test('an open source (a run still going) never settles, waits with no checks, and still fails fast', () => {
+  const now = T0 + 10 * 60 * SEC;
+  const opts = { cfg: cfg('settled'), diagnosis: noDiag, stalled: [] };
+  // Every listed job done, but the run is not: running, not settled.
+  const ob = observe(fresh(), { checks: [passed('build')], ignored: 0, eta: null, now, open: true }, cfg('settled'));
+  assert.equal(ob.phase, 'running');
+  assert.equal(decide(ob.state, { checks: [passed('build')], now, open: true }, opts), null);
+  assert.equal(decide(ob.state, { checks: [passed('build')], now }, opts)?.outcome, 'green');
+  // No jobs yet, well past the grace: still waiting, not no-checks.
+  const empty = observe(fresh(), { checks: [], ignored: 0, eta: null, now, open: true }, cfg());
+  assert.equal(empty.phase, 'registering');
+  assert.equal(decide(empty.state, { checks: [], now, open: true }, opts), null);
+  assert.equal(decide(empty.state, { checks: [], now }, opts)?.outcome, 'no-checks');
+  // first-failure returns on a red job while the run goes on.
+  const red = [failed('unit', 5)];
+  const d = decide(fresh(), { checks: red, now, open: true }, { ...opts, cfg: cfg() });
+  assert.equal(d?.outcome, 'red');
+  assert.equal(d?.settled, false);
+});
