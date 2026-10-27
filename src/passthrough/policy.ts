@@ -365,6 +365,8 @@ function wrapped(top: string, sub: string, args: readonly string[], repo: string
   const pr = sel ?? '<pr>';
   const R = repo !== undefined ? ['-R', repo] : [];
   const prCmd = (...rest: string[]): string[] => ['ghx', ...rest.slice(0, 2), pr, ...rest.slice(2), ...R];
+  // gh run <verb> <run-id>: ghx's run:<id> target, with the id the agent already has.
+  const runTarget = sel !== undefined && /^\d+$/.test(sel) ? `run:${sel}` : undefined;
   const key = `${top} ${sub}`;
   switch (key) {
     case 'pr view':
@@ -386,23 +388,26 @@ function wrapped(top: string, sub: string, args: readonly string[], repo: string
       };
     case 'run view': {
       if (!has(args, '--log', '--log-failed')) return undefined;
-      const suggestion =
-        sel !== undefined ? ['ghx', 'ci', 'why', '--run', sel, ...R] : ['ghx', 'ci', 'why', '<pr>', ...R];
       return {
-        suggestion,
+        suggestion: ['ghx', 'ci', 'why', runTarget ?? '<pr|run:<run-id>>', ...R],
         hint: 'the failing step, error lines and failed tests, read from the jobs-logs API (works while the run is in progress)',
       };
     }
     case 'run watch':
       return {
-        suggestion: ['ghx', 'ci', 'wait', '<pr>', ...R],
-        hint: 'ci wait takes the PR (or branch:<name>@<sha>); run it with run_in_background: true',
+        suggestion: ['ghx', 'ci', 'wait', runTarget ?? '<pr|run:<run-id>>', ...R],
+        hint: 'run it with run_in_background: true; it returns at the first failure with a diagnosis, or add --until settled to wait for the whole run',
       };
-    case 'run rerun':
+    case 'run rerun': {
+      // gh's --job takes a job id; ghx's takes a job name (glob), so the name is the agent's to fill in.
+      const job = has(args, '--job', '-j') ? ['--job', "'<job name>'"] : [];
       return {
-        suggestion: ['ghx', 'ci', 'rerun', '<pr>', ...R],
-        hint: 'reruns the failed jobs of the head SHA; --flaky limits it to likely flakes',
+        suggestion: ['ghx', 'ci', 'rerun', runTarget ?? '<pr|run:<run-id>>', ...job, ...R],
+        hint:
+          'reruns the failed jobs of completed runs (with or without --failed); --flaky limits it to likely flakes. ' +
+          `If a job of the run is still going, first run ghx ci wait ${runTarget ?? 'run:<run-id>'} --until settled in the background`,
       };
+    }
     case 'pr create':
       return {
         suggestion: ['ghx', 'pr', 'create', '--input', 'pr.json', ...R],

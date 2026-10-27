@@ -184,23 +184,31 @@ const WRAPPED: WrapRow[] = [
   ],
   [
     ['run', 'view', '123', '--log'],
-    ['ghx', 'ci', 'why', '--run', '123'],
+    ['ghx', 'ci', 'why', 'run:123'],
   ],
   [
     ['run', 'view', '123', '--log-failed', '-R', 'o/r'],
-    ['ghx', 'ci', 'why', '--run', '123', '-R', 'o/r'],
+    ['ghx', 'ci', 'why', 'run:123', '-R', 'o/r'],
   ],
   [
     ['run', 'view', '--log-failed', '--job', '456'],
-    ['ghx', 'ci', 'why', '<pr>'],
+    ['ghx', 'ci', 'why', '<pr|run:<run-id>>'],
   ],
   [
     ['run', 'watch', '123'],
-    ['ghx', 'ci', 'wait', '<pr>'],
+    ['ghx', 'ci', 'wait', 'run:123'],
   ],
   [
     ['run', 'rerun', '123', '--failed'],
-    ['ghx', 'ci', 'rerun', '<pr>'],
+    ['ghx', 'ci', 'rerun', 'run:123'],
+  ],
+  [
+    ['run', 'rerun', '123', '--job', '456'],
+    ['ghx', 'ci', 'rerun', 'run:123', '--job', "'<job name>'"],
+  ],
+  [
+    ['run', 'rerun'],
+    ['ghx', 'ci', 'rerun', '<pr|run:<run-id>>'],
   ],
   [
     ['pr', 'create', '--title', 'x', '--body', 'y'],
