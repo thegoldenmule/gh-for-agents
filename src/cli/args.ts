@@ -17,6 +17,12 @@ export const GLOBAL_FLAGS = [
   { flag: '--dry-run', type: 'boolean', description: 'Writes: show what would be sent' },
   { flag: '--pretty', type: 'boolean', description: 'Indent JSON output' },
   { flag: '--max-bytes', type: 'string', description: 'Spill bound (default 16384)' },
+  {
+    flag: '--fields',
+    type: 'string',
+    description: 'Keep only these output paths: state,ci.counts,merge.blockers[].code',
+  },
+  { flag: '--brief', type: 'boolean', description: "The command's preset --fields" },
   { flag: '--verbose', type: 'boolean', description: 'NDJSON diagnostics on stderr' },
 ] as const;
 
@@ -34,6 +40,9 @@ export interface GlobalOptions {
   pretty: boolean;
   maxBytes?: string;
   verbose: boolean;
+  /** --fields values (repeatable; each comma-separated). */
+  fields?: string[];
+  brief: boolean;
 }
 
 type JsonSchema = {
@@ -133,6 +142,8 @@ const GLOBAL_PARSE_OPTIONS = {
   pretty: { type: 'boolean' },
   'max-bytes': { type: 'string' },
   verbose: { type: 'boolean' },
+  fields: { type: 'string', multiple: true },
+  brief: { type: 'boolean' },
 } as const;
 
 export interface ParsedArgv {
@@ -193,11 +204,13 @@ export function parseCommandArgv(
     dryRun: v['dry-run'] === true,
     pretty: v.pretty === true,
     verbose: v.verbose === true,
+    brief: v.brief === true,
   };
   if (typeof v.repo === 'string') globals.repo = v.repo;
   if (typeof v.input === 'string') globals.input = v.input;
   if (typeof v.timeout === 'string') globals.timeout = v.timeout;
   if (typeof v['max-bytes'] === 'string') globals.maxBytes = v['max-bytes'];
+  if (Array.isArray(v.fields)) globals.fields = v.fields as string[];
 
   const flagValues: Record<string, unknown> = {};
   const issues: { path: string; code: string; message: string }[] = [];

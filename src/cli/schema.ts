@@ -24,6 +24,8 @@ export function commandSchema(spec: AnyCommandSpec): Record<string, unknown> {
     mode: spec.mode,
     input: toJson(spec.input, 'input'),
     envelopes: 'ghx schema envelopes',
+    // --fields paths are checked against `output` (or `summary`); --brief selects these.
+    brief: spec.brief ?? null,
   };
   if (spec.mode === 'single') {
     return { ...base, output: toJson(spec.output.extend({ warnings: Warning.array().optional() }), 'output') };

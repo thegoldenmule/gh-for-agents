@@ -20,8 +20,10 @@ import type { Clock } from './clock.ts';
 import { type AnyCommandSpec, commandName, DEFAULT_TIMEOUT, Warning } from './command.ts';
 import { createContext } from './context.ts';
 import { parseDuration } from './duration.ts';
+import { ErrorEnvelope } from './envelopes.ts';
 import { GhxError, toErrorObject } from './errors.ts';
 import { ExitCode, exitForSignal } from './exit.ts';
+import { fieldProjection } from './fields.ts';
 import { createLineLogger, type Logger, nullLogger } from './log.ts';
 import { byteLength, DEFAULT_MAX_BYTES, type Sink, serializeJson } from './output.ts';
 import type { Random } from './random.ts';
@@ -54,6 +56,8 @@ export interface OutputOptions {
   maxBytes: number;
   command: string;
   artifacts: ArtifactStore;
+  /** --fields/--brief (src/core/fields.ts): applied to every document but an error, before the bound. */
+  project?: (doc: unknown) => unknown;
 }
 
 /** Resolve --pretty / --max-bytes / GHX_MAX_BYTES into output options. Invalid values are VALIDATION. */
@@ -85,9 +89,11 @@ export function outputOptions(
 
 /**
  * Write one JSON document to stdout. Over `maxBytes`, the full JSON goes to an artifact and stdout
- * gets {spilled, path, bytes, command} instead (01 §3.5 step 7).
+ * gets {spilled, path, bytes, command} instead (01 §3.5 step 7). A projection runs first, so the
+ * projected document is what is bounded and spilled; an error document is never projected.
  */
-export async function emitDocument(stdout: Sink, value: unknown, o: OutputOptions): Promise<void> {
+export async function emitDocument(stdout: Sink, doc: unknown, o: OutputOptions): Promise<void> {
+  const value = o.project && !ErrorEnvelope.safeParse(doc).success ? o.project(doc) : doc;
   const text = serializeJson(value, o.pretty);
   if (byteLength(text) <= o.maxBytes) {
     await stdout.writeLine(text);
@@ -181,6 +187,32 @@ export async function rawInputFrom(
   return mergeSources(sources);
 }
 
+/**
+ * --fields shapes the one summary document of a 'final' stream; NDJSON lines (ci wait --stream) are
+ * written as they are, so the pair is refused. The mode depends on the validated input, so the check
+ * wraps the input producer and runs inside runStream, whose error path then reports it.
+ */
+function projectableStream(
+  spec: Extract<AnyCommandSpec, { mode: 'stream' }>,
+  rawInput: (signal: AbortSignal) => Promise<Record<string, unknown>>,
+): (signal: AbortSignal) => Promise<Record<string, unknown>> {
+  return async (signal) => {
+    const raw = await rawInput(signal);
+    const m = spec.outputMode;
+    const mode = typeof m === 'function' ? m(validateInput(spec.input, raw) as never) : (m ?? 'ndjson');
+    if (mode === 'ndjson') {
+      const flag = 'stream' in raw ? ' --stream' : '';
+      throw new GhxError('VALIDATION', `--fields and --brief do not apply to ghx ${commandName(spec)}${flag} NDJSON.`, {
+        hint: `Drop --fields/--brief, or drop${flag || ' the NDJSON mode'}: the single summary document can be projected.`,
+        details: {
+          issues: [{ path: '--fields', code: 'invalid_combination', message: 'NDJSON lines are not projected' }],
+        },
+      });
+    }
+    return raw;
+  };
+}
+
 /** Run a spec from parsed argv. */
 export async function runCommand(spec: AnyCommandSpec, parsed: ParsedArgv, deps: RunDeps): Promise<RunOutcome> {
   return runCommandWith(spec, parsed.globals, deps, (signal) => rawInputFrom(spec, parsed, deps, signal));
@@ -201,6 +233,9 @@ export async function runCommandWith(
   let out: OutputOptions;
   try {
     out = outputOptions(globals, deps, name, artifacts);
+    // Paths are checked here, before any input is read or gh is called: a typo never follows a write.
+    const project = fieldProjection(spec, globals);
+    if (project) out = { ...out, project };
   } catch (e) {
     const fallback = { pretty: false, maxBytes: DEFAULT_MAX_BYTES, command: name, artifacts };
     return { exitCode: await emitError(deps.stdout, e, fallback, deps.clock), forced: false };
@@ -208,7 +243,7 @@ export async function runCommandWith(
   if (spec.mode === 'stream') {
     if (spec.maxBytes === 'fixed') out = { ...out, maxBytes: DEFAULT_MAX_BYTES };
     const { runStream } = await import('./stream.ts');
-    return runStream(spec, globals, deps, rawInput, out);
+    return runStream(spec, globals, deps, out.project ? projectableStream(spec, rawInput) : rawInput, out);
   }
   let deadline: ReturnType<typeof createDeadline> | undefined;
   let warnings: Warning[] = [];
@@ -292,10 +327,12 @@ export async function runCommandWith(
       const wouldRun =
         e.argv.length === 0 ? [] : [{ argv: e.argv, ...(e.stdin !== undefined ? { stdin: e.stdin } : {}) }];
       const preview = previews.length === 0 ? null : previews.length === 1 ? previews[0] : previews;
+      // The dry-run envelope is not the command's output: --fields does not apply to it.
+      const { project: _project, ...plain } = out;
       await emitDocument(
         deps.stdout,
         { dryRun: true, wouldRun, preview, ...(warnings.length > 0 ? { warnings } : {}) },
-        out,
+        plain,
       );
       return { exitCode: ExitCode.OK, forced: false };
     }

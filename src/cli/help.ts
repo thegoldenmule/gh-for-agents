@@ -20,17 +20,21 @@ function flagLine(g: (typeof GLOBAL_FLAGS)[number]): string {
 export function globalHelp(specs: readonly AnyCommandSpec[], version: string): Record<string, unknown> {
   // A `timeout: null` command has no deadline and rejects --timeout; say so where the flag is listed.
   const noDeadline = specs.filter((s) => s.timeout === null).map(commandName);
+  // Likewise --brief: only commands with a preset take it.
+  const withBrief = specs.filter((s) => s.brief !== undefined).map(commandName);
   const line = (g: (typeof GLOBAL_FLAGS)[number]): string =>
     g.flag === '--timeout' && noDeadline.length > 0
       ? `${flagLine(g)} (not ${noDeadline.join(', ')}: no deadline)`
-      : flagLine(g);
+      : g.flag === '--brief' && withBrief.length > 0
+        ? `${flagLine(g)} (${withBrief.join(', ')})`
+        : flagLine(g);
   return {
     name: 'ghx',
     version,
     summary: 'GitHub for agents: validated writes, one-call reads. Wraps gh.',
     usage: 'ghx <group> <command> [positionals] [--flags] [--input file.json|-]',
     rules: [
-      'One plain call per question: no pipes, --jq, head, sleep or timeout.',
+      'One plain call per question: no pipes, --jq, head, sleep or timeout; --fields or --brief trims the output.',
       'stdout is one JSON document; errors are {error:{code,message,hint,details}}, exit non-zero.',
       'Large artifacts are written to files; the result carries their paths.',
     ],
@@ -75,6 +79,8 @@ export function commandHelp(spec: AnyCommandSpec): Record<string, unknown> {
     examples: spec.examples ?? [],
     replaces: spec.replaces ?? [],
     timeout,
+    // --fields works on every command; --brief is this list (null: refused).
+    brief: spec.brief ?? null,
     ...(spec.kind === 'write' ? { dryRun: `ghx ${name} … --dry-run shows exactly what would be sent` } : {}),
   };
 }

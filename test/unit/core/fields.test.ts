@@ -102,7 +102,7 @@ test('parseFields refuses bad syntax and an empty list as VALIDATION', () => {
   for (const bad of ['a..b', 'a[0]', '.a', 'a b', 'a[].']) {
     const e = thrown(() => parseFields([bad]));
     assert.equal(e.code, 'VALIDATION', bad);
-    assert.equal((e.details?.issues as { path: string }[])[0]?.path, '--fields');
+    assert.equal((e.details as { issues: { path: string }[] }).issues[0]?.path, '--fields');
   }
   assert.equal(thrown(() => parseFields([' , '])).code, 'VALIDATION');
 });
@@ -142,10 +142,25 @@ test('a top-level results array: paths resolve per element and other top-level k
   assert.deepEqual(project(w, 'outcome', 'ci.state'), {
     outcome: 'red',
     results: [
-      { outcome: 'red', ci: { state: 'red' } },
-      { outcome: 'green', ci: { state: 'green' } },
+      { target: '#1', outcome: 'red', ci: { state: 'red' } },
+      { target: '#2', outcome: 'green', ci: { state: 'green' } },
     ],
     eventsPath: '/e',
+  });
+});
+
+test('a results[] element keeps its identity, its error and its warnings whatever the paths', () => {
+  const failed = {
+    selector: '9',
+    ref: 'o/r#9',
+    error: { code: 'PR_NOT_FOUND', message: 'm', hint: null, details: null },
+  };
+  const ok = { ref: 'o/r#1', state: 'OPEN', merge: { ready: true }, warnings: [{ code: 'W', message: 'w' }] };
+  assert.deepEqual(project({ results: [ok, failed] }, 'state'), {
+    results: [{ ref: 'o/r#1', state: 'OPEN', warnings: ok.warnings }, failed],
+  });
+  assert.deepEqual(project({ results: [{ target: '#1', outcome: 'red', ci: {} }] }, 'outcome'), {
+    results: [{ target: '#1', outcome: 'red' }],
   });
 });
 
@@ -159,7 +174,7 @@ test('checkFields names the valid top-level keys and suggests a near miss', () =
   assert.equal(e.code, 'VALIDATION');
   assert.match(e.hint ?? '', /did you mean 'state'/);
   assert.match(e.hint ?? '', /Top-level fields: ref, state, head/);
-  assert.ok((e.details?.fields as string[]).includes('merge'));
+  assert.ok((e.details as { fields: string[] }).fields.includes('merge'));
   const nested = thrown(() => checkFields(statusSpec, parseFields(['ci.stat'])));
   assert.match(nested.hint ?? '', /'stat' is not a field of 'ci'.*did you mean 'state'/);
 });
@@ -171,7 +186,7 @@ test('checkFields says how to fix a path through an array, [] on a non-array, an
   assert.match(notArray.hint ?? '', /not an array: drop the \[\]/);
   const scalar = thrown(() => checkFields(statusSpec, parseFields(['state.x'])));
   assert.match(scalar.hint ?? '', /'state' has no fields/);
-  assert.equal((scalar.details?.issues as unknown[]).length, 1);
+  assert.equal((scalar.details as { issues: unknown[] }).issues.length, 1);
 });
 
 test('a results document checks paths against the element, and a results[] prefix is corrected', () => {

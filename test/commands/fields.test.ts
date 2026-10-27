@@ -1,0 +1,135 @@
+// --fields / --brief through the runner (02 §1.1): checked before the command runs, applied to the
+// success document only, before the byte bound; the stream summary is projected in final mode only.
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { test } from 'node:test';
+import { z } from 'zod';
+import { defineCommand } from '../../src/core/command.ts';
+import { GhxError } from '../../src/core/errors.ts';
+import { DryRunHalt } from '../../src/gh/index.ts';
+import { runInProcess } from '../helpers/harness.ts';
+
+let runs = 0;
+
+const Doc = z.object({
+  state: z.string(),
+  ci: z.object({ state: z.string(), counts: z.object({ pass: z.number() }) }),
+  pad: z.string(),
+});
+
+const docSpec = defineCommand({
+  name: ['t', 'doc'],
+  summary: 'Test only: a fixed document.',
+  kind: 'read',
+  needs: { repo: 'none' },
+  input: z.object({ padBytes: z.number().int().default(0), fail: z.boolean().default(false) }),
+  output: Doc,
+  brief: ['state', 'ci.state'],
+  async run(input, ctx) {
+    runs++;
+    if (input.fail) throw new GhxError('GH_FAILED', 'boom');
+    ctx.warn({ code: 'T_WARN', message: 'kept under --fields' });
+    return { state: 'OPEN', ci: { state: 'green', counts: { pass: 3 } }, pad: 'p'.repeat(input.padBytes) };
+  },
+});
+
+const writeSpec = defineCommand({
+  name: ['t', 'write'],
+  summary: 'Test only: a write that halts under --dry-run.',
+  kind: 'write',
+  needs: { repo: 'none' },
+  input: z.object({}),
+  output: z.object({ merged: z.boolean(), number: z.number() }),
+  async run(_input, ctx) {
+    runs++;
+    if (ctx.dryRun) throw new DryRunHalt(['pr', 'merge', '1'], undefined);
+    return { merged: true, number: 1 };
+  },
+});
+
+const commands = [docSpec, writeSpec];
+
+test('--fields keeps the selected leaves, the nesting and warnings; --brief uses the preset', async () => {
+  const r = await runInProcess(['t', 'doc', '--fields', 'ci.counts', '--fields', 'state'], { commands });
+  assert.equal(r.exitCode, 0, r.stdout);
+  assert.deepEqual(r.json, {
+    state: 'OPEN',
+    ci: { counts: { pass: 3 } },
+    warnings: [{ code: 'T_WARN', message: 'kept under --fields' }],
+  });
+  const b = await runInProcess(['t', 'doc', '--brief'], { commands });
+  assert.deepEqual(b.json, { state: 'OPEN', ci: { state: 'green' }, warnings: b.json.warnings });
+  const u = await runInProcess(['t', 'doc', '--brief', '--fields', 'ci.counts.pass'], { commands });
+  assert.deepEqual(u.json.ci, { state: 'green', counts: { pass: 3 } }, '--brief with --fields is the union');
+});
+
+test('an unknown path is VALIDATION before the command runs, naming the top-level fields', async () => {
+  const before = runs;
+  const r = await runInProcess(['t', 'doc', '--fields', 'stat'], { commands });
+  assert.equal(r.exitCode, 2);
+  assert.equal(r.json.error.code, 'VALIDATION');
+  assert.match(r.json.error.hint, /did you mean 'state'.*Top-level fields: state, ci, pad, warnings/);
+  const w = await runInProcess(['t', 'write', '--fields', 'mergd'], { commands });
+  assert.equal(w.json.error.code, 'VALIDATION');
+  assert.equal(runs, before, 'neither command ran');
+  assert.deepEqual(w.calls, []);
+});
+
+test('error and dry-run documents are never projected', async () => {
+  const e = await runInProcess(['t', 'doc', '--fail', '--fields', 'state'], { commands });
+  assert.deepEqual(Object.keys(e.json), ['error']);
+  assert.equal(e.json.error.code, 'GH_FAILED');
+  const d = await runInProcess(['t', 'write', '--dry-run', '--fields', 'merged'], { commands });
+  assert.equal(d.exitCode, 0, d.stdout);
+  assert.equal(d.json.dryRun, true);
+  assert.deepEqual(d.json.wouldRun, [{ argv: ['pr', 'merge', '1'] }]);
+  const w = await runInProcess(['t', 'write', '--fields', 'merged'], { commands });
+  assert.deepEqual(w.json, { merged: true });
+});
+
+test('--brief on a command without a preset is USAGE_UNKNOWN_FLAG', async () => {
+  const r = await runInProcess(['t', 'write', '--brief'], { commands });
+  assert.equal(r.exitCode, 2);
+  assert.equal(r.json.error.code, 'USAGE_UNKNOWN_FLAG');
+  assert.match(r.json.error.hint, /no brief preset; pick fields with --fields/);
+});
+
+test('the projection runs before the byte bound: a trimmed document fits, a large one spills projected', async () => {
+  const fits = await runInProcess(['t', 'doc', '--pad-bytes', '20000', '--fields', 'state'], { commands });
+  assert.deepEqual(fits.json, { state: 'OPEN', warnings: fits.json.warnings });
+  const spilled = await runInProcess(['t', 'doc', '--pad-bytes', '20000', '--fields', 'pad'], { commands });
+  assert.equal(spilled.json.spilled, true);
+  const full = JSON.parse(readFileSync(spilled.json.path, 'utf8'));
+  assert.deepEqual(Object.keys(full), ['pad', 'warnings']);
+});
+
+test('a final-mode stream projects its summary on stdout; the events file keeps the full summary', async () => {
+  const r = await runInProcess(['test', 'tick', '--count', '1', '--interval-ms', '0', '--fields', 'ticks']);
+  assert.equal(r.exitCode, 0, r.stdout);
+  assert.deepEqual(r.json, { ticks: 1 });
+  const tick = await runInProcess(['test', 'tick', '--count', '1', '--interval-ms', '0']);
+  const last = readFileSync(tick.json.eventsPath, 'utf8').trim().split('\n').at(-1) ?? '';
+  assert.equal(JSON.parse(last).outcome, 'ok', 'the events file is never projected');
+});
+
+test('--fields with an NDJSON stream (--stream) is VALIDATION', async () => {
+  const r = await runInProcess(['test', 'tick', '--count', '1', '--interval-ms', '0', '--stream', '--fields', 'ticks']);
+  assert.equal(r.exitCode, 2);
+  assert.equal(r.json.error.code, 'VALIDATION');
+  assert.match(r.json.error.message, /do not apply to ghx test tick --stream/);
+  const bad = await runInProcess(['test', 'tick', '--fields', 'tiks']);
+  assert.match(bad.json.error.hint, /did you mean 'ticks'/);
+});
+
+test('--help and --schema show the brief preset; the global --brief line names the commands with one', async () => {
+  const h = await runInProcess(['t', 'doc', '--help'], { commands });
+  assert.deepEqual(h.json.brief, ['state', 'ci.state']);
+  const none = await runInProcess(['t', 'write', '--help'], { commands });
+  assert.equal(none.json.brief, null);
+  const s = await runInProcess(['t', 'doc', '--schema'], { commands });
+  assert.deepEqual(s.json.brief, ['state', 'ci.state']);
+  const g = await runInProcess(['--help'], { commands });
+  const flags = g.json.globalFlags as string[];
+  assert.ok(flags.some((f) => f.startsWith('--fields <string>')));
+  assert.ok(flags.some((f) => f.startsWith('--brief') && f.includes('t doc') && !f.includes('t write')));
+});

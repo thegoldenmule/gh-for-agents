@@ -2,8 +2,9 @@
 //
 // A path is dot-separated keys; `key[]` maps over an array. Projection rule (the contract): if the
 // document has a top-level `results` array, paths resolve against each element and the other
-// top-level keys are kept; otherwise they resolve against the document, and a top-level `warnings`
-// is kept. Paths are checked against the output schema before the command runs, so a typo fails
+// top-level keys are kept; otherwise they resolve against the document. `warnings` is always kept,
+// and so is what names a results[] element and its failure (RESULT_KEEP): a failed PR in pr status
+// N M is {selector, ref, error}, never {}. Paths are checked against the output schema before the command runs, so a typo fails
 // as VALIDATION and never after a write. Error documents are never projected (emitDocument).
 import { z } from 'zod';
 import { type AnyCommandSpec, commandName, Warning } from './command.ts';
@@ -93,6 +94,9 @@ export function fieldTree(paths: readonly FieldPath[]): FieldNode {
   return root;
 }
 
+/** Kept in every results[] element whatever the paths: its identity, its failure and its warnings. */
+export const RESULT_KEEP = ['selector', 'ref', 'target', 'error', 'warnings'] as const;
+
 const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 function projectObject(obj: Record<string, unknown>, node: FieldNode, keep: readonly string[] = []): unknown {
@@ -120,7 +124,7 @@ export function projectDocument(doc: unknown, tree: FieldNode): unknown {
   if (!Array.isArray(results)) return projectObject(doc, tree, ['warnings']);
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(doc)) {
-    out[k] = k === 'results' ? results.map((e) => (isRecord(e) ? projectObject(e, tree) : e)) : v;
+    out[k] = k === 'results' ? results.map((e) => (isRecord(e) ? projectObject(e, tree, RESULT_KEEP) : e)) : v;
   }
   return out;
 }
