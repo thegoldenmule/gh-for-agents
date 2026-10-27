@@ -103,6 +103,7 @@ export async function runStream(
       verbose: globals.verbose === true,
       log: globals.verbose && deps.stderrLine ? createLineLogger(deps.stderrLine, () => clock.now()) : nullLogger,
       flagRepo: globals.repo,
+      project: out.project,
     });
     const ctx: StreamContext = { ...built.ctx, events: { path: events.path, setPath: events.setPath } };
 

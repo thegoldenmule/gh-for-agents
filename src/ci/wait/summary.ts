@@ -162,12 +162,17 @@ export const COMPACT_LEVELS = 4;
 
 /**
  * The least-compacted form of `doc` whose JSON fits `maxBytes`. `build(level)` returns the document at
- * a level. Returns the level used (0 = nothing cut).
+ * a level. Returns the level used (0 = nothing cut). With `project` (--fields/--brief, Context.project)
+ * the bound is on what the runner prints, project(doc): detail the projection drops is never cut for size.
  */
-export function fitDocument<T>(build: (level: number) => T, maxBytes: number): { doc: T; level: number } {
+export function fitDocument<T>(
+  build: (level: number) => T,
+  maxBytes: number,
+  project?: (doc: unknown) => unknown,
+): { doc: T; level: number } {
   for (let level = 0; level <= COMPACT_LEVELS; level++) {
     const doc = build(level);
-    if (Buffer.byteLength(serializeJson(doc), 'utf8') <= maxBytes) return { doc, level };
+    if (Buffer.byteLength(serializeJson(project ? project(doc) : doc), 'utf8') <= maxBytes) return { doc, level };
   }
   return { doc: build(COMPACT_LEVELS), level: COMPACT_LEVELS };
 }

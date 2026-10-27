@@ -933,10 +933,11 @@ export async function* runWait(
       resumed: runs.some((r) => r.resumed),
     });
     const path = await writeDiagnosisFile(results, false);
-    const fitted = fitDocument(build(path), maxBytes);
+    // Under --fields/--brief the bound is on the projected summary, so unselected detail costs nothing.
+    const fitted = fitDocument(build(path), maxBytes, ctx.project);
     if (fitted.level === 0 || path !== null) return fitted.doc;
     // Compaction cut detail and nothing was written yet: keep the full form on disk.
-    return fitDocument(build(await writeDiagnosisFile(results, true)), maxBytes).doc;
+    return fitDocument(build(await writeDiagnosisFile(results, true)), maxBytes, ctx.project).doc;
   };
 
   try {

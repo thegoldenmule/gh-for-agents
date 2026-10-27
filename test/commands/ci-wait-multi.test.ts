@@ -118,6 +118,42 @@ test('10 targets, each with 5 diagnosed failing jobs: compacted under 16 384 byt
   assert.deepEqual(sim.mutations(), []);
 });
 
+test('--fields: the 16 KB bound is on the projected summary, so selected detail is not cut for unselected detail', async () => {
+  const clock = new FakeClock();
+  const prs: NonNullable<SimState['prs']> = {};
+  const checks: SimState['checks'] = {};
+  for (let n = 1; n <= 10; n++) {
+    const hh = n < 7 ? sha('abcdef'[n - 1] as string) : `${'0'.repeat(39)}${n - 7}`;
+    prs[n] = { state: 'open', head: hh };
+    checks[hh] = Array.from({ length: 5 }, (_, k) =>
+      job(n * 100 + k, {
+        runId: n * 1000,
+        name: `shard ${k + 1}`,
+        status: 'completed',
+        conclusion: 'failure',
+        completedAt: 0,
+        tests: Array.from({ length: 8 }, (_, t) => `p${n}/suite-${k}.test.ts > case ${t} ${'y'.repeat(150)}`),
+      }),
+    );
+  }
+  const sim = new GitHubSim(clock, { pr: prs[1] as SimState['pr'], prs, checks }, { number: 1 });
+  const targets = Array.from({ length: 10 }, (_, i) => `o/r#${i + 1}`);
+  const whole = await wait(sim, targets);
+  assert.ok(
+    whole.json.results.every((t: { diagnosis: { jobs: unknown[] } }) => t.diagnosis.jobs.length < 5),
+    'unprojected, the summary is compacted',
+  );
+  const r = await wait(sim, [...targets, '--fields', 'diagnosis.jobs[].job']);
+  assert.equal(r.exitCode, EXIT.CI_RED, r.stdout.slice(0, 400));
+  assert.ok(Buffer.byteLength(r.stdout) < 16_384, `${Buffer.byteLength(r.stdout)} bytes`);
+  assert.deepEqual(
+    r.json.results.map((t: { diagnosis: { jobs: { job: string }[] } }) => t.diagnosis.jobs.length),
+    Array(10).fill(5),
+    'every selected job name is kept',
+  );
+  assert.deepEqual(Object.keys(r.json.results[0]).sort(), ['diagnosis', 'target']);
+});
+
 test('two waits over the same targets in opposite order both finish (no lock held across the wait)', async () => {
   const { sim } = twoPrs();
   sim.at(3 * MIN, (s) => ({
