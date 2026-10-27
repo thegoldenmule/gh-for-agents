@@ -1,6 +1,7 @@
 // ghx pr status <pr> <pr>… (02 §4.4): several selectors give {results}, one entry per selector in argument
 // order; a selector that fails is an error entry, and the exit code follows pr create --batch.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { byteLength } from '../../src/core/output.ts';
 import { PrStatusErrorEntry, PrStatusOutput } from '../../src/pr/status/schema.ts';
@@ -95,5 +96,67 @@ test('several large PRs share the 16 KB budget instead of spilling', async () =>
     assert.ok(e.feedback.counts.omitted > 0);
     assert.ok(e.warnings.some((w: { code: string }) => w.code === 'FEEDBACK_OMITTED'));
     assert.deepEqual(e.openFindings, ['f_n2c6rv'], 'open findings are never dropped');
+  }
+});
+
+/** PR `n` of the worked example with `count` issue comments of `chars` characters each. */
+function talkative(fake: FakeGh, n: number, count: number, chars: number) {
+  const comments = Array.from({ length: count }, (_, i) => ({
+    databaseId: n * 100 + i,
+    author: { __typename: 'User', login: 'maria-dev' },
+    authorAssociation: 'MEMBER',
+    body: `${n}-${i} ${'x'.repeat(chars)}`,
+    createdAt: new Date(Date.UTC(2026, 9, 21, 10, i)).toISOString(),
+    lastEditedAt: null,
+    url: `https://github.com/${SLUG}/pull/${n}#issuecomment-${n * 100 + i}`,
+  }));
+  fake.on(
+    isQ1For(n),
+    q1Reply(workedPr({ number: n, url: `https://github.com/${SLUG}/pull/${n}`, comments: page(comments) })),
+  );
+  return comments.map((c) => c.body);
+}
+
+const FIVE = [3301, 3302, 3303, 3304, 3305];
+
+test('--fields: the budget is measured on the projection, so selected bodies that fit are kept whole', async () => {
+  const fake = install();
+  const bodies = FIVE.map((n) => talkative(fake, n, 6, 300));
+  const argv = ['pr', 'status', ...FIVE.map((n) => `${SLUG}#${n}`)];
+  // Without --fields the five PRs do not fit 16 KB: comment bodies are emptied, and the rest spills.
+  const whole = await run(argv, fake);
+  assert.equal(whole.exitCode, EXIT.OK, whole.stdout.slice(0, 500));
+  assert.equal(whole.json.spilled, true);
+  const spilled = JSON.parse(readFileSync(whole.json.path, 'utf8'));
+  assert.ok(spilled.results.every((e: { feedback: { counts: { omitted: number } } }) => e.feedback.counts.omitted > 0));
+
+  const r = await run([...argv, '--fields', 'feedback.comments[].body,feedback.counts.omitted'], fake);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout.slice(0, 500));
+  assert.equal(r.json.spilled, undefined, 'not spilled');
+  assert.ok(byteLength(r.stdout) <= 16_384, `${byteLength(r.stdout)} bytes`);
+  r.json.results.forEach(
+    (
+      e: { feedback: { comments: { body: string }[]; counts: { omitted: number } }; warnings: { code: string }[] },
+      i: number,
+    ) => {
+      for (const b of bodies[i] ?? [])
+        assert.ok(
+          e.feedback.comments.some((c) => c.body === b),
+          `${FIVE[i]}: a body was cut`,
+        );
+      assert.equal(e.feedback.counts.omitted, 0);
+      assert.ok(!e.warnings.some((w) => w.code === 'FEEDBACK_OMITTED'));
+    },
+  );
+});
+
+test('--brief: content it does not select is never cut, and no FEEDBACK_OMITTED is raised for it', async () => {
+  const fake = install();
+  for (const n of FIVE) talkative(fake, n, 6, 300);
+  const r = await run(['pr', 'status', ...FIVE.map((n) => `${SLUG}#${n}`), '--brief'], fake);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout.slice(0, 500));
+  for (const e of r.json.results) {
+    assert.equal(e.feedback.counts.omitted, 0, 'feedback.counts is the fold’s');
+    assert.ok(!e.warnings.some((w: { code: string }) => w.code === 'FEEDBACK_OMITTED'));
   }
 });

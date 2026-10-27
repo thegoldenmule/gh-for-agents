@@ -3,7 +3,9 @@
 // then whole old or resolved comment entries, bots and settled findings, are dropped and counted in
 // feedback.counts.omitted, with a FEEDBACK_OMITTED warning pointing to `pr feedback`. The 01 spill stays
 // the safety net only for a document whose non-feedback parts alone are too large. Several PRs (fitStatuses)
-// share one budget: PRs that fit their share keep it all, and the rest split what is left.
+// share one budget: PRs that fit their share keep it all, and the rest split what is left. Under --fields or
+// --brief (`project`, Context.project) the budget is measured on the projected document, and a cut that the
+// projection would hide is undone: only selected content is cut, counted and reported.
 import { byteLength, DEFAULT_MAX_BYTES } from '../../core/output.ts';
 import type { Comment, Feedback, Finding } from '../../feedback/schemas.ts';
 import type { PrStatusEntry, PrStatusOutput } from './schema.ts';
@@ -39,6 +41,9 @@ export function capFeedback(f: Feedback, caps: { comment: number; finding: numbe
 
 const size = (doc: unknown): number => byteLength(JSON.stringify(doc));
 
+/** The --fields/--brief projection the runner will apply (Context.project); the identity without one. */
+export type Projection = ((doc: unknown) => unknown) | undefined;
+
 /** Open for the merge policy: open, or addressed with an unverified commit (04). Never dropped. */
 const keepsFinding = (f: Finding): boolean =>
   f.status === 'open' || (f.status === 'addressed' && f.statusEvent?.verified == null);
@@ -58,12 +63,14 @@ const commentTier = (c: Comment): number => (c.threadResolved === true ? 0 : c.t
  * first; bots, oldest first; settled findings; reviews no finding points to). Each item is counted once in
  * feedback.counts.omitted, with a FEEDBACK_OMITTED hint to `pr feedback`. Open and unverified findings,
  * preconditions, openFindings and merge.* are never dropped; the fold's counts stay the totals.
+ * With `project`, the bound is on project(doc) and a cut that leaves project(doc) unchanged is undone.
  */
-export function fitStatus(doc: PrStatusOutput, maxBytes = DEFAULT_MAX_BYTES): PrStatusOutput {
+export function fitStatus(doc: PrStatusOutput, maxBytes = DEFAULT_MAX_BYTES, project?: Projection): PrStatusOutput {
   const out: PrStatusOutput = structuredClone(doc);
   out.description.text = capText(out.description.text, STATUS_CAPS.description).text;
   out.feedback = capFeedback(out.feedback, STATUS_CAPS);
-  if (size(out) <= maxBytes) return out;
+  const view = (): string => JSON.stringify(project ? project(out) : out);
+  if (byteLength(view()) <= maxBytes) return out;
 
   const hint = { code: 'FEEDBACK_OMITTED', message: '' };
   out.warnings = [...out.warnings, hint];
@@ -82,45 +89,69 @@ export function fitStatus(doc: PrStatusOutput, maxBytes = DEFAULT_MAX_BYTES): Pr
       `${dropped} whole entries dropped); read them in full with ghx pr feedback ${out.ref}.`;
   };
 
+  // One cut each: the lists it changes (undefined when there is nothing to cut), its count key, and whether
+  // it drops the whole entry.
+  type Lists = Partial<Pick<Feedback, 'findings' | 'comments' | 'bots' | 'reviews'>>;
+  type Cut = { key: string; whole: boolean; apply: () => Lists | undefined };
   const settled = fb.findings.filter((f) => !keepsFinding(f));
-  const drops: (() => void)[] = [
+  const cuts: Cut[] = [
     // Bodies.
     ...settled
       .filter((f) => f.body !== '')
-      .map((f) => () => {
-        fb.findings = fb.findings.map((x) => (x.id === f.id ? { ...x, body: '', truncated: true } : x));
-        count(`f:${f.id}`, false);
-      }),
-    ...byAge(fb.comments.filter((c) => c.body !== '')).map((c) => () => {
-      fb.comments = fb.comments.map((x) => (x.id === c.id ? { ...x, body: '', truncated: true } : x));
-      count(`c:${c.id}`, false);
-    }),
+      .map((f) => ({
+        key: `f:${f.id}`,
+        whole: false,
+        apply: () => ({ findings: fb.findings.map((x) => (x.id === f.id ? { ...x, body: '', truncated: true } : x)) }),
+      })),
+    ...byAge(fb.comments.filter((c) => c.body !== '')).map((c) => ({
+      key: `c:${c.id}`,
+      whole: false,
+      apply: () => ({ comments: fb.comments.map((x) => (x.id === c.id ? { ...x, body: '', truncated: true } : x)) }),
+    })),
     // Whole entries.
     ...[0, 1, 2].flatMap((tier) =>
-      byAge(fb.comments.filter((c) => commentTier(c) === tier)).map((c) => () => {
-        fb.comments = fb.comments.filter((x) => x.id !== c.id);
-        count(`c:${c.id}`, true);
-      }),
+      byAge(fb.comments.filter((c) => commentTier(c) === tier)).map((c) => ({
+        key: `c:${c.id}`,
+        whole: true,
+        apply: () => ({ comments: fb.comments.filter((x) => x.id !== c.id) }),
+      })),
     ),
-    ...byAge(fb.bots).map((b) => () => {
-      fb.bots = fb.bots.filter((x) => x.id !== b.id);
-      count(`b:${b.id}`, true);
-    }),
-    ...settled.map((f) => () => {
-      fb.findings = fb.findings.filter((x) => x.id !== f.id);
-      count(`f:${f.id}`, true);
-    }),
-    ...byAge(fb.reviews.map((r) => ({ r, at: r.submittedAt }))).map(({ r }) => () => {
-      if (r.githubState === 'CHANGES_REQUESTED' || fb.findings.some((f) => f.reviewId === r.id)) return;
-      fb.reviews = fb.reviews.filter((x) => x.id !== r.id);
-      count(`r:${r.id}`, true);
-    }),
+    ...byAge(fb.bots).map((b) => ({
+      key: `b:${b.id}`,
+      whole: true,
+      apply: () => ({ bots: fb.bots.filter((x) => x.id !== b.id) }),
+    })),
+    ...settled.map((f) => ({
+      key: `f:${f.id}`,
+      whole: true,
+      apply: () => ({ findings: fb.findings.filter((x) => x.id !== f.id) }),
+    })),
+    ...byAge(fb.reviews.map((r) => ({ r, at: r.submittedAt }))).map(({ r }) => ({
+      key: `r:${r.id}`,
+      whole: true,
+      apply: () =>
+        r.githubState === 'CHANGES_REQUESTED' || fb.findings.some((f) => f.reviewId === r.id)
+          ? undefined
+          : { reviews: fb.reviews.filter((x) => x.id !== r.id) },
+    })),
   ];
   setHint();
-  for (const drop of drops) {
-    if (size(out) <= maxBytes) break;
-    drop();
+  let seen = view();
+  for (const cut of cuts) {
+    if (byteLength(seen) <= maxBytes) break;
+    const next = cut.apply();
+    if (!next) continue;
+    const before = { findings: fb.findings, comments: fb.comments, bots: fb.bots, reviews: fb.reviews };
+    Object.assign(fb, next);
+    // Under a projection that does not select this content the cut saves nothing: undo it, uncounted.
+    const after = view();
+    if (project && after === seen) {
+      Object.assign(fb, before);
+      continue;
+    }
+    count(cut.key, cut.whole);
     setHint();
+    seen = view();
   }
   if (fb.counts.omitted === doc.feedback.counts.omitted) out.warnings = out.warnings.filter((w) => w !== hint);
   return out;
@@ -131,26 +162,34 @@ export function fitStatus(doc: PrStatusOutput, maxBytes = DEFAULT_MAX_BYTES): Pr
  * the budget is water-filled. Error entries and PRs already within an equal share keep their size, and the
  * others are re-fitted to an equal split of what is left, until every share holds. A PR's non-feedback core
  * is never cut, so ten large PRs can still exceed the budget: the 01 spill is the safety net there too.
+ * With `project`, each entry is measured as the projection keeps a results[] element.
  */
-export function fitStatuses(entries: readonly PrStatusEntry[], maxBytes = DEFAULT_MAX_BYTES): PrStatusEntry[] {
+export function fitStatuses(
+  entries: readonly PrStatusEntry[],
+  maxBytes = DEFAULT_MAX_BYTES,
+  project?: Projection,
+): PrStatusEntry[] {
   const isPr = (e: PrStatusEntry): e is PrStatusOutput => !('error' in e);
-  const out = entries.map((e) => (isPr(e) ? fitStatus(e, maxBytes) : e));
-  if (size({ results: out }) <= maxBytes) return out;
+  // An element is projected as part of {results} (RESULT_KEEP), not as a document of its own.
+  const element: Projection = project && ((e) => (project({ results: [e] }) as { results: unknown[] }).results[0]);
+  const measure = (e: unknown): number => size(element ? element(e) : e);
+  const out = entries.map((e) => (isPr(e) ? fitStatus(e, maxBytes, element) : e));
+  if (size(project ? project({ results: out }) : { results: out }) <= maxBytes) return out;
   // The wrapper and the commas between entries.
   let budget = maxBytes - size({ results: [] }) - Math.max(0, out.length - 1);
   let open: number[] = [];
   out.forEach((e, i) => {
     if (isPr(e)) open.push(i);
-    else budget -= size(e);
+    else budget -= measure(e);
   });
   while (open.length > 0) {
     const share = Math.max(0, Math.floor(budget / open.length));
-    const within = open.filter((i) => size(out[i]) <= share);
+    const within = open.filter((i) => measure(out[i]) <= share);
     if (within.length === 0) {
-      for (const i of open) out[i] = fitStatus(entries[i] as PrStatusOutput, share);
+      for (const i of open) out[i] = fitStatus(entries[i] as PrStatusOutput, share, element);
       break;
     }
-    for (const i of within) budget -= size(out[i]);
+    for (const i of within) budget -= measure(out[i]);
     open = open.filter((i) => !within.includes(i));
   }
   return out;

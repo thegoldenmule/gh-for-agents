@@ -1,7 +1,7 @@
 // ghx pr status <pr>… (02 §4; 03 M6.5): what is this PR, can it land, and what's left, in one bounded object.
 // The composition lives in src/pr/status/compose.ts (shared with pr merge and ci wait --until mergeable);
 // this file resolves the repo and config, maps a cwd-inferred not-found to the 02 §1.2 hint, and applies
-// the 16 KB budget. Warnings are returned in the output, never sent to ctx.warn. Several selectors
+// the 16 KB budget to what --fields/--brief will print. Warnings are returned in the output, never sent to ctx.warn. Several selectors
 // (02 §4.4) give {results}, one entry per selector; src/pr/status/batch.ts reads them.
 import { z } from 'zod';
 import { type Context, defineCommand } from '../../core/command.ts';
@@ -78,10 +78,13 @@ export default defineCommand({
   async run(input, ctx) {
     const opts = { compareMain: input.compareMain, waitMergeable: input.waitMergeable };
     const [only, ...rest] = input.pr;
-    if (only !== undefined && rest.length === 0) return fitStatus(await readStatus(ctx, only, opts), DEFAULT_MAX_BYTES);
+    // The budget is measured on what --fields/--brief keep (ctx.project): unselected parts are never cut.
+    if (only !== undefined && rest.length === 0) {
+      return fitStatus(await readStatus(ctx, only, opts), DEFAULT_MAX_BYTES, ctx.project);
+    }
     checkSelectors(input.pr);
     const results = await readStatuses(ctx, input.pr, (selector) => readStatus(ctx, selector, opts));
-    return { results: fitStatuses(results, DEFAULT_MAX_BYTES) };
+    return { results: fitStatuses(results, DEFAULT_MAX_BYTES, ctx.project) };
   },
 });
 

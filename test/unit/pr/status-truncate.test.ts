@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fieldTree, parseFields, projectDocument } from '../../../src/core/fields.ts';
 import { byteLength, DEFAULT_MAX_BYTES } from '../../../src/core/output.ts';
 import type { BotItem, Comment, Finding } from '../../../src/feedback/schemas.ts';
 import { PrStatusOutput } from '../../../src/pr/status/schema.ts';
@@ -122,4 +123,33 @@ test('a document already under the bound loses no entries', () => {
     out.warnings.find((w) => w.code === 'FEEDBACK_OMITTED'),
     undefined,
   );
+});
+
+const projection =
+  (...fields: string[]) =>
+  (doc: unknown): unknown =>
+    projectDocument(doc, fieldTree(parseFields(fields)));
+
+test('with a projection, the bound is on what it keeps: unselected feedback is never cut or counted', () => {
+  const project = projection('merge.ready', 'feedback.counts');
+  const out = fitStatus(bigPr(), DEFAULT_MAX_BYTES, project);
+  const capped = fitStatus(bigPr(), Number.MAX_SAFE_INTEGER);
+  assert.deepEqual(out.feedback, capped.feedback, 'only the per-item caps apply');
+  assert.equal(out.feedback.counts.omitted, 0);
+  assert.equal(
+    out.warnings.find((w) => w.code === 'FEEDBACK_OMITTED'),
+    undefined,
+  );
+});
+
+test('with a projection that selects the bodies, cuts are made, counted and bounded on the projection', () => {
+  const project = projection('feedback.comments[].body');
+  const out = fitStatus(bigPr(), DEFAULT_MAX_BYTES, project);
+  assert.ok(byteLength(JSON.stringify(project(out))) <= DEFAULT_MAX_BYTES);
+  assert.ok(out.feedback.counts.omitted > 0);
+  assert.ok(out.warnings.some((w) => w.code === 'FEEDBACK_OMITTED'));
+  // Bots are not selected: none is dropped, though bigPr has 40.
+  assert.equal(out.feedback.bots.length, bigPr().feedback.bots.length);
+  // Fewer cuts than without a projection: the unselected parts cost nothing.
+  assert.ok(out.feedback.counts.omitted < fitStatus(bigPr(), DEFAULT_MAX_BYTES).feedback.counts.omitted);
 });
