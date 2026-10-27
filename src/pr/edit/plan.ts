@@ -19,6 +19,7 @@ import {
   collectRefs,
   createNetworkRules,
   createRules,
+  stripFooter,
   validationError,
 } from '../create/rules.ts';
 import { PrCreateInput, type PrEditInput } from '../create/schema.ts';
@@ -108,6 +109,12 @@ export async function planEdit(env: EditEnv): Promise<EditPlan> {
   const ref = formatPrRef(repo, number);
   const warnings: Warning[] = [];
   const { adopt, draft: draftPatch, ...patch } = env.patch;
+  // A harness footer at the end of the patched description is ghx's to render (stripFooter).
+  if (patch.description !== undefined) {
+    const stripped = stripFooter(patch.description, config);
+    patch.description = stripped.description;
+    if (stripped.warning !== null) warnings.push(stripped.warning);
+  }
 
   const pr = await fetchPrSnapshot(ctx.gh, repo, number);
   if (pr.state !== 'OPEN') {

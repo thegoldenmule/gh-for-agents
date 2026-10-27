@@ -99,6 +99,7 @@ export default defineCommand({
       ]);
     }
     const offline = offlineIssues(pr, config);
+    for (const w of offline.warnings) ctx.warn(w);
     if (offline.input === null || offline.issues.length > 0) throw validationError(offline.issues);
     const plan = await planCreate(offline.input, { ctx, repo: resolved, config });
     for (const w of plan.warnings) ctx.warn(w);

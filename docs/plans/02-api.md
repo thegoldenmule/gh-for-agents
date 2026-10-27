@@ -199,7 +199,7 @@ const PrCreateInput = z.object({ title: z.string(), description: z.string(),
 | description | `description.lines` | 1–3 lines, no blank lines |
 | description | `description.too_long` | ≤500 chars. The post-correction median was 568 including the ~65-char footer (§4.1) |
 | description | `description.markdown_structure` | No headings, list markers, `>`, tables, fences, `<details` or `<!--`. Encodes the user's corrections (§4.1) |
-| description | `description.footer` | No footer or `ghx:` marker; ghx adds both |
+| description | `description.footer` | No footer or `ghx:` marker; ghx adds both. Footer lines at the **end** (`🤖 Generated with …`, `Generated with [Claude Code](…)` with any URL, or `render.footer`), with the blank lines and `---`/`***`/`___` above them, are stripped before validation with the warning `FOOTER_STRIPPED`, in `pr create`, each `--batch` item and a `pr edit` patch. A footer inside the prose, or followed by another line such as `Co-Authored-By:`, still fails |
 | testing | `testing.min_pass` | At least one item has `pass` (`create.requirePassingTest`) |
 | testing[i] | `testing.command_required` / `testing.steps_required` | Non-manual items need a command; manual items need steps |
 | testing[i] | `testing.not_rerunnable` | No absolute or home paths |

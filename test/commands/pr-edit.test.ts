@@ -201,6 +201,15 @@ test('a title patch sends title and the re-rendered body', async () => {
   assert.deepEqual(r.json.changed, ['title', 'body']);
 });
 
+test('a description patch ending in a harness footer is stripped with FOOTER_STRIPPED', async () => {
+  const s = editScene();
+  const footer = '\n\nGenerated with [Claude Code](https://claude.ai/code)\n';
+  const r = await run(s.gh, { description: `${NEW_DESCRIPTION}${footer}` });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(codes(r), ['FOOTER_STRIPPED']);
+  assert.equal(s.patched[0]?.body, bodyOf({ ...CONTENT, description: NEW_DESCRIPTION }, 2));
+});
+
 test('a closed PR is PR_NOT_OPEN (exit 9)', async () => {
   const s = editScene({ pr: { state: 'MERGED' } });
   const r = await run(s.gh, { description: NEW_DESCRIPTION });

@@ -230,6 +230,17 @@ test('--batch --dry-run checks every item, halts at the first POST, and previews
   );
 });
 
+test('--batch strips a harness footer per item, with the warning prefixed items[i]', async () => {
+  const s = scene({ branches: OIDS });
+  const footer = '\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)';
+  const stdin = batch([item('1'), item('2', { description: `${SHARED.description}${footer}` })]);
+  const r = await runInProcess([...ARGV, '--dry-run'], { gh: s.gh, stdin });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  const stripped = r.json.warnings.filter((w: { code: string }) => w.code === 'FOOTER_STRIPPED');
+  assert.equal(stripped.length, 1);
+  assert.match(stripped[0].message, /^items\[1\]: Removed '🤖 Generated with/);
+});
+
 test('--batch input shape: PR fields at the top level, or items without --batch, are VALIDATION', async () => {
   const top = await runInProcess(ARGV, {
     gh: scene().gh,

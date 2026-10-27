@@ -127,6 +127,7 @@ export async function runBatch(input: PrBatchInput, env: BatchEnv): Promise<Batc
   const parsed: PrCreateInput[] = [];
   merged.forEach((raw, i) => {
     const r = offlineIssues(raw, config);
+    for (const w of r.warnings) ctx.warn({ ...w, message: `items[${i}]: ${w.message}` });
     issues.push(...r.issues.map((d) => prefix(i, d)));
     if (r.input) parsed[i] = r.input;
   });

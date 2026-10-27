@@ -292,6 +292,19 @@ test('--dry-run runs every read, halts at the POST and previews the PR without r
   assert.equal(preview.body, JSON.parse(would.stdin).body);
 });
 
+test('a harness footer at the end of the description is stripped with FOOTER_STRIPPED, not VALIDATION', async () => {
+  const s = scene();
+  const footer = '\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n';
+  const r = await run(s.gh, { ...INPUT, description: `${INPUT.description}${footer}` }, ['--dry-run']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(
+    r.json.warnings.map((w: { code: string }) => w.code),
+    ['FOOTER_STRIPPED'],
+  );
+  assert.ok(r.json.preview.body.startsWith(`${INPUT.description}\n\nRisk: low`), r.json.preview.body);
+  assert.equal(r.json.preview.body.split('Generated with').length, 2, 'only the rendered footer remains');
+});
+
 test('smoke/pr-create: the example reaches the halt, and the fixture query matches the builder', async () => {
   const gh = FakeGh.fromScenario('smoke/pr-create');
   const r = await runInProcess([...ARGV, '--dry-run'], { gh, stdin: JSON.stringify(INPUT) });

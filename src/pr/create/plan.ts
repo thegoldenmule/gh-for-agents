@@ -10,20 +10,36 @@ import { newId } from '../../meta/ids.ts';
 import { renderPrBody, toPrBlock } from '../../render/pr-body.ts';
 import type { PrCreateOutput, PrCreatePreview } from './output.ts';
 import { changedFiles, type Preflight, PUSH_PERMISSIONS, runPreflight } from './preflight.ts';
-import { collectRefs, createNetworkRules, createRules } from './rules.ts';
+import { collectRefs, createNetworkRules, createRules, stripFooter } from './rules.ts';
 import { PrCreateInput } from './schema.ts';
 import { prRef, type Submitted } from './submit.ts';
 
-/** Structure (zod) then every createRules issue, without the network. `input` is null when zod failed. */
-export function offlineIssues(raw: unknown, config: GhxConfig): { input: PrCreateInput | null; issues: IssueDetail[] } {
-  const r = PrCreateInput.safeParse(raw);
+/**
+ * Structure (zod) then every createRules issue, without the network. `input` is null when zod failed. A
+ * harness footer at the end of the description is stripped first (stripFooter), with a warning.
+ */
+export function offlineIssues(
+  raw: unknown,
+  config: GhxConfig,
+): { input: PrCreateInput | null; issues: IssueDetail[]; warnings: Warning[] } {
+  const warnings: Warning[] = [];
+  let value = raw;
+  if (typeof raw === 'object' && raw !== null && 'description' in raw && typeof raw.description === 'string') {
+    const stripped = stripFooter(raw.description, config);
+    if (stripped.warning !== null) {
+      value = { ...raw, description: stripped.description };
+      warnings.push(stripped.warning);
+    }
+  }
+  const r = PrCreateInput.safeParse(value);
   if (!r.success) {
     return {
       input: null,
-      issues: mapZodIssues(r.error, { schema: PrCreateInput, input: raw, suggest: (w, c) => suggest(w, c) }),
+      issues: mapZodIssues(r.error, { schema: PrCreateInput, input: value, suggest: (w, c) => suggest(w, c) }),
+      warnings,
     };
   }
-  return { input: r.data, issues: createRules(r.data, { config }) };
+  return { input: r.data, issues: createRules(r.data, { config }), warnings };
 }
 
 export interface PlanEnv {

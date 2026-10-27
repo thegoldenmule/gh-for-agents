@@ -144,6 +144,50 @@ const FOOTER_MARKERS: readonly string[] = ['🤖 Generated with', 'Generated wit
 /** A hidden ghx block marker. Prose that merely mentions `ghx:` is fine. */
 const GHX_MARKER = /<!--\s*ghx:/;
 
+/**
+ * A whole line that is a harness footer: what agents append to every PR body because their harness tells
+ * them to (`🤖 Generated with [Claude Code](https://claude.com/claude-code)`, other URLs, no emoji).
+ */
+const FOOTER_LINE = [/^🤖\uFE0F?\s*Generated with\b/u, /^Generated with \[?Claude Code\b/i];
+/** A Markdown thematic break, the `---` agents put above the footer. */
+const SEPARATOR_LINE = /^(?:-{3,}|\*{3,}|_{3,})$/;
+
+/**
+ * The description without the footer lines at its end, and the blank lines and `---` they leave behind
+ * (02 §2.1). ghx renders the footer itself, so a copy in the description is removed with a
+ * FOOTER_STRIPPED warning instead of failing description.footer. Only the tail is touched: a footer
+ * inside the prose still fails the rule, and so does a Co-Authored-By line after it.
+ */
+export function stripFooter(
+  description: string,
+  config: Pick<CreateRulesConfig, 'render'>,
+): { description: string; warning: Warning | null } {
+  const own = config.render.footer?.trim();
+  const isFooter = (t: string) =>
+    (own !== undefined && own !== '' && t === own) || FOOTER_LINE.some((re) => re.test(t));
+  const lines = description.split(/\r\n|\r|\n/);
+  const removed: string[] = [];
+  let end = lines.length;
+  const at = (i: number) => (lines[i] ?? '').trim();
+  const skipBlank = () => {
+    while (end > 0 && at(end - 1) === '') end--;
+  };
+  for (skipBlank(); end > 0 && isFooter(at(end - 1)); skipBlank()) {
+    removed.unshift(at(end - 1));
+    end--;
+    skipBlank();
+    if (end > 0 && SEPARATOR_LINE.test(at(end - 1))) end--;
+  }
+  if (removed.length === 0) return { description, warning: null };
+  return {
+    description: lines.slice(0, end).join('\n'),
+    warning: {
+      code: 'FOOTER_STRIPPED',
+      message: `Removed ${removed.map((r) => `'${r}'`).join(', ')} from the end of description; ghx renders the footer itself.`,
+    },
+  };
+}
+
 function descriptionRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDetail[] {
   const out: IssueDetail[] = [];
   const d = input.description;

@@ -10,6 +10,7 @@ import {
   compoundOperators,
   createRules,
   machinePaths,
+  stripFooter,
   validationError,
 } from '../../../../src/pr/create/rules.ts';
 import { PrCreateInput, PrEditInput } from '../../../../src/pr/create/schema.ts';
@@ -202,6 +203,44 @@ describe('description', () => {
       'description.markdown_structure',
       'description.footer',
     ]);
+  });
+});
+
+describe('stripFooter', () => {
+  const strip = (d: string, c = CTX.config) => stripFooter(d, c);
+  const PROSE = 'Retries now show a banner.';
+
+  test('the harness footer, its blank lines and a --- above it are removed, with FOOTER_STRIPPED', () => {
+    for (const tail of [
+      '\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)',
+      '\n\n🤖 Generated with [Claude Code](https://claude.ai/code)\n',
+      '\nGenerated with [Claude Code](https://claude.com/claude-code)',
+      '\n\nGenerated with Claude Code',
+      '\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n',
+      '\r\n\r\n***\r\n🤖\uFE0F Generated with [Claude Code](https://claude.com/claude-code)',
+    ]) {
+      const r = strip(`${PROSE}${tail}`);
+      assert.equal(r.description, PROSE, JSON.stringify(tail));
+      assert.equal(r.warning?.code, 'FOOTER_STRIPPED');
+      assert.match(r.warning?.message ?? '', /Generated with/);
+      pass({ description: r.description });
+    }
+  });
+
+  test("the repo's own render.footer is stripped too; a description without a footer is untouched", () => {
+    const own = ctxWith({ render: { footer: 'Made by the bot squad' } }).config;
+    assert.equal(strip(`${PROSE}\n\nMade by the bot squad`, own).description, PROSE);
+    const plain = strip(`${PROSE}\n`);
+    assert.deepEqual(plain, { description: `${PROSE}\n`, warning: null }, 'other defects are left to the rules');
+  });
+
+  test('only the tail is touched: a footer inside the prose or before a Co-Authored-By line still fails', () => {
+    const inline = 'Done. 🤖 Generated with Claude Code';
+    assert.deepEqual(strip(inline), { description: inline, warning: null });
+    const trailer = `${PROSE}\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>`;
+    assert.equal(strip(trailer).warning, null);
+    assert.ok(codes({ description: trailer }).includes('description.footer'));
+    assert.equal(strip('Generated with care by hand.').warning, null);
   });
 });
 
