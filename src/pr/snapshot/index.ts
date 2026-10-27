@@ -223,7 +223,10 @@ export async function fetchPrSnapshot(o: FetchPrSnapshotOptions): Promise<PrSnap
       const what = mergeable === 'UNKNOWN' ? 'mergeable' : 'mergeStateStatus';
       warn({
         code: 'MERGEABLE_UNKNOWN',
-        message: `GitHub still reports ${what} UNKNOWN after ${budgetMs / 1000} s; re-run to check again.`,
+        message:
+          budgetMs < MERGEABLE_BUDGET_MS
+            ? `GitHub still reports ${what} UNKNOWN; the deadline left ${Math.round(budgetMs / 1000)} s to retry. Re-run this PR alone, or raise --timeout.`
+            : `GitHub still reports ${what} UNKNOWN after ${budgetMs / 1000} s; re-run to check again.`,
       });
     } else if (r.kind === 'head-changed') {
       warn({
