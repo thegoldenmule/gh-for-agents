@@ -337,10 +337,10 @@ gh calls:
 ## 4. `pr status`
 
 ```
-ghx pr status <pr> [-R owner/repo] [--no-compare-main] [--no-wait-mergeable]
+ghx pr status <pr>… [-R owner/repo] [--no-compare-main] [--no-wait-mergeable]
 ```
 
-One object that answers: what is this PR, can it land, and what's left (§8a, §9.3).
+One object that answers: what is this PR, can it land, and what's left (§8a, §9.3). Up to 10 selectors in one call give `{results: [...]}`, one such object per PR (§4.4).
 
 ### 4.1 Output
 
@@ -404,15 +404,19 @@ const PrStatusOutput = z.object({ ref: PrRef, url: z.string(), number: z.number(
   - Per-item caps: description 1,000, comment 500, finding 600, summary 400.
   - If the document is still over 16 KB, ghx drops resolved-finding bodies, then the oldest comment bodies, counts them in `omitted`, and adds a hint pointing to `pr feedback`.
   - The 01 spill is the safety net.
+  - With several PRs the 16 KB is shared (§4.4).
 
 ### 4.2 Errors
 
 | Exit | Codes |
 |---|---|
+| 2 | `USAGE_BAD_SELECTOR` (any selector, before anything is fetched); more than 10 selectors |
 | 3 | `CONFIG_INVALID`. `CONFIG_MISSING` here is only a warning, plus blocker `CONFIG_MISSING` |
 | 4 | `ENV_*` |
 | 5 | `PR_NOT_FOUND`, `REPO_NOT_FOUND` |
-| 7 | `GH_*` |
+| 7 | `GH_*`. With 2+ selectors: at least one `results[]` entry is an `error` and at least one is a PR |
+
+With 2+ selectors, a PR that cannot be read is an error entry in `results` (§4.4), not the error envelope. When every selector fails, the exit is the first entry's own code from this table.
 
 ### 4.3 gh calls
 
@@ -435,6 +439,28 @@ All calls use the read-mode client, `gh graphql` and `gh api` GET only.
 8. **`release-includes`:** `releases/latest` plus `compare`.
 
 A green PR costs 2 GraphQL calls. A red one costs about 3 REST calls per failing job (versus 5–8 calls in §8b).
+
+### 4.4 Several PRs
+
+```
+ghx pr status 3264 3267 3268 -R owner/repo
+```
+
+This replaces shell loops of `gh pr view` / `gh pr checks` (or `ghx pr status`) over a list of PRs.
+
+- **Shape.** One selector prints `PrStatusOutput` itself, unchanged. With 2 to 10 selectors, stdout is `{results: [...]}`, one entry per selector in argument order. Each entry is self-contained, so `--fields` paths resolve against every entry as they would against one PR's document:
+
+  ```ts
+  const PrStatusErrorEntry = z.object({ selector: z.string(), ref: PrRef.nullable(),
+    error: z.object({ code: z.string(), message: z.string(), hint: z.string().nullable(), details: z.record(z.unknown()).nullable() }) });
+  const PrStatusMany = z.object({ results: z.array(z.union([PrStatusOutput, PrStatusErrorEntry])) });
+  ```
+
+  An error entry is the §1.3 error envelope plus the `selector` it was given and its `ref` (`owner/repo#N` once the repo resolved, else `null`). `ref` is the one key both kinds share.
+- **Reads.** Every selector is parsed before anything is fetched. The PRs are then read concurrently, 5 at a time, each exactly as a single `pr status` reads it (§4.3), with its own `CWD_REPO_MISMATCH` and `CONFIG_MISSING` warnings. Repo resolution and config are fetched once per repo.
+- **Failures.** A selector that fails (not found, forbidden, invalid config, …) becomes its error entry, and the rest are still read. A deadline or a signal still ends the whole call (`TIMEOUT`, `INTERRUPTED`).
+- **Exit**, as `pr create --batch` (§2.4): 0 when every entry is a PR; 7 when some are errors; when all are, the first entry's own code (5 for `PR_NOT_FOUND`).
+- **Size.** The 16 KB bound covers the whole document. Each PR is fitted alone first (§4.1 Truncation). If the sum is over, the budget is water-filled: error entries and PRs within an equal share keep their size, and the rest are fitted to an equal split of what is left. A PR's non-feedback core (about 4 KB) is never cut, so more than 3 or 4 PRs can still exceed 16 KB. The 01 spill then applies, and it exits 0 even when an entry is an error: read the spilled file, or narrow the output with `--fields`.
 
 ---
 
