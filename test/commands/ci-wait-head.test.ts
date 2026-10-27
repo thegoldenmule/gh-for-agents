@@ -146,7 +146,7 @@ test('target parsing, keys and default head policies', () => {
   assert.equal((parseWaitTarget('branch:user@host') as { branch: string }).branch, 'user@host');
   assert.equal(targetKey(parseWaitTarget('o/r#12')), 'pr-12');
   assert.throws(() => parseWaitTarget('branch:'), /not a ci wait target/);
-  assert.throws(() => parseWaitTarget('https://github.com/o/r/actions/runs/5'), /not a ci wait target/);
+  assert.equal(targetKey(parseWaitTarget('https://github.com/o/r/actions/runs/5')), 'run-5');
   assert.equal(headPolicy(parseWaitTarget('12'), undefined), 'restart');
   assert.equal(headPolicy(parseWaitTarget('branch:main'), undefined), 'stay');
   assert.equal(headPolicy(parseWaitTarget('branch:main@9f2c4e1'), 'restart'), 'stay');
