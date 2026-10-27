@@ -4,13 +4,14 @@
 // never spills; larger stdout goes to the artifact dir as stdoutPath.
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { type AnyCommandSpec, defineCommand } from '../core/command.ts';
+import { type AnyCommandSpec, type Context, defineCommand } from '../core/command.ts';
 import { rethrowControlFlow } from '../core/control-flow.ts';
 import { type ErrorDetails, GhxError } from '../core/errors.ts';
 import { byteLength, DEFAULT_MAX_BYTES } from '../core/output.ts';
 import { apiShape } from '../gh/guard.ts';
 import { GhFailure } from '../gh/index.ts';
-import { DEFAULT_HOST, type RepoRef, repoArg } from '../gh/types.ts';
+import type { ResolvedRepo } from '../gh/repo.ts';
+import { DEFAULT_HOST, type RepoRef, repoArg, repoSlug, sameRepo } from '../gh/types.ts';
 import type { PassthroughPlan } from './policy.ts';
 import { firstPositional } from './policy.ts';
 
@@ -129,7 +130,8 @@ export function passthroughSpec(name: readonly string[]): AnyCommandSpec {
         input.inject === 'positional' ||
         (input.inject === 'placeholders' && /\{(owner|repo)\}/.test(apiShape(input.args).endpoint ?? ''));
       const resolved = needsRepo ? await ctx.tryRepo() : undefined;
-      const args = finalArgs(input, resolved?.repo);
+      const planArgs = input.name.join(' ') === 'run list' ? await expandCommit(input.args, ctx, resolved) : input.args;
+      const args = finalArgs({ ...input, args: planArgs }, resolved?.repo);
       const envMax = ctx.env.GHX_MAX_BYTES;
       const maxBytes =
         input.maxBytes ?? (envMax !== undefined && /^\d+$/.test(envMax) ? Number(envMax) : DEFAULT_MAX_BYTES);
@@ -168,6 +170,59 @@ export function passthroughSpec(name: readonly string[]): AnyCommandSpec {
       }
     },
   });
+}
+
+/** A SHA shorter than a full one: what an agent copies from `git log --oneline` or a PR page. */
+const SHORT_SHA = /^[0-9a-f]{4,39}$/i;
+
+/** Where `run list`'s commit filter sits: the token index and the value (`--commit X`, `--commit=X`, `-c X`, `-cX`). */
+function commitFlag(args: readonly string[]): { at: number; value: string; prefix: string } | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i] as string;
+    if (t === '--') return undefined;
+    if ((t === '--commit' || t === '-c') && args[i + 1] !== undefined) {
+      return { at: i + 1, value: args[i + 1] as string, prefix: '' };
+    }
+    const m = /^(--commit=|-c=?)(.+)$/.exec(t);
+    if (m) return { at: i, value: m[2] as string, prefix: m[1] as string };
+  }
+  return undefined;
+}
+
+/**
+ * `gh run list --commit` matches full SHAs only: a short one silently lists nothing. Expand it with the
+ * local checkout when that is the target repo (with a COMMIT_EXPANDED warning, since the envelope has no
+ * notes); otherwise refuse with REF_NOT_FOUND rather than return an empty list that looks like an answer.
+ */
+async function expandCommit(
+  args: readonly string[],
+  ctx: Pick<Context, 'git' | 'warn'>,
+  resolved: ResolvedRepo | undefined,
+): Promise<string[]> {
+  const f = commitFlag(args);
+  if (f === undefined || !SHORT_SHA.test(f.value)) return [...args];
+  const local = resolved?.cwdRepo !== undefined && sameRepo(resolved.cwdRepo, resolved.repo);
+  const full = local ? await ctx.git.revParse(f.value) : undefined;
+  if (full === undefined) {
+    const slug = resolved ? repoSlug(resolved.repo) : '{owner}/{repo}';
+    throw new GhxError(
+      'REF_NOT_FOUND',
+      `--commit ${f.value} is a short SHA; gh run list matches full 40-character SHAs only, so it would list nothing.`,
+      {
+        hint: local
+          ? `${f.value} is not a commit in the local checkout; git fetch, or pass the full SHA (ghx api repos/${slug}/commits/${f.value} returns it as sha).`
+          : `Pass the full SHA: git rev-parse ${f.value} in a checkout of ${slug}, or ghx api repos/${slug}/commits/${f.value} (its sha).`,
+        details: { commit: f.value, localCheckout: local },
+      },
+    );
+  }
+  ctx.warn({
+    code: 'COMMIT_EXPANDED',
+    message: `--commit ${f.value} was expanded to ${full} from the local checkout; gh run list matches full SHAs only.`,
+  });
+  const out = [...args];
+  out[f.at] = `${f.prefix}${full}`;
+  return out;
 }
 
 /** `pr diff` past GitHub's 300-file limit (HTTP 406, G-300): point at a local diff. */

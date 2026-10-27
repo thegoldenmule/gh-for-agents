@@ -146,6 +146,62 @@ describe('-R injection', () => {
   });
 });
 
+describe('run list --commit with a short SHA', () => {
+  const FULL = '2edd19f221aa4bb5cc6dd7ee8ff9900112233445';
+  const checkout = () => gitCheckout('octo/demo', { refs: { '2edd19f221': FULL } });
+
+  test('is expanded from the local checkout, in every spelling, with COMMIT_EXPANDED', async () => {
+    for (const [flag, want] of [
+      [
+        ['--commit', '2edd19f221'],
+        ['--commit', FULL],
+      ],
+      [['--commit=2edd19f221'], [`--commit=${FULL}`]],
+      [
+        ['-c', '2edd19f221'],
+        ['-c', FULL],
+      ],
+      [['-c2edd19f221'], [`-c${FULL}`]],
+    ] as const) {
+      const fake = new FakeGh().on({ prefix: ['run', 'list'] }, ok('[]'));
+      const r = await runInProcess(['run', 'list', ...flag, '-L', '5'], { gh: fake, git: checkout() });
+      assert.equal(r.exitCode, EXIT.OK, r.stdout);
+      assert.deepEqual(fake.calls[0]?.argv, ['run', 'list', ...want, '-L', '5', '-R', 'github.com/octo/demo']);
+      assert.deepEqual(
+        r.json.warnings.map((w: { code: string }) => w.code),
+        ['COMMIT_EXPANDED'],
+      );
+      assert.match(r.json.warnings[0].message, new RegExp(`2edd19f221 was expanded to ${FULL}`));
+    }
+  });
+
+  test('a full SHA, or no --commit, passes through untouched and without a warning', async () => {
+    const fake = new FakeGh().on({ prefix: ['run', 'list'] }, ok('[]'));
+    const r = await runInProcess(['run', 'list', '--commit', FULL], { gh: fake, git: checkout() });
+    assert.deepEqual(fake.calls[0]?.argv, ['run', 'list', '--commit', FULL, '-R', 'github.com/octo/demo']);
+    assert.equal(r.json.warnings, undefined);
+  });
+
+  test('unresolvable is REF_NOT_FOUND (5) with no gh call, not a silent []', async () => {
+    const rows: [argv: string[], hint: RegExp][] = [
+      [['run', 'list', '--commit', 'abcdef1'], /not a commit in the local checkout; git fetch/],
+      [
+        ['run', 'list', '--commit', '2edd19f221', '-R', 'cli/cli'],
+        /git rev-parse 2edd19f221 in a checkout of cli\/cli/,
+      ],
+    ];
+    for (const [argv, hint] of rows) {
+      const fake = new FakeGh();
+      const r = await runInProcess(argv, { gh: fake, git: checkout() });
+      assert.equal(r.exitCode, EXIT.NOT_FOUND, r.stdout);
+      assert.equal(r.json.error.code, 'REF_NOT_FOUND');
+      assert.match(r.json.error.hint, hint);
+      assert.match(r.json.error.hint, /ghx api repos\/.+\/commits\//);
+      assert.deepEqual(fake.calls, []);
+    }
+  });
+});
+
 describe('failures', () => {
   test('a non-zero gh exit is GH_FAILED (7) with the envelope in details', async () => {
     const stderr = 'GraphQL: Could not resolve to an issue or pull request with the number of 9. (repository.issue)\n';
