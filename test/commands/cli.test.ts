@@ -81,6 +81,16 @@ test('ghx schema: index, envelopes, a command, --all, unknown target', async () 
   const bad = await runInProcess(['schema', 'envelope']);
   assert.equal(bad.exitCode, EXIT.USAGE);
   assert.deepEqual(bad.json.error.details.suggestions, ['envelopes']);
+  assert.match(bad.json.error.hint, /^Did you mean: ghx schema envelopes\?$/);
+});
+
+test('ghx schema "pr create": a quoted target is split into its words', async () => {
+  const quoted = await runInProcess(['schema', 'pr create']);
+  assert.equal(quoted.exitCode, EXIT.OK, quoted.stdout);
+  assert.deepEqual(quoted.json, (await runInProcess(['schema', 'pr', 'create'])).json);
+  const typo = await runInProcess(['schema', 'pr crate']);
+  assert.equal(typo.json.error.code, 'USAGE_UNKNOWN_COMMAND');
+  assert.match(typo.json.error.hint, /ghx schema pr create/);
 });
 
 test('unknown command is refused with suggestions', async () => {

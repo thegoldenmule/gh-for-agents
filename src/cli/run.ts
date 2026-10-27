@@ -76,7 +76,8 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<Ru
       );
       out = outputOptions(parsed.globals, deps, 'schema');
       const all = argv.includes('--all');
-      const target = parsed.positionals;
+      // `ghx schema "pr create"` arrives as one token; a target is its words either way.
+      const target = parsed.positionals.flatMap((t) => t.split(/\s+/).filter((w) => w !== ''));
       if (all) {
         const content = JSON.stringify(allSchemas(await deps.registry.list()), null, 2);
         const ref = await out.artifacts.write({
@@ -105,7 +106,10 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<Ru
       const names = [...Object.keys(SCHEMA_TARGETS), ...(await deps.registry.names()).map((n) => n.join(' '))];
       const suggestions = suggest(t, names);
       throw new GhxError('USAGE_UNKNOWN_COMMAND', `'${t}' is not a schema target.`, {
-        hint: suggestions.length > 0 ? `Did you mean: ${suggestions.join(', ')}?` : 'Run ghx schema to list targets.',
+        hint:
+          suggestions.length > 0
+            ? `Did you mean: ${suggestions.map((n) => `ghx schema ${n}`).join(', ')}?`
+            : 'Run ghx schema to list targets.',
         details: { suggestions },
       });
     }
