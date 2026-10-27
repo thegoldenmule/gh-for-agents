@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "repos/viewer-user/gh-for-agents/actions/jobs/122257509597"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: ETag, Link, Location, Retry-After, X-GitHub-OTP, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Used, X-RateLimit-Resource, X-RateLimit-Reset, X-OAuth-Scopes, X-Accepted-OAuth-Scopes, X-Poll-Interval, X-GitHub-Media-Type, X-GitHub-SSO, X-GitHub-Request-Id, Deprecation, Sunset, Warning\r\nCache-Control: private, max-age=60, s-maxage=60\r\nContent-Security-Policy: default-src 'none'\r\nContent-Type: application/json; charset=utf-8\r\nDate: Thu, 22 Oct 2026 12:00:00 GMT\r\nEtag: W/\"297dcecbde65845d27e4ce6d1c3ceb48a30cb2c09d3962c07015dec1dc7a978b\"\r\nReferrer-Policy: origin-when-cross-origin, strict-origin-when-cross-origin\r\nServer: github.com\r\nStrict-Transport-Security: max-age=31536000; includeSubdomains; preload\r\nVary: Accept, Authorization, Cookie, X-GitHub-OTP,Accept-Encoding, Accept, X-Requested-With\r\nX-Accepted-Oauth-Scopes: \r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: deny\r\nX-Github-Api-Version-Selected: 2022-11-28\r\nX-Github-Edge-Region: iad\r\nX-Github-Media-Type: github.v3; format=json\r\nX-Github-Request-Id: 0000:0000:0000000:0000000:00000000\r\nX-Oauth-Client-Id: 178c6fc778ccc68e1d6a\r\nX-Oauth-Scopes: gist, read:org, repo\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4903\r\nX-Ratelimit-Reset: 1793114666\r\nX-Ratelimit-Resource: core\r\nX-Ratelimit-Used: 97\r\nX-Xss-Protection: 0\r\n\r\n{\"id\":122257509597,\"run_id\":40523740737,\"workflow_name\":\"ci\",\"head_branch\":\"main\",\"run_url\":\"https://api.github.com/repos/viewer-user/gh-for-agents/actions/runs/40523740737\",\"run_attempt\":1,\"node_id\":\"CR_kwDOVTwSjs8AAAAcdx2M3Q\",\"head_sha\":\"98c067ef1c03fe7bd3fc229c3669e384145f8e97\",\"url\":\"https://api.github.com/repos/viewer-user/gh-for-agents/actions/jobs/122257509597\",\"html_url\":\"https://github.com/viewer-user/gh-for-agents/actions/runs/40523740737/job/122257509597\",\"status\":\"completed\",\"conclusion\":\"cancelled\",\"created_at\":\"2026-10-27T14:42:43Z\",\"started_at\":\"2026-10-27T14:42:43Z\",\"completed_at\":\"2026-10-27T14:57:45Z\",\"name\":\"pack-test (macos-latest)\",\"steps\":[],\"check_run_url\":\"https://api.github.com/repos/viewer-user/gh-for-agents/check-runs/122257509597\",\"labels\":[\"macos-latest\"],\"runner_id\":0,\"runner_name\":\"\",\"runner_group_id\":0,\"runner_group_name\":\"\"}",
+  "stderr": "",
+  "meta": {
+    "source": "live:public",
+    "recordedAt": "2026-10-27T15:09:42.638Z",
+    "ghVersion": "2.86.0",
+    "note": "thegoldenmule/gh-for-agents run 40523740737 attempt 1: pack-test (macos-latest) cancelled after 15m queued, no runner"
+  }
+}
