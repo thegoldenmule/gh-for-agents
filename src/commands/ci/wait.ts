@@ -51,7 +51,7 @@ const Input = z.strictObject({
 
 export default defineStreamCommand({
   name: ['ci', 'wait'],
-  summary: 'Wait for CI on a PR, branch or workflow run; one JSON summary, exit code = outcome (run in background)',
+  summary: 'Wait for CI on a PR, branch or run; one JSON summary, exit code = outcome (run in background)',
   description: `${PROTOCOL} The summary is never spilled: it is compacted to 16 KB, and --max-bytes and GHX_MAX_BYTES are ignored.`,
   kind: 'read',
   input: Input,
