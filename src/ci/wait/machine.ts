@@ -6,6 +6,7 @@
 // driver hands the CI outcome to its settle hook.
 import { SHARED_VERDICTS } from '../../policy/shared-red.ts';
 import type { Bucket, Check, CiCounts, ExpectedCheck, FailingJob, Outcome, StalledCheck } from '../../schemas/ci.ts';
+import { isInvalidRunCheck, WORKFLOW_INVALID_REASON } from '../invalid-runs.ts';
 import { countChecks, isRed } from '../summary.ts';
 import type { Eta } from './eta.ts';
 import { type CiPhase, type ExpectedDef, expectedPhase, expectedState } from './expected.ts';
@@ -266,6 +267,8 @@ export function redOutcome(
 
 /**
  * The terminal outcome for this tick, or null to keep waiting. Order:
+ * 0. a run GitHub rejected before any job ran (invalid-runs.ts): red at once, in every mode and on every
+ *    re-run, since only a fixed workflow file can change it;
  * 1. first-failure: a red check not yet reported ends the wait early;
  * 2. settled (all complete, expected checks reported or aged out): green, red-shared or red;
  * 3. a stall (from stall.ts): stalled;
@@ -289,6 +292,9 @@ export function decide(
       : null;
   }
   const red = checks.filter(isRed);
+  if (red.some(isInvalidRunCheck)) {
+    return { outcome: 'red', reason: WORKFLOW_INVALID_REASON, settled: true, ...none, failing: red };
+  }
   const phase = openPhase(expectedPhase([...checks], currentExpected(state, checks, o.cfg)), obs.open, checks);
   const settled = phase === 'settled';
   if (o.cfg.until === 'first-failure' && !settled) {

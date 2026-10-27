@@ -1,0 +1,18 @@
+{
+  "argv": [
+    "api",
+    "--include",
+    "-X",
+    "GET",
+    "--hostname",
+    "github.com",
+    "repos/powerhouse-inc/powerhouse/actions/runs?head_sha=9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d&per_page=100"
+  ],
+  "exitCode": 0,
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nETag: W/\"5a1e0c9d3b7f2468\"\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4996\r\nX-Ratelimit-Used: 4\r\nX-Ratelimit-Reset: 1792674000\r\nX-Ratelimit-Resource: core\r\n\r\n{\"total_count\":1,\"workflow_runs\":[{\"id\":37948190914,\"name\":\"CI\",\"head_sha\":\"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d\",\"head_branch\":\"feat/x\",\"event\":\"pull_request\",\"status\":\"completed\",\"conclusion\":\"success\",\"workflow_id\":5,\"path\":\".github/workflows/ci.yml\",\"html_url\":\"https://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914\",\"run_attempt\":1,\"check_suite_id\":37957190914,\"created_at\":\"2026-10-22T10:59:00Z\"}]}",
+  "stderr": "",
+  "meta": {
+    "source": "synthetic",
+    "note": "ci wait smoke: a settled green PR, terminal on the first tick (the head's runs: none rejected)"
+  }
+}

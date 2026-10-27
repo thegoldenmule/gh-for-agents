@@ -1,5 +1,5 @@
-// The ci wait poller (02 §11.6; 03 M4.3, spike §3.1). A tick sends three conditional REST GETs (pulls/N
-// or branches/<name>, check-runs, status) and returns GraphQL-shaped rollup nodes for checks.ts. A 304 is
+// The ci wait poller (02 §11.6; 03 M4.3, spike §3.1). A tick sends four conditional REST GETs (pulls/N
+// or branches/<name>, check-runs, status, runs) and returns GraphQL-shaped rollup nodes for checks.ts. A 304 is
 // free and reuses the cached, schema-stripped body, which persists in the wait state (M4.6).
 // REST check runs carry no workflow run, so new check suites are mapped once via GraphQL. The same query
 // reads which suites the statusCheckRollup holds: the rollup is the one canonical check set (04), and
@@ -7,6 +7,8 @@
 // After two consecutive REST failures, one GraphQL query per tick (with rateLimit{}) takes over.
 // A run target (run:<id>) reads actions/runs/{id} and its latest jobs instead, both conditional: the jobs
 // carry their run, so no suite mapping is needed, and there is no GraphQL fallback (a failed tick retries).
+// The runs read finds what no check-runs listing shows: a failed run with no check run in its suite, one
+// GitHub rejected before any job ran (invalid-runs.ts).
 import { z } from 'zod';
 import { rethrowControlFlow } from '../../core/control-flow.ts';
 import { GhxError } from '../../core/errors.ts';
@@ -15,6 +17,7 @@ import { type Gh, GhFailure } from '../../gh/index.ts';
 import type { RateBudget } from '../../gh/ratelimit.ts';
 import type { RepoRef } from '../../gh/types.ts';
 import type { RollupContext } from '../checks.ts';
+import { invalidFromRun, invalidRunNode, isInvalidRun } from '../invalid-runs.ts';
 import { CI_COMMIT_FIELDS, CI_SNAPSHOT_QUERY, CiCommit, completeRollup } from '../snapshot.ts';
 import { branchPath } from './fetch.ts';
 
@@ -71,7 +74,11 @@ const RunRest = z.object({
   workflow_id: z.number().int(),
   path: z.string().nullish(),
   run_attempt: z.number().int().nullish(),
+  html_url: z.string().nullish(),
+  created_at: z.string().nullish(),
+  check_suite_id: z.number().int().nullish(),
 });
+const RunsRest = z.object({ total_count: z.number().int(), workflow_runs: z.array(RunRest) });
 
 const RunJobRest = z.object({
   id: z.number().int(),
@@ -175,6 +182,8 @@ const FallbackPrData = z.object({
 
 const LooseCommit = z.object({
   oid: z.string(),
+  /** Kept for CiCommit.parse, which checks it. */
+  checkSuites: z.unknown().optional(),
   statusCheckRollup: z
     .object({
       contexts: z.object({
@@ -501,12 +510,16 @@ export function createPoller(o: PollerOptions): Poller {
       if (more.jobs.length === 0) break;
       jobs = [...jobs, ...more.jobs];
     }
+    const nodes = jobs.map((j) => runJobNode(j, run));
+    if (isInvalidRun(run.status, run.conclusion, Math.max(first.total_count, jobs.length))) {
+      nodes.push(invalidRunNode(invalidFromRun(run, repo)));
+    }
     return {
       pull: null,
       run: { id: run.id, status: run.status, attempt: run.run_attempt ?? 1, headBranch: run.head_branch ?? null },
       headSha: run.head_sha,
       sha: run.head_sha,
-      nodes: jobs.map((j) => runJobNode(j, run)),
+      nodes,
       source: 'rest',
       notModified: !counter.changed,
       calls: counter.calls,
@@ -568,12 +581,19 @@ export function createPoller(o: PollerOptions): Poller {
       counter,
     );
     const suiteIds = [...new Set(runs.flatMap((r) => (r.check_suite ? [r.check_suite.id] : [])))];
+    const workflowRuns = await conditional(
+      { path: 'repos/{owner}/{repo}/actions/runs', repo, fields: { head_sha: target, per_page: 100 } },
+      RunsRest,
+      counter,
+    );
     await mapSuites(target, suiteIds, counter);
     const nodes: RollupContext[] = [
       ...runs
         .filter((r) => !(r.check_suite && outside(r.check_suite.id)))
         .map((r) => checkRunNode(r, st.suites, required)),
       ...status.statuses.map((s) => statusNode(s, required)),
+      // Only a complete check-run listing proves a suite has none.
+      ...(runs.length < first.total_count ? [] : rejectedRuns(workflowRuns.workflow_runs, new Set(suiteIds))),
     ];
     return {
       pull,
@@ -585,6 +605,14 @@ export function createPoller(o: PollerOptions): Poller {
       calls: counter.calls,
       budget: gh.rateBudget('core'),
     };
+  }
+
+  /** Failed runs whose suite has no check run: GitHub rejected the workflow before any job ran. */
+  function rejectedRuns(rows: readonly z.infer<typeof RunRest>[], suitesWithRuns: ReadonlySet<number>) {
+    return rows
+      .filter((r) => r.check_suite_id != null && !suitesWithRuns.has(r.check_suite_id))
+      .filter((r) => isInvalidRun(r.status, r.conclusion, 0))
+      .map((r) => invalidRunNode(invalidFromRun(r, repo)));
   }
 
   async function graphqlTick(sha: string | null, required: ReadonlySet<string>): Promise<TickResult> {

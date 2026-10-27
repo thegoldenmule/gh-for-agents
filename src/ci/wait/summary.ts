@@ -78,6 +78,8 @@ export interface NextInput {
   settled: boolean;
   flaky: boolean;
   identical: string;
+  /** Fix-the-file lines for runs GitHub rejected before any job ran (invalidRunNext); they replace a red's `next`. */
+  workflowInvalid?: readonly string[];
 }
 
 export function nextFor(n: NextInput): string[] {
@@ -90,6 +92,8 @@ export function nextFor(n: NextInput): string[] {
     case 'red-shared':
       return [...merge, ...rerunFlaky];
     case 'red':
+      // Neither a re-wait nor a rerun changes a rejected workflow file.
+      if (n.workflowInvalid && n.workflowInvalid.length > 0) return [...n.workflowInvalid];
       // An early red: the identical command continues to the next failure or to settle.
       return [...rerunFlaky, ...(n.settled ? [] : [n.identical])];
     case 'stalled':

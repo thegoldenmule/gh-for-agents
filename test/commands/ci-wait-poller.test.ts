@@ -37,7 +37,7 @@ function setup(jobs: SimJob[], initial?: PollerState) {
 const lint: SimJob = { id: 11, runId: 500, name: 'lint', status: 'completed', conclusion: 'success' };
 const test1: SimJob = { id: 12, runId: 500, name: 'test', status: 'in_progress', startedAt: 0 };
 
-test('first tick: three REST reads plus one suite lookup; checks carry their workflow and run', async () => {
+test('first tick: four REST reads plus one suite lookup; checks carry their workflow and run', async () => {
   const { sim, poller } = setup([lint, test1]);
   const r = await poller.tick({ sha: null });
   assert.equal(r.source, 'rest');
@@ -45,7 +45,7 @@ test('first tick: three REST reads plus one suite lookup; checks carry their wor
   assert.equal(r.sha, H);
   assert.equal(r.pull?.state, 'OPEN');
   assert.equal(r.notModified, false);
-  assert.equal(r.calls, 4);
+  assert.equal(r.calls, 5);
   assert.equal(sim.callsTo('graphql').length, 1, 'the new suite is mapped once via GraphQL');
   const { checks, runs } = normaliseRollup(r.nodes, { repo, headSha: H });
   assert.deepEqual(
@@ -66,11 +66,11 @@ test('an unchanged tick is all 304s: free, cached bodies reused, no second suite
   for (let i = 0; i < 3; i++) {
     const r = await poller.tick({ sha: H });
     assert.equal(r.notModified, true);
-    assert.equal(r.calls, 3);
+    assert.equal(r.calls, 4);
     assert.equal(r.nodes.length, 2);
   }
   const later = sim.calls.slice(before);
-  assert.equal(later.length, 9);
+  assert.equal(later.length, 12);
   assert.ok(
     later.every((c) => c.status === 304 && header(c.argv, 'if-none-match')),
     'every read sent If-None-Match and got 304',

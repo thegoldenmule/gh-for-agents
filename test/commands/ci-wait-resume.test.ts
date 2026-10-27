@@ -16,9 +16,9 @@ const H2 = sha('b');
 const MIN = 60_000;
 
 const path = (c: SimCall) => c.argv.find((a) => a.startsWith('repos/'))?.split('?')[0] ?? c.argv[1] ?? '';
-/** Reads that belong to setup or diagnosis, never to a steady-state poll. */
+/** Reads that belong to setup or diagnosis, never to a steady-state poll (which lists the head's runs). */
 const SETUP =
-  /\/rules\/branches\/|\/branches\/main$|\/pulls\/7\/commits$|\/pulls$|\/actions\/workflows\/|\/actions\/jobs\/|\/actions\/runs|\/contents\/\.github\/workflows\//;
+  /\/rules\/branches\/|\/branches\/main$|\/pulls\/7\/commits$|\/pulls$|\/actions\/workflows\/|\/actions\/jobs\/|\/actions\/runs\/|\/contents\/\.github\/workflows\//;
 
 function world(extra: SimJob[] = []) {
   const clock = new FakeClock();
@@ -88,6 +88,7 @@ test('a known terminal state returns at once: one 304 tick, no other poll, no sl
       ['repos/o/r/pulls/7', 304],
       [`repos/o/r/commits/${H}/check-runs`, 304],
       [`repos/o/r/commits/${H}/status`, 304],
+      ['repos/o/r/actions/runs', 304],
     ],
   );
   assert.equal(sim.clock.pendingTimers(), 0);

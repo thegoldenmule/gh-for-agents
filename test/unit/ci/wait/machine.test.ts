@@ -232,3 +232,35 @@ test('an open source (a run still going) never settles, waits with no checks, an
   assert.equal(d?.outcome, 'red');
   assert.equal(d?.settled, false);
 });
+
+test('a rejected workflow run (an Actions check with a run and no job) is red at once, in every mode, every time', () => {
+  const rejected = failed('.github/workflows/ci.yml', 0, { jobId: null, runId: 40518894617 });
+  const running = check('unit', { bucket: 'pending', status: 'in_progress', jobId: 5, runId: 2 });
+  for (const until of ['first-failure', 'settled', 'mergeable'] as const) {
+    const st = observe(
+      fresh(),
+      { checks: [rejected, running], ignored: 0, eta: null, now: T0 + SEC },
+      cfg(until),
+    ).state;
+    const d = decide(
+      st,
+      { checks: [rejected, running], now: T0 + SEC },
+      { cfg: cfg(until), diagnosis: noDiag, stalled: [] },
+    );
+    assert.equal(d?.outcome, 'red', until);
+    assert.equal(d?.reason, 'workflow-invalid');
+    assert.equal(d?.settled, true);
+    assert.equal(d?.gate, false);
+    // Already reported: a re-run returns it again instead of waiting on.
+    const again = decide(
+      markReported(st, [rejected]),
+      { checks: [rejected, running], now: T0 + SEC },
+      {
+        cfg: cfg(until),
+        diagnosis: noDiag,
+        stalled: [],
+      },
+    );
+    assert.equal(again?.reason, 'workflow-invalid');
+  }
+});

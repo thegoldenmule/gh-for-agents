@@ -60,6 +60,16 @@ export interface SimRun {
   headBranch?: string;
 }
 
+/** A run GitHub rejected before any job ran (an invalid workflow file): failed, no job, no check run. */
+export interface SimRejected {
+  id: number;
+  /** Default `.github/workflows/bad.yml`; GitHub names such a run after its file. */
+  path?: string;
+  workflowId?: number;
+  /** Default 'failure'. */
+  conclusion?: string;
+}
+
 export interface SimState {
   /** PR number `o.number` (default 7). */
   pr: SimPr;
@@ -71,6 +81,8 @@ export interface SimState {
   statuses?: Record<string, SimStatus[]>;
   /** actions/runs/{id} overrides (a run still going with every listed job done, a rerun's attempt). */
   runs?: Record<number, SimRun>;
+  /** Rejected runs per commit. */
+  rejected?: Record<string, SimRejected[]>;
 }
 
 export interface SimOptions {
@@ -396,14 +408,26 @@ export class GitHubSim {
         })),
       });
     }
-    if (path === `${repo}/actions/runs`) return this.#ok({ total_count: 0, workflow_runs: [] });
+    if (path === `${repo}/actions/runs`) {
+      const head = q.head_sha;
+      if (head === undefined) return this.#ok({ total_count: 0, workflow_runs: [] });
+      const byRun = new Map((st.checks[head] ?? []).map((j) => [j.runId, j]));
+      const rows = [
+        ...[...byRun.keys()].map((id) => ({
+          ...this.runRow(id, st),
+          check_suite_id: suiteOf(byRun.get(id) as SimJob),
+        })),
+        ...(st.rejected?.[head] ?? []).map((r) => this.rejectedRow(r, head)),
+      ];
+      return this.#conditional(argv, { total_count: rows.length, workflow_runs: rows });
+    }
     m = new RegExp(`^${repo}/actions/runs/(\\d+)/jobs$`).exec(path);
     if (m) {
       const runId = Number(m[1]);
       const rows = this.#allJobs()
         .filter((x) => x.job.runId === runId)
         .map((x) => this.jobRow(x.job, x.sha));
-      if (rows.length === 0 && !st.runs?.[runId]) return this.#notFound();
+      if (rows.length === 0 && !st.runs?.[runId] && !this.#rejected(runId)) return this.#notFound();
       return this.#conditional(argv, { total_count: rows.length, jobs: rows });
     }
     m = new RegExp(`^${repo}/actions/jobs/(\\d+)/logs$`).exec(path);
@@ -426,29 +450,83 @@ export class GitHubSim {
     m = new RegExp(`^${repo}/actions/runs/(\\d+)$`).exec(path);
     if (m) {
       const runId = Number(m[1]);
-      const jobs = this.#allJobs().filter((x) => x.job.runId === runId);
-      const hit = jobs[0];
-      const set = st.runs?.[runId];
-      if (!hit && !set) return this.#notFound();
-      const wf = hit?.job.workflowId ?? 5;
-      const done = jobs.every((x) => x.job.status === 'completed');
-      const status = set?.status ?? (done ? 'completed' : 'in_progress');
-      const failed = jobs.some((x) => x.job.status === 'completed' && (x.job.conclusion ?? 'success') !== 'success');
-      return this.#conditional(argv, {
-        id: runId,
-        name: hit?.job.workflow ?? 'CI',
-        head_sha: hit?.sha ?? sha('e'),
-        head_branch: set?.headBranch ?? 'main',
-        event: 'pull_request',
-        status,
-        conclusion: status === 'completed' ? (set?.conclusion ?? (failed ? 'failure' : 'success')) : null,
-        workflow_id: wf,
-        path: `.github/workflows/w${wf}.yml`,
-        run_attempt: set?.attempt ?? 1,
-        created_at: this.iso(0),
-      });
+      const rejected = this.#rejected(runId);
+      if (rejected) return this.#conditional(argv, this.rejectedRow(rejected.run, rejected.sha));
+      const row = this.runRow(runId, st);
+      return row ? this.#conditional(argv, row) : this.#notFound();
     }
     return this.#notFound();
+  }
+
+  /** actions/runs/{id} for a run with jobs (or an explicit SimRun), derived from its jobs. */
+  runRow(runId: number, st: SimState): Record<string, unknown> | undefined {
+    const jobs = this.#allJobs().filter((x) => x.job.runId === runId);
+    const hit = jobs[0];
+    const set = st.runs?.[runId];
+    if (!hit && !set) return undefined;
+    const wf = hit?.job.workflowId ?? 5;
+    const done = jobs.every((x) => x.job.status === 'completed');
+    const status = set?.status ?? (done ? 'completed' : 'in_progress');
+    const failed = jobs.some((x) => x.job.status === 'completed' && (x.job.conclusion ?? 'success') !== 'success');
+    return {
+      id: runId,
+      name: hit?.job.workflow ?? 'CI',
+      head_sha: hit?.sha ?? sha('e'),
+      head_branch: set?.headBranch ?? 'main',
+      event: 'pull_request',
+      status,
+      conclusion: status === 'completed' ? (set?.conclusion ?? (failed ? 'failure' : 'success')) : null,
+      workflow_id: wf,
+      path: `.github/workflows/w${wf}.yml`,
+      run_attempt: set?.attempt ?? 1,
+      created_at: this.iso(0),
+    };
+  }
+
+  /** A rejected run's row: completed and failed at creation, named after its file. */
+  rejectedRow(r: SimRejected, headSha: string): Record<string, unknown> {
+    const path = r.path ?? '.github/workflows/bad.yml';
+    return {
+      id: r.id,
+      name: path,
+      head_sha: headSha,
+      head_branch: 'main',
+      event: 'push',
+      status: 'completed',
+      conclusion: r.conclusion ?? 'failure',
+      workflow_id: r.workflowId ?? 9,
+      path,
+      html_url: `https://github.com/${this.slug}/actions/runs/${r.id}`,
+      run_attempt: 1,
+      check_suite_id: 8_000_000 + r.id,
+      created_at: this.iso(0),
+    };
+  }
+
+  /** A rejected run as a GraphQL check suite: completed, failed, no check run. */
+  rejectedSuite(r: SimRejected): Record<string, unknown> {
+    const path = r.path ?? '.github/workflows/bad.yml';
+    return {
+      status: 'COMPLETED',
+      conclusion: (r.conclusion ?? 'failure').toUpperCase(),
+      checkRuns: { totalCount: 0 },
+      workflowRun: {
+        databaseId: r.id,
+        url: `https://github.com/${this.slug}/actions/runs/${r.id}`,
+        createdAt: this.iso(0),
+        event: 'push',
+        file: { path },
+        workflow: { databaseId: r.workflowId ?? 9, name: 'bad' },
+      },
+    };
+  }
+
+  #rejected(runId: number): { run: SimRejected; sha: string } | undefined {
+    for (const [s, runs] of Object.entries(this.stateAt().rejected ?? {})) {
+      const run = runs.find((r) => r.id === runId);
+      if (run) return { run, sha: s };
+    }
+    return undefined;
   }
 
   #graphql(argv: string[], st: SimState): ProcResultLike {
@@ -550,6 +628,7 @@ export class GitHubSim {
                   commit: {
                     oid: head,
                     statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false, endCursor: null }, nodes } },
+                    checkSuites: { nodes: (st.rejected?.[head] ?? []).map((r) => this.rejectedSuite(r)) },
                   },
                 },
               ],

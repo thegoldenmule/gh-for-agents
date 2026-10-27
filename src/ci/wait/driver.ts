@@ -39,6 +39,7 @@ import {
   isDiagnosable,
 } from '../diagnose.ts';
 import { type ActionsJob, listRunJobs } from '../github.ts';
+import { invalidRunNext, invalidRunWarning, isInvalidRunCheck, WORKFLOW_INVALID_REASON } from '../invalid-runs.ts';
 import { isRed, summariseCi } from '../summary.ts';
 import { computeEta, type EtaEstimate } from './eta.ts';
 import { buildExpectedSet, configExpected, previousHeadCandidates, requiredChecks } from './expected.ts';
@@ -351,6 +352,7 @@ export async function* runWait(
     // Nothing observed yet (bound, but the first check read has not completed): not "no checks".
     const ci = r.last === null ? notObserved() : { state: s.state, phase: s.phase, observed: true };
     const red = obs.checks.filter(isRed);
+    const rejected = reason === WORKFLOW_INVALID_REASON ? red.filter(isInvalidRunCheck) : [];
     const diags = red.flatMap((c) => {
       const j = c.jobId === null ? undefined : st.diagnoses[String(c.jobId)];
       return j ? [j] : [];
@@ -387,6 +389,7 @@ export async function* runWait(
         settled: d?.settled ?? false,
         flaky: flaky.length > 0,
         identical: identical(),
+        workflowInvalid: invalidRunNext(rejected),
       }),
     };
   };
@@ -421,6 +424,9 @@ export async function* runWait(
   ): void => {
     const st = r.st as WaitState;
     if ((outcome === 'red' || outcome === 'red-shared') && d) st.machine = markReported(st.machine, d.failing);
+    if (reason === WORKFLOW_INVALID_REASON) {
+      for (const c of (d?.failing ?? []).filter(isInvalidRunCheck)) warn(invalidRunWarning(c));
+    }
     const s = summarise(r, outcome, reason, d);
     r.summary = gate ? { ...s, merge: gate.merge, next: gate.next ?? s.next } : s;
     st.terminal = {
@@ -747,7 +753,8 @@ export async function* runWait(
 
     const norm = normaliseRollup(res.nodes, { repo: r.repo, headSha: st.boundSha, ignore: r.ci.ignore });
     Object.assign(r.runs, norm.runs);
-    const checks = norm.checks.filter(consider);
+    // A rejected workflow run counts whatever --check selects: the checks it would have run never come.
+    const checks = norm.checks.filter((c) => consider(c) || isInvalidRunCheck(c));
     const ignored = norm.ignored;
     const now = clock.now();
 

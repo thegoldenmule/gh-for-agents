@@ -30,7 +30,9 @@ test('killed mid-wait, re-run, then re-run again after the terminal state', asyn
   await clock.runUntil(run1.isDone, { maxMs: 10_000 });
   assert.equal((await run1.p).json.outcome, 'interrupted');
   const setupCalls = () =>
-    sim.calls.filter((c) => /\/pulls\/7\/commits|\/rules\/|\/actions\//.test(c.argv.join(' '))).length;
+    sim.calls.filter((c) =>
+      /\/pulls\/7\/commits|\/rules\/|\/actions\/(?!runs\?head_sha=[0-9a-f]{40}&per_page=100\b)/.test(c.argv.join(' ')),
+    ).length;
   const before = setupCalls();
 
   const r2 = await wait(sim, ['o/r#7', '--until', 'settled'], { artifacts: run1.artifacts });
@@ -42,6 +44,6 @@ test('killed mid-wait, re-run, then re-run again after the terminal state', asyn
   const r3 = await wait(sim, ['o/r#7', '--until', 'settled'], { artifacts: run1.artifacts });
   assert.equal(r3.exitCode, EXIT.CI_RED);
   const polls = sim.calls.slice(n).filter((c) => !c.argv.join(' ').includes('/contents/'));
-  assert.equal(polls.length, 3);
+  assert.equal(polls.length, 4, "one tick: the PR, check runs, status and the head's runs");
   assert.ok(polls.every((c) => c.status === 304));
 });

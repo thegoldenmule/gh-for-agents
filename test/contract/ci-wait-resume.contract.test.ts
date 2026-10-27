@@ -18,8 +18,11 @@ import { EXIT } from './exit-table.ts';
 
 const H = sha('a');
 const ARGV = ['o/r#7', '--until', 'settled'];
-/** Calls a resumed run must not repeat: PR commits (baseline), rules/branches (expected set), Actions. */
-const SETUP = /\/pulls\/7\/commits|\/rules\/|\/branches\/|\/actions\//;
+/**
+ * Calls a resumed run must not repeat: PR commits (baseline), rules/branches (expected set), Actions (but
+ * not the head's runs, which every poll lists).
+ */
+const SETUP = /\/pulls\/7\/commits|\/rules\/|\/branches\/|\/actions\/(?!runs\?head_sha=[0-9a-f]{40}&per_page=100\b)/;
 
 const state = (): SimState => ({
   pr: { state: 'open', head: H },
