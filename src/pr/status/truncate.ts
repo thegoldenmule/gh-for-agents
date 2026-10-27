@@ -2,10 +2,11 @@
 // first, then, while the document is over the budget, resolved-finding bodies and the oldest comment bodies,
 // then whole old or resolved comment entries, bots and settled findings, are dropped and counted in
 // feedback.counts.omitted, with a FEEDBACK_OMITTED warning pointing to `pr feedback`. The 01 spill stays
-// the safety net only for a document whose non-feedback parts alone are too large.
+// the safety net only for a document whose non-feedback parts alone are too large. Several PRs (fitStatuses)
+// share one budget: PRs that fit their share keep it all, and the rest split what is left.
 import { byteLength, DEFAULT_MAX_BYTES } from '../../core/output.ts';
 import type { Comment, Feedback, Finding } from '../../feedback/schemas.ts';
-import type { PrStatusOutput } from './schema.ts';
+import type { PrStatusEntry, PrStatusOutput } from './schema.ts';
 
 export const STATUS_CAPS = { description: 1000, comment: 500, finding: 600, summary: 400 } as const;
 
@@ -122,5 +123,35 @@ export function fitStatus(doc: PrStatusOutput, maxBytes = DEFAULT_MAX_BYTES): Pr
     setHint();
   }
   if (fb.counts.omitted === doc.feedback.counts.omitted) out.warnings = out.warnings.filter((w) => w !== hint);
+  return out;
+}
+
+/**
+ * `{results}` for several PRs within `maxBytes` (02 §4.4): each PR is fitted alone first; over the budget,
+ * the budget is water-filled. Error entries and PRs already within an equal share keep their size, and the
+ * others are re-fitted to an equal split of what is left, until every share holds. A PR's non-feedback core
+ * is never cut, so ten large PRs can still exceed the budget: the 01 spill is the safety net there too.
+ */
+export function fitStatuses(entries: readonly PrStatusEntry[], maxBytes = DEFAULT_MAX_BYTES): PrStatusEntry[] {
+  const isPr = (e: PrStatusEntry): e is PrStatusOutput => !('error' in e);
+  const out = entries.map((e) => (isPr(e) ? fitStatus(e, maxBytes) : e));
+  if (size({ results: out }) <= maxBytes) return out;
+  // The wrapper and the commas between entries.
+  let budget = maxBytes - size({ results: [] }) - Math.max(0, out.length - 1);
+  let open: number[] = [];
+  out.forEach((e, i) => {
+    if (isPr(e)) open.push(i);
+    else budget -= size(e);
+  });
+  while (open.length > 0) {
+    const share = Math.max(0, Math.floor(budget / open.length));
+    const within = open.filter((i) => size(out[i]) <= share);
+    if (within.length === 0) {
+      for (const i of open) out[i] = fitStatus(entries[i] as PrStatusOutput, share);
+      break;
+    }
+    for (const i of within) budget -= size(out[i]);
+    open = open.filter((i) => !within.includes(i));
+  }
   return out;
 }

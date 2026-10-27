@@ -54,6 +54,37 @@ export const PrStatusOutput = z.object({
   fetchedAt: Iso,
 });
 
+/** Most selectors one `pr status` call takes (as ci wait's targets). */
+export const STATUS_MAX_PRS = 10;
+
+/**
+ * A selector that failed in a several-PR call: the 02 §1.3 error envelope plus what it was asked for.
+ * `ref` is owner/repo#N once the repo resolved, else null.
+ */
+export const PrStatusErrorEntry = z.object({
+  selector: z.string(),
+  ref: PrRef.nullable(),
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+    hint: z.string().nullable(),
+    details: z.record(z.string(), z.unknown()).nullable(),
+  }),
+});
+
+export const PrStatusEntry = z.union([PrStatusOutput, PrStatusErrorEntry]);
+
+/**
+ * One schema for both modes (a spec has one output object, as PrCreateCommandOutput): one selector prints
+ * PrStatusOutput itself; 2+ print {results}, one PrStatusOutput or PrStatusErrorEntry per selector, in order.
+ */
+export const PrStatusCommandOutput = PrStatusOutput.partial().extend({
+  results: z
+    .array(PrStatusEntry)
+    .optional()
+    .describe('2+ selectors: one entry per selector, in argument order; a failed one is {selector, ref, error}'),
+});
+
 export const PrFeedbackOutput = z.object({
   ref: PrRef,
   headSha: Sha,
@@ -67,4 +98,7 @@ export const PrFeedbackOutput = z.object({
 
 export type PrMeta = z.infer<typeof PrMeta>;
 export type PrStatusOutput = z.infer<typeof PrStatusOutput>;
+export type PrStatusErrorEntry = z.infer<typeof PrStatusErrorEntry>;
+export type PrStatusEntry = z.infer<typeof PrStatusEntry>;
+export type PrStatusCommandOutput = z.infer<typeof PrStatusCommandOutput>;
 export type PrFeedbackOutput = z.infer<typeof PrFeedbackOutput>;
