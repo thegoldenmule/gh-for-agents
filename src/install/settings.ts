@@ -26,7 +26,7 @@ export interface SettingsEdit {
   deny: boolean;
   /** The hook command to register, or null to leave hooks alone. */
   hookCommand: string | null;
-  /** 'deny' sets env.GHX_HOOK_MODE; 'ask' (the hook's default) removes it; undefined leaves env alone. */
+  /** 'ask' sets env.GHX_HOOK_MODE; 'deny' (the hook's default) removes it; undefined leaves env alone. */
   hookMode?: 'ask' | 'deny' | undefined;
 }
 
@@ -127,10 +127,10 @@ export function installSettings(input: Json, edit: SettingsEdit): Json {
     groups.splice(at ?? groups.length, 0, ghxHookEntry(edit.hookCommand));
     hooks.PreToolUse = groups;
   }
-  if (edit.hookMode === 'deny') {
+  if (edit.hookMode === 'ask') {
     const env = child(s, 'env', () => ({})) as Json;
-    env.GHX_HOOK_MODE = 'deny';
-  } else if (edit.hookMode === 'ask' && isObj(s.env) && HOOK_MODE_VALUES.has(String(s.env.GHX_HOOK_MODE))) {
+    env.GHX_HOOK_MODE = 'ask';
+  } else if (edit.hookMode === 'deny' && isObj(s.env) && HOOK_MODE_VALUES.has(String(s.env.GHX_HOOK_MODE))) {
     delete s.env.GHX_HOOK_MODE;
     if (Object.keys(s.env).length === 0) delete s.env;
   }

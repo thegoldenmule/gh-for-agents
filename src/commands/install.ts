@@ -80,7 +80,7 @@ export default defineCommand({
     hookMode: z
       .enum(['ask', 'deny'])
       .optional()
-      .describe('deny sets env.GHX_HOOK_MODE=deny; ask removes it (the default mode)'),
+      .describe('ask sets env.GHX_HOOK_MODE=ask; deny removes it (the default mode)'),
     global: z
       .boolean()
       .default(true)

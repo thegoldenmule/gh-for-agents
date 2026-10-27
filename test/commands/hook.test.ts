@@ -110,36 +110,36 @@ test('GHX_HOOK_MODE=off: no output, not even the rewrite', async () => {
 
 // --- CI polling loops ---
 
-test('monitor-gh-checks-loop.json: ask, naming ghx ci wait 3266 with run_in_background', async () => {
+test('monitor-gh-checks-loop.json: deny, naming ghx ci wait 3266 with run_in_background', async () => {
   const { out } = await hook(fixture('monitor-gh-checks-loop.json'));
-  assert.equal(out?.hookSpecificOutput.permissionDecision, 'ask');
+  assert.equal(out?.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(reason(out), /`ghx ci wait 3266`/);
   assert.match(reason(out), /run_in_background: true/);
   assert.equal(out?.hookSpecificOutput.updatedInput, undefined);
 });
 
-test('monitor-run-watch.json: ask, naming ghx ci wait with run_in_background', async () => {
+test('monitor-run-watch.json: deny, naming ghx ci wait with run_in_background', async () => {
   const { out } = await hook(fixture('monitor-run-watch.json'));
-  assert.equal(out?.hookSpecificOutput.permissionDecision, 'ask');
+  assert.equal(out?.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(reason(out), /ghx ci wait <pr>/);
   assert.match(reason(out), /run_in_background/);
 });
 
-test('bash-until-gh-run-list.json: ask; no PR in the command, so <pr>', async () => {
+test('bash-until-gh-run-list.json: deny; no PR in the command, so <pr>', async () => {
   const { out } = await hook(fixture('bash-until-gh-run-list.json'));
-  assert.equal(out?.hookSpecificOutput.permissionDecision, 'ask');
+  assert.equal(out?.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(reason(out), /`ghx ci wait <pr>` with the Bash tool and run_in_background: true/);
 });
 
-test('deny mode denies with the same reason', async () => {
-  const { out } = await hook(fixture('monitor-gh-checks-loop.json'), { GHX_HOOK_MODE: 'deny' });
-  assert.equal(out?.hookSpecificOutput.permissionDecision, 'deny');
+test('ask mode asks with the same reason', async () => {
+  const { out } = await hook(fixture('monitor-gh-checks-loop.json'), { GHX_HOOK_MODE: 'ask' });
+  assert.equal(out?.hookSpecificOutput.permissionDecision, 'ask');
   assert.match(reason(out), /ghx ci wait 3266/);
 });
 
-test('an unrecognised GHX_HOOK_MODE behaves as ask', async () => {
+test('an unrecognised GHX_HOOK_MODE behaves as deny, the default', async () => {
   const { out } = await hook(fixture('monitor-gh-checks-loop.json'), { GHX_HOOK_MODE: 'loud' });
-  assert.equal(out?.hookSpecificOutput.permissionDecision, 'ask');
+  assert.equal(out?.hookSpecificOutput.permissionDecision, 'deny');
 });
 
 test('loops and sleeps around gh CI reads, in Bash or Monitor, name ghx ci wait', () => {
@@ -193,9 +193,9 @@ test('monitor-unrelated.json and a single gh run view in Monitor get no ci wait 
 
 // --- wrapped gh commands ---
 
-test('bash-gh-pr-view.json: ask, quoting the exact replacement', async () => {
+test('bash-gh-pr-view.json: deny, quoting the exact replacement', async () => {
   const { out } = await hook(fixture('bash-gh-pr-view.json'));
-  assert.equal(out?.hookSpecificOutput.permissionDecision, 'ask');
+  assert.equal(out?.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(reason(out), /Use: ghx pr status 3266/);
 });
 
@@ -343,7 +343,7 @@ const at = (cwd: string | undefined, command: string, extra: Record<string, unkn
 
 test('a configured repo enforces: wrapped writes denied, reads suggested', async () => {
   assert.equal((await raw(at(CONFIGURED, 'gh pr merge 12')))?.hookSpecificOutput.permissionDecision, 'deny');
-  assert.equal((await raw(at(CONFIGURED, 'gh pr view 12')))?.hookSpecificOutput.permissionDecision, 'ask');
+  assert.equal((await raw(at(CONFIGURED, 'gh pr view 12')))?.hookSpecificOutput.permissionDecision, 'deny');
 });
 
 test('an unconfigured repo is silent for gh reads and writes, in every mode', async () => {
@@ -369,7 +369,7 @@ test('a worktree (.git file) and a subdirectory cwd find the configured root', a
   );
   assert.equal(
     (await raw(at(join(CONFIGURED, 'src', 'deep'), 'gh pr view 1')))?.hookSpecificOutput.permissionDecision,
-    'ask',
+    'deny',
   );
   // The nearest .git wins: an unconfigured checkout nested in a configured one is silent.
   const nested = join(CONFIGURED, 'src', 'vendored');

@@ -64,13 +64,13 @@ test('a re-install replaces an older ghx hook in place, including the bare manua
   assert.equal(after.permissions, undefined, '--no-deny adds no permissions');
 });
 
-test('hook mode: deny sets env.GHX_HOOK_MODE, ask removes it, omitted leaves env alone', () => {
-  const withDeny = installSettings({ env: { A: '1' } }, { deny: false, hookCommand: null, hookMode: 'deny' });
-  assert.deepEqual(withDeny.env, { A: '1', GHX_HOOK_MODE: 'deny' });
-  assert.deepEqual(installSettings(withDeny, { deny: false, hookCommand: null, hookMode: 'ask' }).env, { A: '1' });
-  assert.deepEqual(installSettings(withDeny, { deny: false, hookCommand: null }).env, withDeny.env);
+test('hook mode: ask sets env.GHX_HOOK_MODE, deny removes it, omitted leaves env alone', () => {
+  const withAsk = installSettings({ env: { A: '1' } }, { deny: false, hookCommand: null, hookMode: 'ask' });
+  assert.deepEqual(withAsk.env, { A: '1', GHX_HOOK_MODE: 'ask' });
+  assert.deepEqual(installSettings(withAsk, { deny: false, hookCommand: null, hookMode: 'deny' }).env, { A: '1' });
+  assert.deepEqual(installSettings(withAsk, { deny: false, hookCommand: null }).env, withAsk.env);
   assert.equal(
-    installSettings({ env: { GHX_HOOK_MODE: 'deny' } }, { deny: false, hookCommand: null, hookMode: 'ask' }).env,
+    installSettings({ env: { GHX_HOOK_MODE: 'ask' } }, { deny: false, hookCommand: null, hookMode: 'deny' }).env,
     undefined,
   );
 });
@@ -82,12 +82,12 @@ test('recordAdded names only what ghx added; uninstallSettings takes exactly tha
     env: { X: '1', GHX_HOOK_MODE: 'off' },
   };
   const none = { deny: [], containers: [], hookMode: null };
-  const installed = installSettings(orig, { deny: true, hookCommand: CMD, hookMode: 'deny' });
+  const installed = installSettings(orig, { deny: true, hookCommand: CMD, hookMode: 'ask' });
   const added = recordAdded(none, orig, installed);
   assert.ok(!added.deny.includes('Bash(gh pr merge:*)'), "the user's own identical rule is not ghx's");
   assert.equal(added.deny.length, GHX_DENY_RULES.length - 1);
   assert.deepEqual(added.containers, [], 'every container was already there');
-  assert.deepEqual(added.hookMode, { set: 'deny', prev: 'off' });
+  assert.deepEqual(added.hookMode, { set: 'ask', prev: 'off' });
   assert.deepEqual(uninstallSettings(installed, added), orig, 'the empty PreToolUse and the user rule stay');
   // A second install folds into the first record; a fresh file owns every container it got.
   assert.deepEqual(recordAdded(added, installed, installed), added);

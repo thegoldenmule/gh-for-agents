@@ -34,7 +34,7 @@ export const REPLACES_TABLE: readonly ReplacesEntry[] = REPLACES;
 
 export function hookMode(env: Readonly<Record<string, string | undefined>>): HookMode {
   const v = env.GHX_HOOK_MODE?.trim().toLowerCase();
-  return v === 'off' || v === 'deny' ? v : 'ask';
+  return v === 'off' || v === 'ask' ? v : 'deny';
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);

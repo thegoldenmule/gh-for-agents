@@ -177,7 +177,7 @@ Claude Code PreToolUse hook: background ghx ci wait, steer raw gh to ghx (stdin 
 
 read, single document, timeout 1m (max 5m).
 
-Reads the PreToolUse event JSON on stdin (the one command that does; Claude Code delivers it there) and prints a hook reply or nothing. A Bash `ghx ci wait` without run_in_background gets updatedInput with run_in_background: true and no permission decision, in any repo. The rest applies only when the event's cwd is in a checkout with .github/ghx.json (found by walking up to .git; no gh or git spawn): a raw gh write ghx wraps (gh pr merge, gh -R o/r pr create, …) gets permissionDecision deny in every mode, and a gh CI polling loop (Bash or Monitor) or a gh read ghx wraps gets permissionDecision ask (GHX_HOOK_MODE=deny|ask|off; default ask), each naming the ghx replacement. Elsewhere gh calls get no output. Fails open: any error, unparseable stdin or a missing cwd exits 0 with no output. No gh calls. Register it with matcher Bash|Monitor (docs/agents/hooks.md).
+Reads the PreToolUse event JSON on stdin (the one command that does; Claude Code delivers it there) and prints a hook reply or nothing. A Bash `ghx ci wait` without run_in_background gets updatedInput with run_in_background: true and no permission decision, in any repo. The rest applies only when the event's cwd is in a checkout with .github/ghx.json (found by walking up to .git; no gh or git spawn): a raw gh write ghx wraps (gh pr merge, gh -R o/r pr create, …) gets permissionDecision deny in every mode, and a gh CI polling loop (Bash or Monitor) or a gh read ghx wraps gets permissionDecision deny (GHX_HOOK_MODE=deny|ask|off; default deny), each naming the ghx replacement. Elsewhere gh calls get no output. Fails open: any error, unparseable stdin or a missing cwd exits 0 with no output. No gh calls. Register it with matcher Bash|Monitor (docs/agents/hooks.md).
 
 Input: Flags and positionals only; --input file.json is also accepted.
 
@@ -228,7 +228,7 @@ Flags:
 - `--hook` (default `true`): Register the PreToolUse hook; --no-hook skips it
 - `--snippet` (default `true`): Add the CLAUDE.md block; --no-snippet skips it
 - `--bin-dir <string>`: Also symlink <dir>/ghx to bin/ghx.js (recorded, so uninstall removes it without the flag)
-- `--hook-mode <ask|deny>`: deny sets env.GHX_HOOK_MODE=deny; ask removes it (the default mode)
+- `--hook-mode <ask|deny>`: ask sets env.GHX_HOOK_MODE=ask; deny removes it (the default mode)
 - `--global` (default `true`): From npx: install ghx globally first (default); --no-global refuses instead
 
 Input: Flags and positionals only; --input file.json is also accepted.

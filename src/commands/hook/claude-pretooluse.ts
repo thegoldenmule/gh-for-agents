@@ -27,8 +27,8 @@ export default defineCommand({
     'run_in_background: true and no permission decision, in any repo. The rest applies only when the ' +
     "event's cwd is in a checkout with .github/ghx.json (found by walking up to .git; no gh or git spawn): " +
     'a raw gh write ghx wraps (gh pr merge, gh -R o/r pr create, …) gets permissionDecision deny in every ' +
-    'mode, and a gh CI polling loop (Bash or Monitor) or a gh read ghx wraps gets permissionDecision ask ' +
-    '(GHX_HOOK_MODE=deny|ask|off; default ask), each naming the ghx replacement. Elsewhere gh calls get no ' +
+    'mode, and a gh CI polling loop (Bash or Monitor) or a gh read ghx wraps gets permissionDecision deny ' +
+    '(GHX_HOOK_MODE=deny|ask|off; default deny), each naming the ghx replacement. Elsewhere gh calls get no ' +
     'output. Fails open: any error, unparseable stdin or a missing cwd exits 0 with no output. No gh calls. ' +
     'Register it with matcher Bash|Monitor (docs/agents/hooks.md).',
   kind: 'read',

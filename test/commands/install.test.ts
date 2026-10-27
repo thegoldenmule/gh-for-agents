@@ -150,11 +150,11 @@ test('an existing settings file keeps its keys, order, other hooks, permissions 
   assert.ok(read(h.settings).endsWith('}\n'));
 });
 
-test('--hook-mode deny sets env.GHX_HOOK_MODE beside the existing env', async () => {
+test('--hook-mode ask sets env.GHX_HOOK_MODE beside the existing env', async () => {
   const h = home({ 'settings.json': EXISTING });
-  const r = await run(['install', '--no-snippet', '--hook-mode', 'deny'], { HOME: h.home });
+  const r = await run(['install', '--no-snippet', '--hook-mode', 'ask'], { HOME: h.home });
   assert.equal(r.exitCode, 0, r.stdout);
-  assert.deepEqual(json(h.settings).env, { FOO: 'bar', GHX_HOOK_MODE: 'deny' });
+  assert.deepEqual(json(h.settings).env, { FOO: 'bar', GHX_HOOK_MODE: 'ask' });
 });
 
 test('invalid JSON settings are refused untouched: INSTALL_SETTINGS_INVALID, no CLAUDE.md write, no backup', async () => {
@@ -426,7 +426,7 @@ test('uninstall restores the original byte for byte when ghx was the only change
   const bin = join(tmp, `bin-${n++}`);
   mkdirSync(bin);
   const env = { HOME: h.home };
-  assert.equal((await run(['install', '--hook-mode', 'deny', '--bin-dir', bin], env)).exitCode, 0);
+  assert.equal((await run(['install', '--hook-mode', 'ask', '--bin-dir', bin], env)).exitCode, 0);
   assert.notEqual(read(h.settings), EXISTING);
   const r = await run(['uninstall', '--bin-dir', bin], env);
   assert.equal(r.exitCode, 0, r.stdout);
@@ -549,7 +549,7 @@ test('install then uninstall restores a real-shaped settings file byte for byte,
   for (const original of [standard, inline]) {
     // User scope (hook and mode, no deny rules).
     const h = home({ 'settings.json': original, 'CLAUDE.md': '# Mine\n' });
-    assert.equal((await run(['install', '--hook-mode', 'deny'], { HOME: h.home })).exitCode, 0);
+    assert.equal((await run(['install', '--hook-mode', 'ask'], { HOME: h.home })).exitCode, 0);
     assert.notEqual(read(h.settings), original);
     assert.equal((await run(['uninstall'], { HOME: h.home })).exitCode, 0);
     assert.equal(read(h.settings), original, 'user scope');
@@ -617,12 +617,12 @@ test("uninstall removes only what install added: the user's identical deny rule 
   const repo = join(tmp, `repo-${n++}`);
   const local = join(repo, '.claude', 'settings.local.json');
   mkdirSync(join(repo, '.claude'), { recursive: true });
-  const mine = `${JSON.stringify({ permissions: { deny: ['Bash(gh pr merge:*)'] }, env: { GHX_HOOK_MODE: 'deny' } }, null, 2)}\n`;
+  const mine = `${JSON.stringify({ permissions: { deny: ['Bash(gh pr merge:*)'] }, env: { GHX_HOOK_MODE: 'ask' } }, null, 2)}\n`;
   writeFileSync(local, mine);
   const h = home();
   const git = fakeGit({ toplevel: repo, ignored: [local] });
   const i = await run(
-    ['install', '--scope', 'project', '--hook-mode', 'deny', '--no-snippet'],
+    ['install', '--scope', 'project', '--hook-mode', 'ask', '--no-snippet'],
     { HOME: h.home },
     { git },
   );
@@ -637,7 +637,7 @@ test("uninstall removes only what install added: the user's identical deny rule 
   const manifest = JSON.parse(read(join(state, dir as string, 'manifest.json')));
   assert.equal(manifest.settings.path, local);
   assert.ok(!manifest.settings.deny.includes('Bash(gh pr merge:*)'));
-  assert.equal(manifest.settings.hookMode, null, 'GHX_HOOK_MODE was already deny: not ghx');
+  assert.equal(manifest.settings.hookMode, null, 'GHX_HOOK_MODE was already ask: not ghx');
   assert.deepEqual(
     readdirSync(join(repo, '.claude')).filter((f) => !f.includes('.bak-ghx-')),
     ['settings.local.json'],
