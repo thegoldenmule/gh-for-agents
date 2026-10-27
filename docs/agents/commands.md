@@ -4,9 +4,9 @@
 
 Every command prints one JSON document (or a spill result). Errors are `{"error":{"code","message","hint","details"}}` with a non-zero exit. `ghx <cmd> --help` and `ghx <cmd> --schema` print the same information as JSON.
 
-- [`ghx ci rerun`](#ghx-ci-rerun) (write): Rerun failed jobs of completed runs on the PR head (--flaky: only likely-flaky jobs)
+- [`ghx ci rerun`](#ghx-ci-rerun) (write): Rerun failed jobs of completed runs on the PR head, or of one run (--flaky: only likely-flaky jobs)
 - [`ghx ci retrigger`](#ghx-ci-retrigger) (write): Fire fresh pull_request workflows by closing and reopening the PR (never left closed)
-- [`ghx ci wait`](#ghx-ci-wait) (read): Wait for CI on a PR or branch; one JSON summary, exit code = outcome (run in background)
+- [`ghx ci wait`](#ghx-ci-wait) (read): Wait for CI on a PR, branch or run; one JSON summary, exit code = outcome (run in background)
 - [`ghx ci why`](#ghx-ci-why) (read): Why CI is red: failing jobs, step, tests, errors, log path, shared-with-main and flake
 - [`ghx doctor`](#ghx-doctor) (read): Check the setup: gh version and features, auth, git, the target repo and its config.
 - [`ghx hook claude-pretooluse`](#ghx-hook-claude-pretooluse) (read): Claude Code PreToolUse hook: background ghx ci wait, steer raw gh to ghx (stdin protocol)
@@ -29,31 +29,32 @@ These gh reads run through ghx in a bounded JSON envelope (`{passthrough:{argv, 
 
 ## ghx ci rerun
 
-Rerun failed jobs of completed runs on the PR head (--flaky: only likely-flaky jobs)
+Rerun failed jobs of completed runs on the PR head, or of one run (--flaky: only likely-flaky jobs)
 
-`ghx ci rerun <pr> [flags]`
+`ghx ci rerun <target> [flags]`
 
 write, single document, timeout 2m (max 5m).
 
-Reruns the failed jobs of completed Actions runs for the current head, skipping runs still in progress (RUN_IN_PROGRESS) and runs at ci.maxRerunAttempts (RERUN_LIMIT, default 3). --job reruns matching jobs; --flaky only jobs with flake evidence (NO_FLAKY_CANDIDATES if none), never widening to a real failure: one job per run at a time, the rest DEFERRED until that run completes. A rerun reuses the original merge ref: after a base change, use ghx ci retrigger.
+Reruns the failed jobs of completed Actions runs for the current PR head, or of one run (run:<id>, for CI without a PR, such as main). The run id pins a run target to its commit; --expect-head checks it. Runs still in progress are skipped (RUN_IN_PROGRESS) and runs at ci.maxRerunAttempts (RERUN_LIMIT, default 3). --job reruns matching jobs; --flaky only jobs with flake evidence (NO_FLAKY_CANDIDATES if none), never widening to a real failure: one job per run at a time, the rest DEFERRED until that run completes. A rerun reuses the original merge ref: after a base change, use ghx ci retrigger.
 
 Flags:
 
 - `--job <string>` (repeatable): Only failed jobs whose name matches (repeatable; * and ?)
 - `--flaky` (default `false`): Only jobs whose flake score is medium or higher
-- `--expect-head <string>`: Refuse with HEAD_MOVED unless the head is this SHA
+- `--expect-head <string>`: Refuse with HEAD_MOVED unless the head (for run:<id>, the run's commit) is this SHA
 - `--override <string>` (repeatable): RERUN_LIMIT: rerun past ci.maxRerunAttempts
 - `--reason <string>`: Why the override is allowed (who asked); required with --override
 
 Input: Flags and positionals only; --input file.json is also accepted.
 
-Replaces: `gh run rerun`, `gh run rerun --failed`, `gh run rerun --job`.
+Replaces: `gh run rerun <run-id>`, `gh run rerun <run-id> --failed`, `gh run rerun <run-id> --job`.
 
 Examples:
 
 - `ghx ci rerun powerhouse-inc/powerhouse#3301 --flaky`: Rerun only the jobs that look flaky
 - `ghx ci rerun 3301`: Rerun every failed job of the completed runs on the head
 - `ghx ci rerun 3301 --job 'Test Reactor*'`: Rerun matching failed jobs
+- `ghx ci rerun run:40345582950 -R owner/repo`: Rerun the failed jobs of one run (main, no PR)
 - `ghx ci rerun 3301 --override RERUN_LIMIT --reason "user asked in chat"`: Past ci.maxRerunAttempts
 
 Schema: `ghx ci rerun --schema`.
@@ -89,7 +90,7 @@ Schema: `ghx ci retrigger --schema`.
 
 ## ghx ci wait
 
-Wait for CI on a PR or branch; one JSON summary, exit code = outcome (run in background)
+Wait for CI on a PR, branch or run; one JSON summary, exit code = outcome (run in background)
 
 `ghx ci wait <targets…> [flags]`
 
@@ -99,7 +100,7 @@ Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then co
 
 Flags:
 
-- `--until <first-failure|settled|mergeable>` (default `"first-failure"`): first-failure: return at the first new failure or settled green; settled: wait for everything; mergeable: settled, then the merge CI gate (PR targets only)
+- `--until <first-failure|settled|mergeable>` (default `"first-failure"`): first-failure: return at the first new failure or settled green; settled: wait for everything; mergeable: settled, then the merge CI gate (PR targets only; a branch or run is a usage error)
 - `--any` (default `false`): Return when the first target reaches a terminal state
 - `--on-head-change <restart|stop|stay>`: On a head change: restart (PR default), stop (exit 12) or stay (branch default)
 - `--check <string>` (repeatable): Only checks whose name matches (repeatable; globs); under --until mergeable, required checks always count
@@ -109,7 +110,7 @@ Flags:
 
 Input: Flags and positionals only; --input file.json is also accepted.
 
-Replaces: `gh pr checks --watch`, `gh run watch`, `gh pr checks`, `gh run list`.
+Replaces: `gh pr checks --watch`, `gh run watch <run-id>`, `gh pr checks`, `gh run list`.
 
 Examples:
 
@@ -117,6 +118,7 @@ Examples:
 - `ghx ci wait owner/repo#12 --until settled`: Wait for every check, not the first failure
 - `ghx ci wait owner/repo#12 --until mergeable`: Settled CI, then the merge CI gate
 - `ghx ci wait branch:main@9f2c4e1 -R owner/repo`: CI for one commit on a branch
+- `ghx ci wait run:40345582950 --until settled -R owner/repo`: One workflow run until it completes (e.g. after ghx ci rerun run:<id>)
 - `ghx ci wait owner/repo#12 owner/repo#13 --any`: Return at the first target that finishes
 
 Schema: `ghx ci wait --schema`.
@@ -125,15 +127,15 @@ Schema: `ghx ci wait --schema`.
 
 Why CI is red: failing jobs, step, tests, errors, log path, shared-with-main and flake
 
-`ghx ci why [<pr>] [flags]`
+`ghx ci why [<target>] [flags]`
 
 read, single document, timeout 2m (max 5m).
 
-Diagnoses the failing checks on a PR head (or one workflow run, --run) in one call. Logs come from the jobs API, so a finished job is diagnosed while the rest of its run is still going. Full logs are written to files (logPath). Green jobs whose ci.keySteps step was skipped are listed in suspicious.
+Diagnoses the failing checks on a PR head, one workflow run (run:<id>; --run is the same), or a branch head (branch:<name>: every workflow's newest run on the branch's head commit) in one call. Logs come from the jobs API, so a finished job is diagnosed while the rest of its run is still going. Full logs are written to files (logPath). Green jobs whose ci.keySteps step was skipped are listed in suspicious.
 
 Flags:
 
-- `--run <string>`: A workflow run id or URL, instead of a PR
+- `--run <string>`: A workflow run id or URL (the same as run:<id>)
 - `--job <string>` (repeatable): Only failing jobs whose name matches (repeatable; * and ?)
 - `--compare-main` (default `true`): Compare failures with the default branch; --no-compare-main skips it
 - `--max-jobs <integer>` (default `5`): Failing jobs to diagnose
@@ -141,13 +143,14 @@ Flags:
 
 Input: Flags and positionals only; --input file.json is also accepted.
 
-Replaces: `gh run view --log`, `gh run view --log-failed`, `gh api repos/{o}/{r}/actions/jobs/{id}/logs`.
+Replaces: `gh run view <run-id> --log`, `gh run view <run-id> --log-failed`, `gh api repos/{o}/{r}/actions/jobs/{id}/logs`.
 
 Examples:
 
 - `ghx ci why 3301 -R powerhouse-inc/powerhouse`: Diagnose the failing checks on PR #3301
 - `ghx ci why owner/repo#12 --job 'Test*'`: Only jobs whose name starts with Test
-- `ghx ci why --run 37948190914 -R owner/repo`: One workflow run, without a PR
+- `ghx ci why run:37948190914 -R owner/repo`: One workflow run, without a PR
+- `ghx ci why branch:main -R owner/repo`: Is main red, and why: every workflow on its head
 - `ghx ci why 12 --no-compare-main`: Skip the comparison with the default branch
 
 Schema: `ghx ci why --schema`.
@@ -445,11 +448,11 @@ Schema: `ghx pr review --schema`.
 
 One object: description, block, merge readiness, CI for the head, feedback, preconditions, stack
 
-`ghx pr status <pr> [flags]`
+`ghx pr status <pr…> [flags]`
 
 read, single document, timeout 2m (max 5m).
 
-Answers "can this PR land, and what is left" in one call. merge.ready is exactly what ghx pr merge would decide now (same policy engine); merge.blockers say why not. CI is reported for the head SHA only. Feedback from all three GitHub sources is folded; bodies are capped, and the full text is in ghx pr feedback.
+Answers "can this PR land, and what is left" in one call. merge.ready is exactly what ghx pr merge would decide now (same policy engine); merge.blockers say why not. CI is reported for the head SHA only. Feedback from all three GitHub sources is folded; bodies are capped, and the full text is in ghx pr feedback. Several PRs (up to 10) give {results: [...]}, one object per PR in argument order, read concurrently; a PR that cannot be read is {selector, ref, error} there, and the exit is 7 when some failed.
 
 Flags:
 
@@ -465,6 +468,7 @@ Examples:
 - `ghx pr status 3301 -R powerhouse-inc/powerhouse`: Everything about PR #3301
 - `ghx pr status owner/repo#12 --no-compare-main`: Skip the comparison with the default branch
 - `ghx pr status 12 --no-wait-mergeable`: Read mergeable once, even if GitHub says UNKNOWN
+- `ghx pr status 3264 3267 3268 -R owner/repo`: Several PRs in one call: {results: [...]}
 
 Schema: `ghx pr status --schema`.
 

@@ -1,14 +1,14 @@
 [
   {
-    "pattern": "gh run rerun",
+    "pattern": "gh run rerun <run-id>",
     "command": "ci rerun"
   },
   {
-    "pattern": "gh run rerun --failed",
+    "pattern": "gh run rerun <run-id> --failed",
     "command": "ci rerun"
   },
   {
-    "pattern": "gh run rerun --job",
+    "pattern": "gh run rerun <run-id> --job",
     "command": "ci rerun"
   },
   {
@@ -28,7 +28,7 @@
     "command": "ci wait"
   },
   {
-    "pattern": "gh run watch",
+    "pattern": "gh run watch <run-id>",
     "command": "ci wait"
   },
   {
@@ -36,11 +36,11 @@
     "command": "ci why"
   },
   {
-    "pattern": "gh run view --log",
+    "pattern": "gh run view <run-id> --log",
     "command": "ci why"
   },
   {
-    "pattern": "gh run view --log-failed",
+    "pattern": "gh run view <run-id> --log-failed",
     "command": "ci why"
   },
   {

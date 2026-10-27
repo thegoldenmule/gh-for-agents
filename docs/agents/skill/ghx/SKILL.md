@@ -8,14 +8,14 @@ description: Use for any GitHub PR or CI task (status, why CI failed, waiting fo
 ## GitHub: use `ghx` in repos that have `.github/ghx.json`
 
 - In a repo with `.github/ghx.json`, use `ghx` for PRs and CI, not raw `gh`. Elsewhere `ghx` reads still work but aren't required.
-- Run `ghx` as one plain command: no pipes, `--jq`, `head`, `sleep` or `timeout`. It bounds its own output and its own time.
+- Run `ghx` as one plain command: no pipes, `--jq`, `head`, `sleep` or `timeout`. It bounds its own output and its own time. To keep only some fields, use `--brief` or `--fields a.b,c[].d`, not jq.
 - Discover with `ghx --help`, `ghx <cmd> --help` and `ghx <cmd> --schema`. Check setup with `ghx doctor`.
 - One call per question:
-  - PR state, mergeability, CI for the head SHA and feedback: `ghx pr status <pr>`.
+  - PR state, mergeability, CI for the head SHA and feedback: `ghx pr status <pr>`. Several PRs: `ghx pr status 12 13 14`.
   - All review and comment threads: `ghx pr feedback <pr>`.
-  - Why CI failed: `ghx ci why <pr>`.
+  - Why CI failed: `ghx ci why <pr>`, `ghx ci why run:<id>`, or `ghx ci why branch:main` for main.
 - Other gh reads (`pr diff`, `pr list`, `issue view`, `run list`, `api` GETs, …) run through ghx: `ghx pr diff 12` returns gh's output in a bounded JSON envelope.
-- In those repos, writes go through ghx, never raw `gh pr create|edit|merge|comment|review|close|ready` or `gh run rerun`. The ghx verbs check repo policy and pin the head SHA.
+- In those repos, writes go through ghx, never raw `gh pr create|edit|merge|comment|review|close|ready` or `gh run rerun`. The ghx verbs check repo policy and pin the head SHA (for `ghx ci rerun run:<id>`, the run).
 
 ### JSON input
 
@@ -28,6 +28,7 @@ description: Use for any GitHub PR or CI task (status, why CI failed, waiting fo
 Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then continue other work or end your turn. Do not poll, sleep, or use Monitor for CI. You will be re-invoked when it exits. Its stdout is the full answer and its exit code is the outcome.
 
 - A non-zero exit shows as "failed" in the task notification. That label is not the outcome: read the JSON summary (`outcome`, and each result's `diagnosis`, `stalled` and `rerunCandidates`) and the exit code below.
+- The target can also be `run:<id>` (say, after a rerun) or `branch:<name>`.
 - Don't read the task's output file while it runs, and don't start a second wait on the same PR.
 - By default (`--until first-failure`) it returns at the first new failure, so you can start on the fix early. Run the identical command again on the same SHA to continue: it skips the failures it already reported and returns at the next new failure or once CI settles.
 - Exit 15 means the wait handed back early in an unattended session. Run the identical command again, in the background; it resumes from cached state.
@@ -38,6 +39,8 @@ Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then co
 
 - stdout is one JSON document. Errors are `{"error":{"code","message","hint","details"}}` with a non-zero exit. Follow `hint`; don't retry blindly.
 - Big outputs (logs, diffs) come back as file paths. Read the file; don't fetch it again.
+- `--brief` (pr status, ci wait, pr create, pr merge, pr feedback) keeps the fields you'd otherwise extract. Errors are never trimmed.
+- With several PRs, `pr status` exits 7 if some `results[]` entries are `error`. Read the document.
 
 ### Exit codes
 
@@ -56,16 +59,16 @@ Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then co
 | 10 | `ci wait`: CI is red | Read the diagnosis; fix it, or `ghx ci rerun <pr> --flaky` |
 | 11 | `ci wait`: red, but every failure so far is also red on main | Under the default first-failure, other checks may still be running: run `ghx ci wait <pr> --until mergeable` before merging |
 | 12 | `ci wait`: the head moved, or the PR closed or merged | Re-read with `ghx pr status` |
-| 13 | `ci wait`: no checks registered | Check the triggers, or `ghx ci retrigger <pr>` |
+| 13 | `ci wait`: no checks registered | If `reason` is `merge-conflict`, merge the base and push. Otherwise check the triggers, or `ghx ci retrigger <pr>` |
 | 14 | `ci wait`: a check stalled | Read `stalled`; `ghx ci rerun`, or wait again |
 | 15 | `ci wait`: handed back while unattended; state is cached (or, under `--any`, `reason: "any-satisfied"`: another target finished first) | Re-run the identical command in the background |
 | 130, 143 | Interrupted | Re-run if still needed |
 
 ### Commands
 
-- `ghx ci rerun` (write): Rerun failed jobs of completed runs on the PR head (--flaky: only likely-flaky jobs)
+- `ghx ci rerun` (write): Rerun failed jobs of completed runs on the PR head, or of one run (--flaky: only likely-flaky jobs)
 - `ghx ci retrigger` (write): Fire fresh pull_request workflows by closing and reopening the PR (never left closed)
-- `ghx ci wait` (read): Wait for CI on a PR or branch; one JSON summary, exit code = outcome (run in background)
+- `ghx ci wait` (read): Wait for CI on a PR, branch or run; one JSON summary, exit code = outcome (run in background)
 - `ghx ci why` (read): Why CI is red: failing jobs, step, tests, errors, log path, shared-with-main and flake
 - `ghx doctor` (read): Check the setup: gh version and features, auth, git, the target repo and its config.
 - `ghx hook claude-pretooluse` (read): Claude Code PreToolUse hook: background ghx ci wait, steer raw gh to ghx (stdin protocol)
