@@ -7,7 +7,7 @@
   - PR state, mergeability, CI for the head SHA and feedback: `ghx pr status <pr>`. Several PRs: `ghx pr status 12 13 14`.
   - All review and comment threads: `ghx pr feedback <pr>`.
   - Why CI failed: `ghx ci why <pr>`, `ghx ci why run:<id>`, or `ghx ci why branch:main` for main.
-- Other gh reads (`pr diff`, `pr list`, `issue view`, `run list`, `api` GETs, …) run through ghx: `ghx pr diff 12` returns gh's output in a bounded JSON envelope.
+- Other gh reads (`pr diff`, `pr list`, `issue view`, `run list`, `api` GETs, …) run through ghx: `ghx pr diff 12` returns gh's output in a bounded JSON envelope. `--fields passthrough.json[].<key>` trims it.
 - In those repos, writes go through ghx, never raw `gh pr create|edit|merge|comment|review|close|ready` or `gh run rerun`. The ghx verbs check repo policy and pin the head SHA (for `ghx ci rerun run:<id>`, the run).
 
 ### JSON input
@@ -49,7 +49,7 @@ Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then co
 | 7 | gh or API failure after retries, permission, rate limit | Retry later, or fix access |
 | 8 | Deadline exceeded | Retry |
 | 9 | GitHub state forbids it now: head moved, conflict, CI pending | Change the state, then retry |
-| 10 | `ci wait`: CI is red | Read the diagnosis; fix it, or `ghx ci rerun <pr> --flaky` |
+| 10 | `ci wait`: CI is red | Read the diagnosis; fix it, or `ghx ci rerun <pr> --flaky`. `reason: "workflow-invalid"`: GitHub rejected a workflow file; fix it as `next` says |
 | 11 | `ci wait`: red, but every failure so far is also red on main | Under the default first-failure, other checks may still be running: run `ghx ci wait <pr> --until mergeable` before merging |
 | 12 | `ci wait`: the head moved, or the PR closed or merged | Re-read with `ghx pr status` |
 | 13 | `ci wait`: no checks registered | If `reason` is `merge-conflict`, merge the base and push. Otherwise check the triggers, or `ghx ci retrigger <pr>` |

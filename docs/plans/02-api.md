@@ -47,14 +47,14 @@ The grammar is `ghx <noun> <verb> [selector…] [flags]`, where noun ∈ `pr`, `
 | `--expect-head <sha>` | `pr merge`, `pr review`, `ci rerun`, `ci retrigger` | Refuses with `HEAD_MOVED` unless the head is this SHA (7–40 hex) **[G-SHA]** |
 | `--timeout <dur>` | all | 01's deadline with per-command default and max. `ci wait` has its own rules (§11.1) |
 | `--schema`, `--pretty`, `--max-bytes` | all | As defined in 01 |
-| `--fields <paths>` | every JSON-emitting command (not passthrough) | Keep only these leaves of the output, nesting intact. Comma-separated dot paths, repeatable; `key[]` maps over an array: `--fields state,head.sha,ci.counts,merge.blockers[].code`. Projection rule below |
-| `--brief` | commands that declare a preset (`pr status`, `ci wait`, `pr create`, `pr merge`, `pr feedback`) | The command's preset `--fields` list, shown as `brief` in `--help` and `--schema`. Elsewhere it is `USAGE_UNKNOWN_FLAG`. With `--fields` it selects the union |
+| `--fields <paths>` | every JSON-emitting command, passthrough reads included (§10) | Keep only these leaves of the output, nesting intact. Comma-separated dot paths, repeatable; `key[]` maps over an array: `--fields state,head.sha,ci.counts,merge.blockers[].code`. Projection rule below |
+| `--brief` | commands that declare a preset (`pr status`, `ci wait`, `pr create`, `pr merge`, `pr feedback`) | The command's preset `--fields` list, shown as `brief` in `--help` and `--schema`. Elsewhere, passthrough included, it is `USAGE_UNKNOWN_FLAG`. With `--fields` it selects the union |
 
 There is no `--json`, `--jq`, `--web`, `--watch` or pager. Every output has a fixed, typed schema (§3.1, §9.9); `--fields` and `--brief` cut it down, they never reshape it.
 
 **Projection rule.** If the document has a top-level `results` array, field paths resolve against each element and other top-level keys are kept; otherwise against the document. Details:
 
-- Paths are checked against the output schema (`--schema` `output`, or `summary` for `ci wait`) before the command reads input or calls gh, so a typo fails as `VALIDATION` and never follows a write. The hint names the valid top-level keys (the element keys for a `results` document), the nearest match, and the fix for a path through an array without `[]` (`ci.failing.name` → `ci.failing[].name`) or one written with a `results[].` prefix.
+- Paths are checked against the output schema (`--schema` `output`, or `summary` for `ci wait`) before the command reads input or calls gh (a free-form value, such as a passthrough's `passthrough.json`, accepts any path below it), so a typo fails as `VALIDATION` and never follows a write. The hint names the valid top-level keys (the element keys for a `results` document), the nearest match, and the fix for a path through an array without `[]` (`ci.failing.name` → `ci.failing[].name`) or one written with a `results[].` prefix.
 - `warnings` is always kept. Each `results[]` element also keeps `selector`, `ref`, `target`, `error` and its own `warnings`, so a failed entry of `pr status N M` stays `{selector, ref, error}`, never `{}`.
 - A selected object or array is kept whole. A key absent from the document is omitted; a `null` on the way stays `null` (`meta.rev` on a PR without a block gives `meta: null`).
 - Error documents and the `--dry-run` envelope are never projected. The exit code comes from the full output.
@@ -157,6 +157,7 @@ const CiSummary = z.object({ headSha: Sha, forHeadSha: z.literal(true),
 ```
 
 - Duplicate re-run rows collapse to the latest attempt per (workflow, name) (§6).
+- **A workflow run GitHub rejected before any job ran** (an invalid workflow file: the run completes `failure` or `startup_failure` with zero jobs, so it has no check run) is one red Actions check, never "no checks": `name` is the workflow file (`.github/workflows/ci.yml`), `workflow` the workflow's name as the source gives it, `runId` the run, `jobId: null` (no other Actions check lacks one), `url` the run page. Each such run is warned `WORKFLOW_INVALID`. No API returns the validation message (the run, its check suite and its empty jobs carry none, and `display_title` is the commit subject), so the warning and `next` point at the run page and say to fix the file; never a re-wait or `ci rerun`, which cannot change it. Found from the commit's check suites in the rollup query (a completed, failed Actions suite with `checkRuns.totalCount` 0), or from REST run rows with no job.
 - `cancelled` counts as red.
 
 **Shared with main** (one definition, used by `ci why`, `ci wait`, `pr status` and `pr merge`):
@@ -440,7 +441,7 @@ All calls use the read-mode client, `gh graphql` and `gh api` GET only.
    - `comments(first:100)`, `reviews(first:100)`;
    - `reviewThreads(first:100){isResolved isOutdated path line comments(first:50){… replyTo pullRequestReview}}`;
    - `timelineItems(BASE_REF_CHANGED_EVENT, AUTOMATIC_BASE_CHANGE_SUCCEEDED_EVENT)` **[G-RETARGET]**;
-   - `commits(last:1){commit{oid statusCheckRollup{contexts(first:100){CheckRun{databaseId … isRequired checkSuite{workflowRun{databaseId workflow{databaseId name}}}} StatusContext{…}}}}}`;
+   - `commits(last:1){commit{oid statusCheckRollup{contexts(first:100){CheckRun{databaseId … isRequired checkSuite{workflowRun{databaseId workflow{databaseId name}}}} StatusContext{…}}} checkSuites(first:50){status conclusion checkRuns(first:0){totalCount} workflowRun{…}}}}` (the suites find runs GitHub rejected before any job ran, §1.5);
    - viewer, repo merge settings and default branch;
    - `rateLimit`.
 3. **[G-SHA]** Assert rollup oid == `headRefOid`. On mismatch, re-query once; then warn `CI_SHA_MISMATCH` with state `pending`.
@@ -890,6 +891,7 @@ The envelope:
 - `pr diff` failing with HTTP 406 becomes `DIFF_TOO_LARGE`, with a hint to run a local `git diff`, or for names only `ghx pr diff N --name-only` or `ghx api "repos/{owner}/{repo}/pulls/N/files?per_page=100" --paginate --slurp` **[G-300]**.
 - `pr diff N --name-only` (N a PR number or URL) needs no diff: on the 406, ghx lists `pulls/N/files` (paged, up to GitHub's 3,000 files) and returns the names one per line, as gh prints them, in an envelope whose `argv` is that `gh api` path, with the warning `DIFF_NAMES_FROM_FILES_API`. A branch selector, or more than 3,000 files, stays `DIFF_TOO_LARGE`.
 - `run list --commit <sha>` (or `-c`): gh matches full SHAs only, so a short one lists nothing. When the cwd checkout is the target repo, ghx expands it with `git rev-parse --verify <sha>^{commit}` and warns `COMMIT_EXPANDED` (the envelope has no notes field); otherwise it refuses with `REF_NOT_FOUND` (5), naming `git rev-parse` and `ghx api repos/{owner}/{repo}/commits/<sha>`.
+- ghx's own flags are taken out of the gh argv up to a bare `--` (after it every token is gh's): `--pretty`, `--max-bytes`, `--timeout`, `--fields` and `--brief` (gh has neither of the last two, so none is ever forwarded). `--fields` projects the envelope like any command's output (§1.1): paths under `passthrough.json` are gh's parsed output and are not checked (`ghx run list --json headSha,status --fields passthrough.json[].headSha`), and with `--fields` parsed JSON stays inline past the inline cap so the projection reaches it (a projection that is still too big spills). gh's own `--json <fields>` and `--jq` still select inside gh's output. `--brief` is `USAGE_UNKNOWN_FLAG` (no preset). Both fail before gh runs.
 - `ghx api --help` (or `-h`, anywhere before `--`) cannot pass the GET check, so it answers with ghx's passthrough help, the same document as `ghx help api`: the accepted `ghx api <endpoint>` form. Other allowlisted reads pass `--help` to gh.
 
 Justification:
@@ -947,7 +949,7 @@ Why not Monitor:
 | Outcome | Exit | When |
 |---|---:|---|
 | `green` | 0 | Settled with no considered failures |
-| `red` | 10 | A considered check failed and isn't shared with main |
+| `red` | 10 | A considered check failed and isn't shared with main. A run GitHub rejected before any job ran (§1.5) ends the wait at once in every mode, whatever `--check` selects, with `reason: "workflow-invalid"` and `next` saying to fix each file (its run page has the error); re-running the identical command returns it again |
 | `red-shared` | 11 | Every failure is shared with main (§1.5) |
 | `superseded` / `closed` | 12 | The head moved (with `--on-head-change stop`), or the PR closed or merged |
 | `no-checks` | 13 | Nothing registered within `--grace` (default 120 s). On a PR GitHub reports as conflicting, `reason` is `merge-conflict`: GitHub runs no `pull_request` workflow on a conflicting PR, so a `MERGE_CONFLICT` warning says to merge or rebase the base and push, and `next` names that merge instead of `ci retrigger` |
@@ -1004,7 +1006,7 @@ A stall ends the wait with the diagnosis so far, the stalled checks, and `next` 
 | baseline | Check names, in priority order: (1) the PR's previous head SHA (for branch targets, the previous commit); (2) the last PR merged into the base; (3) the base head (`confidence:"low"`). Cached | Ages to `absent` after `--expect-grace` (90 s) once everything else settles, emitting `expected-absent`. Covers path-filtered and main-only jobs |
 
 Phases:
-- **`registering`:** nothing reported yet. After `--grace` (default 120 s; §3.1 and §5.2 saw 10–60 s), the outcome is `no-checks`, exit 13.
+- **`registering`:** nothing reported yet. After `--grace` (default 120 s; §3.1 and §5.2 saw 10–60 s), the outcome is `no-checks`, exit 13. A run GitHub rejected before any job ran is a reported (red) check, so it is never `no-checks` (§11.1).
 - **`partial`:** some checks reported, but required or config checks are missing or baseline checks are still within their grace. Never green. This catches `workflow_run` chains and late registration.
 - **`running`:** all expected checks registered, some pending.
 - **`settled`:** done.
@@ -1131,7 +1133,7 @@ gh calls:
 1. Snapshot with the oid check **[G-SHA]**.
 2. Expected set, cached.
 3. ETA baselines, cached.
-4. Each tick: conditional REST, or the GraphQL fallback.
+4. Each tick: conditional REST (the PR or branch, check runs, status, and the head's runs, `actions/runs?head_sha=`, whose failed runs with no check run in their suite are rejected workflows; a run target reads its run and jobs), or the GraphQL fallback.
 5. On a failure: jobs and logs **[G-LOGS]**, the main comparison, flake checks.
 6. `mergeable` mode: the mergeable retry **[G-UNKNOWN]** and the gate.
 
@@ -1150,6 +1152,8 @@ Targets are §11's grammar:
 - **`branch:<name>`** (or `branch:<name>@<sha>`): "is main red, and why". It reads the branch head (or that commit), then every workflow's newest run on it, `actions/runs?head_sha=<sha>&branch=<name>`. One run per workflow (a re-triggered workflow counts once; a PR run that shares the commit is left out), at most 20. Every failing workflow on the head is diagnosed in one call, not just one run. `target` is `branch:<name>@<sha7>`, and `next` names `ghx ci rerun run:<id> -R o/r --flaky` per run with flake candidates, since `ci rerun` takes a PR or one run.
 
 Run and branch targets carry Actions checks only (commit statuses come with a PR's rollup), and `ref` is null; every output carries `target`.
+
+A run GitHub rejected before any job ran (§1.5) is red in `ci` and listed in `nonActionsFailing`, which holds every red check without a job log to diagnose (commit statuses, other apps' checks, and these runs); `next` leads with fixing its file.
 
 Answers "why is CI red?" in one call (§5.1, §9.1).
 
