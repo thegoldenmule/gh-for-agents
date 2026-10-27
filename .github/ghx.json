@@ -50,8 +50,8 @@
       "paths": ["src/passthrough/**"]
     },
     "docs": {
-      "description": "Agent docs, plans and the README",
-      "paths": ["docs/**", "README.md", "RELEASING.md"]
+      "description": "Agent docs, plans, the README and CLAUDE.md",
+      "paths": ["docs/**", "README.md", "RELEASING.md", "CLAUDE.md"]
     },
     "test": {
       "description": "Tests, helpers and fixtures",
