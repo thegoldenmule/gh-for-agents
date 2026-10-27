@@ -118,10 +118,10 @@ test('monitor-gh-checks-loop.json: deny, naming ghx ci wait 3266 with run_in_bac
   assert.equal(out?.hookSpecificOutput.updatedInput, undefined);
 });
 
-test('monitor-run-watch.json: deny, naming ghx ci wait with run_in_background', async () => {
+test('monitor-run-watch.json: deny, naming ghx ci wait run:<id> with run_in_background', async () => {
   const { out } = await hook(fixture('monitor-run-watch.json'));
   assert.equal(out?.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(reason(out), /ghx ci wait <pr>/);
+  assert.match(reason(out), /ghx ci wait run:18234567890/);
   assert.match(reason(out), /run_in_background/);
 });
 
@@ -149,7 +149,7 @@ test('loops and sleeps around gh CI reads, in Bash or Monitor, name ghx ci wait'
     ["watch -n 30 'gh pr checks octo/demo#12'", /`ghx ci wait octo\/demo#12`/],
     ['sleep 300 && gh pr checks 12', /`ghx ci wait 12`/],
     ['sleep 120; gh run list --limit 3', /`ghx ci wait <pr>`/],
-    ['while gh run view 99 --json status | grep -q in_progress; do sleep 15; done', /`ghx ci wait <pr>`/],
+    ['while gh run view 99 --json status | grep -q in_progress; do sleep 15; done', /`ghx ci wait run:99`/],
     ["bash -c 'while true; do gh api repos/o/r/commits/abc/check-runs; sleep 10; done'", /ghx ci wait <pr>/],
     ['while true; do ghx pr status 12; sleep 60; done', /`ghx ci wait 12`/],
     ['sleep 600; ghx ci wait 12', /`ghx ci wait 12`/],
@@ -206,8 +206,8 @@ test('wrapped gh commands, including piped and chained ones, name their replacem
   const cases: [string, RegExp][] = [
     ["gh pr checks 3198 | awk '{print $2}'", /ghx ci wait 3198/],
     ['gh pr view 12 --comments', /ghx pr feedback 12/],
-    ['gh run view 123 --log-failed | tail -50', /ghx ci why --run 123/],
-    ['gh run view --log 123', /ghx ci why --run 123/],
+    ['gh run view 123 --log-failed | tail -50', /ghx ci why run:123/],
+    ['gh run view --log 123', /ghx ci why run:123/],
     ['cd repo && gh pr merge 12 --merge', /ghx pr merge 12/],
     ['gh pr create --title x --body y', /ghx pr create --input pr\.json/],
     ['gh pr ready 12', /ghx pr edit 12 --input ready\.json/],

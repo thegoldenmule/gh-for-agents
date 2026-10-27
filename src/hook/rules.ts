@@ -94,9 +94,10 @@ function ciWaitCommand(polls: readonly Invocation[]): string {
     const { rest, repo } = takeRepoFlag(inv.argv.slice(3));
     const sel = firstPositional(rest);
     const isPrCommand = inv.argv[1] === 'pr' || isCiWait(inv);
-    if (isPrCommand && sel !== undefined && PR_SELECTOR.test(sel)) {
-      return ['ghx', 'ci', 'wait', sel, ...(repo !== undefined ? ['-R', repo] : [])].join(' ');
-    }
+    const runId = inv.argv[1] === 'run' && sel !== undefined && /^\d+$/.test(sel) ? `run:${sel}` : undefined;
+    const target = isPrCommand && sel !== undefined && PR_SELECTOR.test(sel) ? sel : runId;
+    if (target !== undefined)
+      return ['ghx', 'ci', 'wait', target, ...(repo !== undefined ? ['-R', repo] : [])].join(' ');
   }
   return 'ghx ci wait <pr>';
 }
@@ -183,7 +184,7 @@ function isWrappedWrite(inv: Invocation): boolean {
 }
 
 const WRITE_DENIED =
-  ' Raw gh writes that ghx wraps are always denied: the ghx command checks policy, validates input and pins the head SHA.';
+  ' Raw gh writes that ghx wraps are always denied: the ghx command checks policy, validates input and pins the head SHA (or the run, for run:<id>).';
 
 /** Compound `replaces` entries (gh pr close <n> && gh pr reopen <n>): every part matches some invocation. */
 function compoundReason(gh: readonly Invocation[]): string | undefined {
