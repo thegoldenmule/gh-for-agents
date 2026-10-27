@@ -1,7 +1,10 @@
-// ghx ci rerun <pr> (02 §13.1; 03 M5.1): rerun the failed jobs of completed runs on the head, within
-// ci.maxRerunAttempts. Flow: rollup for H [G-SHA] → GET actions/runs/{id} per failing run → (--flaky) the
-// diagnosis engine's flake signals → POST rerun-failed-jobs or jobs/{id}/rerun (--dry-run halts at the
-// first). The selection rules and the error precedence live in src/ci/rerun/plan.ts.
+// ghx ci rerun <pr|run:<id>> (02 §13.1; 03 M5.1): rerun the failed jobs of completed runs, within
+// ci.maxRerunAttempts. A PR: the runs on its head H, read through the rollup [G-SHA], then GET
+// actions/runs/{id} per failing run. A run (run:<id>, a run or job URL): that run alone, read once with its
+// jobs; the run id is the pin (one run, one commit), so there is no head to move and --expect-head checks
+// the run's commit. Then (--flaky) the diagnosis engine's flake signals → POST rerun-failed-jobs or
+// jobs/{id}/rerun (--dry-run halts at the first). The selection rules and the error precedence live in
+// src/ci/rerun/plan.ts.
 import { z } from 'zod';
 import { createDiagnoser, DIAGNOSIS_BUDGET_MS, DIAGNOSIS_MAX_JOBS } from '../../ci/diagnose.ts';
 import { wildcard } from '../../ci/flake.ts';
@@ -16,13 +19,12 @@ import {
   type Skipped,
   selectJobs,
 } from '../../ci/rerun/plan.ts';
-import { fetchCiSnapshot, snapshotSummary } from '../../ci/snapshot.ts';
+import { readSubject } from '../../ci/subject.ts';
+import { parseCiTarget, targetRepo } from '../../ci/wait/targets.ts';
 import { defineCommand } from '../../core/command.ts';
 import { rethrowControlFlow } from '../../core/control-flow.ts';
 import { GhxError } from '../../core/errors.ts';
 import { GhFailure } from '../../gh/index.ts';
-import { formatPrRef, parseTargetRef } from '../../gh/refs.ts';
-import { enrichNotFound } from '../../gh/repo.ts';
 import { githubMessage } from '../../pr/feedback-writes/post.ts';
 import { Flake } from '../../schemas/ci.ts';
 import { PrRef, Sha, ShaInput } from '../../schemas/common.ts';
@@ -31,10 +33,15 @@ import { PrRef, Sha, ShaInput } from '../../schemas/common.ts';
 const OUTPUT_MARGIN_MS = 15_000;
 
 const Input = z.strictObject({
-  pr: z.string().min(1).describe('PR: 3198, #3198, owner/repo#3198 or a PR URL'),
+  target: z
+    .string()
+    .min(1)
+    .describe('A PR (3198, owner/repo#3198, a PR URL), or run:<id> (or a run or job URL) for one workflow run'),
   job: z.array(z.string().min(1)).optional().describe('Only failed jobs whose name matches (repeatable; * and ?)'),
   flaky: z.boolean().default(false).describe('Only jobs whose flake score is medium or higher'),
-  expectHead: ShaInput.optional().describe('Refuse with HEAD_MOVED unless the head is this SHA'),
+  expectHead: ShaInput.optional().describe(
+    "Refuse with HEAD_MOVED unless the head (for run:<id>, the run's commit) is this SHA",
+  ),
   override: z.array(z.string().min(1)).optional().describe('RERUN_LIMIT: rerun past ci.maxRerunAttempts'),
   reason: z.string().optional().describe('Why the override is allowed (who asked); required with --override'),
 });
@@ -42,7 +49,10 @@ const Input = z.strictObject({
 const SkipReason = z.enum(['RUN_IN_PROGRESS', 'RERUN_LIMIT', 'NOT_FLAKY', 'DEFERRED', 'REFUSED']);
 
 const Output = z.object({
-  ref: PrRef,
+  /** owner/repo#N for a PR; null for run:<id>. */
+  ref: PrRef.nullable(),
+  /** What was rerun: owner/repo#N or run:<id>. */
+  target: z.string(),
   headSha: Sha,
   rerun: z.array(
     z.object({
@@ -73,63 +83,57 @@ const ALREADY_RUNNING = /already running/i;
 
 export default defineCommand({
   name: ['ci', 'rerun'],
-  summary: 'Rerun failed jobs of completed runs on the PR head (--flaky: only likely-flaky jobs)',
+  summary: 'Rerun failed jobs of completed runs on the PR head, or of one run (--flaky: only likely-flaky jobs)',
   description:
-    'Reruns the failed jobs of completed Actions runs for the current head, skipping runs still in progress ' +
+    'Reruns the failed jobs of completed Actions runs for the current PR head, or of one run (run:<id>, for CI ' +
+    'without a PR, such as main). The run id pins a run target to its commit; --expect-head checks it. Runs still in progress are skipped ' +
     '(RUN_IN_PROGRESS) and runs at ci.maxRerunAttempts (RERUN_LIMIT, default 3). --job reruns matching jobs; ' +
     '--flaky only jobs with flake evidence (NO_FLAKY_CANDIDATES if none), never widening to a real failure: ' +
     'one job per run at a time, the rest DEFERRED until that run completes. A rerun reuses the original merge ' +
     'ref: after a base change, use ghx ci retrigger.',
   kind: 'write',
   input: Input,
-  positionals: ['pr'],
+  positionals: ['target'],
   output: Output,
   needs: { repo: 'inferred', config: 'optional' },
   timeout: { defaultMs: 120_000, maxMs: 300_000 },
-  replaces: ['gh run rerun', 'gh run rerun --failed', 'gh run rerun --job'],
+  replaces: ['gh run rerun <run-id>', 'gh run rerun <run-id> --failed', 'gh run rerun <run-id> --job'],
   examples: [
     { argv: 'ghx ci rerun powerhouse-inc/powerhouse#3301 --flaky', note: 'Rerun only the jobs that look flaky' },
     { argv: 'ghx ci rerun 3301', note: 'Rerun every failed job of the completed runs on the head' },
     { argv: "ghx ci rerun 3301 --job 'Test Reactor*'", note: 'Rerun matching failed jobs' },
+    { argv: 'ghx ci rerun run:40345582950 -R owner/repo', note: 'Rerun the failed jobs of one run (main, no PR)' },
     {
       argv: 'ghx ci rerun 3301 --override RERUN_LIMIT --reason "user asked in chat"',
       note: 'Past ci.maxRerunAttempts',
     },
   ],
   async run(input, ctx) {
-    const target = parseTargetRef(input.pr);
-    if (target.kind !== 'pr') {
-      throw new GhxError('USAGE_BAD_SELECTOR', `'${input.pr}' is not a PR selector.`, {
-        hint: 'Use 3198, #3198, owner/repo#3198 or a PR URL.',
-      });
-    }
+    const target = parseCiTarget(input.target, 'ci rerun', ['pr', 'run']);
     const overrides = parseCommandOverrides(input.override, input.reason, ['RERUN_LIMIT'] as const);
-    const resolved = await ctx.repo({ ref: target.repo });
+    const resolved = await ctx.repo({ ref: targetRepo(target) });
     const { repo } = resolved;
     const ci = (await ctx.config({ ref: repo })).config.ci;
-    let snapshot: Awaited<ReturnType<typeof fetchCiSnapshot>>;
-    try {
-      snapshot = await fetchCiSnapshot({ gh: ctx.gh, repo, number: target.number, ignore: ci.ignore, warn: ctx.warn });
-    } catch (e) {
-      throw enrichNotFound(e, resolved, `PR #${target.number}`);
-    }
-    const ref = formatPrRef(repo, snapshot.number);
-    const headSha = snapshot.headSha;
-    assertExpectHead(ref, headSha, input.expectHead);
+    const subject = await readSubject(ctx, resolved, target, ci.ignore);
+    // `ref` in hints and `next`: owner/repo#N, or `run:<id> -R owner/repo`.
+    const ref = subject.arg;
+    const headSha = subject.headSha;
+    if (target.kind === 'pr') assertExpectHead(ref, headSha, input.expectHead);
+    else assertRunCommit(target.runId, headSha, input.expectHead);
 
     const classifyInput = {
       repo,
       ref,
       headSha,
-      ciState: snapshotSummary(snapshot).state,
-      checks: snapshot.checks,
+      ciState: subject.summary.state,
+      checks: subject.checks,
       jobPatterns: (input.job ?? []).map(wildcard),
       maxAttempts: ci.maxRerunAttempts ?? DEFAULT_MAX_RERUN_ATTEMPTS,
       overrideLimit: overrides !== null,
     };
     const rows = new Map<number, ActionsRun>();
     for (const runId of failingRunIds(classifyInput)) {
-      rows.set(runId, await fetchRun({ gh: ctx.gh, repo, runId }));
+      rows.set(runId, subject.runRows.get(runId) ?? (await fetchRun({ gh: ctx.gh, repo, runId })));
     }
     const { rerunnable, skipped } = classifyRuns(classifyInput, rows);
 
@@ -141,8 +145,8 @@ export default defineCommand({
         clock: ctx.clock,
         repo,
         headSha,
-        defaultBranch: snapshot.defaultBranch,
-        runs: snapshot.runs,
+        defaultBranch: subject.defaultBranch,
+        runs: subject.runs,
         config: ci,
         warn: ctx.warn,
       });
@@ -205,7 +209,8 @@ export default defineCommand({
     const rerunIds = new Set(done.map((a) => a.runId));
     const deferred = selection.skipped.filter((s) => s.reason === 'DEFERRED' && rerunIds.has(s.runId));
     return {
-      ref,
+      ref: subject.ref,
+      target: subject.target,
       headSha,
       rerun: done.map((a) => ({
         runId: a.runId,
@@ -225,3 +230,16 @@ export default defineCommand({
     };
   },
 });
+
+/** --expect-head for a run target: the run's commit is fixed, so a mismatch names another commit's run. */
+function assertRunCommit(runId: number, head: string, expected: string | undefined): void {
+  if (expected === undefined || head.startsWith(expected)) return;
+  throw new GhxError(
+    'HEAD_MOVED',
+    `Run ${runId} is for commit ${head.slice(0, 7)}, expected ${expected.slice(0, 7)}.`,
+    {
+      hint: `That run belongs to another commit. Find the run for ${expected.slice(0, 7)}: ghx ci why branch:<name>@${expected.slice(0, 7)}.`,
+      details: { expected, actual: head, runId },
+    },
+  );
+}

@@ -1,4 +1,4 @@
-// ghx ci rerun <pr> (02 §13.1; 03 M5.1), in-process over the fake GitHub in ci-why-world.ts.
+// ghx ci rerun <pr|run:<id>> (02 §13.1; 03 M5.1), in-process over the fake GitHub in ci-why-world.ts.
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
@@ -388,4 +388,68 @@ test('--flaky with every red job of the run a candidate reruns the run with reru
   assert.equal(r.exitCode, EXIT.OK, r.stdout);
   assert.deepEqual(posts(fake), [`repos/${SLUG}/actions/runs/500/rerun-failed-jobs`]);
   assert.deepEqual(r.json.skipped, []);
+});
+
+// --- run:<id>: one workflow run, without a PR (main) ---
+
+async function rerunRun(fake: FakeGh, target: string, args: string[] = []) {
+  const artifacts = mkdtempSync(join(scratchDir(), 'rerun-'));
+  return runInProcess(['ci', 'rerun', target, '-R', SLUG, ...args], { gh: fake, env: { GHX_ARTIFACT_DIR: artifacts } });
+}
+
+test('run:<id> reruns that run’s failed jobs from one read of the run and its jobs, with no PR', async () => {
+  const w = world([red(101, 'test'), { id: 102, runId: 500, name: 'lint', conclusion: 'success' }]);
+  const fake = scene(w);
+  const r = await rerunRun(fake, 'run:500');
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.ref, null);
+  assert.equal(r.json.target, 'run:500');
+  assert.equal(r.json.headSha, H);
+  assert.deepEqual(
+    r.json.rerun.map((x: { runId: number; method: string; jobs: string[] }) => [x.runId, x.method, x.jobs]),
+    [[500, 'failed-jobs', ['test']]],
+  );
+  assert.deepEqual(r.json.next, ['ghx ci wait run:500 -R o/r']);
+  assert.deepEqual(posts(fake), [`repos/${SLUG}/actions/runs/500/rerun-failed-jobs`]);
+  fake.expectNoCall({ prefix: ['api', 'graphql'] });
+  assert.equal(fake.calls.filter((c) => pathOf(c.argv) === `repos/${SLUG}/actions/runs/500`).length, 1);
+});
+
+test('run:<id> --job reruns one matching job through jobs/{id}/rerun', async () => {
+  const fake = scene(world([red(101, 'test'), red(103, 'e2e')]));
+  const r = await rerunRun(fake, 'run:500', ['--job', 'e2e']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(posts(fake), [`repos/${SLUG}/actions/jobs/103/rerun`]);
+});
+
+test('run:<id> with a sibling job still running is RUN_IN_PROGRESS; the hint waits on the run in the background', async () => {
+  const fake = scene(world([red(101, 'test'), { id: 102, runId: 500, name: 'e2e', conclusion: null }]));
+  const r = await rerunRun(fake, 'run:500');
+  assert.equal(r.exitCode, EXIT.STATE, r.stdout);
+  assert.equal(r.json.error.code, 'RUN_IN_PROGRESS');
+  assert.match(r.json.error.hint, /ghx ci wait run:500 -R o\/r --until settled with run_in_background: true/);
+  assert.match(r.json.error.hint, /ghx ci rerun run:500 -R o\/r/);
+  assert.deepEqual(posts(fake), []);
+});
+
+test('run:<id> --expect-head checks the run’s commit (HEAD_MOVED on another commit)', async () => {
+  const fake = scene(world([red(101, 'test')]));
+  const r = await rerunRun(fake, 'run:500', ['--expect-head', 'bbbbbbb']);
+  assert.equal(r.exitCode, EXIT.STATE, r.stdout);
+  assert.equal(r.json.error.code, 'HEAD_MOVED');
+  assert.match(r.json.error.message, /Run 500 is for commit aaaaaaa/);
+  assert.deepEqual(posts(fake), []);
+  const ok = await rerunRun(scene(world([red(101, 'test')])), 'run:500', ['--expect-head', 'aaaaaaa']);
+  assert.equal(ok.exitCode, EXIT.OK, ok.stdout);
+});
+
+test('a run URL is a run target; a branch is not a ci rerun target', async () => {
+  const fake = scene(world([red(101, 'test')]));
+  const url = await rerunRun(fake, `https://github.com/${SLUG}/actions/runs/500`);
+  assert.equal(url.exitCode, EXIT.OK, url.stdout);
+  assert.equal(url.json.target, 'run:500');
+  const branch = await rerunRun(scene(world([red(101, 'test')])), 'branch:main');
+  assert.equal(branch.exitCode, EXIT.USAGE);
+  assert.equal(branch.json.error.code, 'USAGE_BAD_SELECTOR');
+  assert.match(branch.json.error.hint, /ci rerun does not take branch:.*it takes a PR .*run:<id>/);
 });

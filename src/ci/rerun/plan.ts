@@ -51,7 +51,7 @@ export interface RunClassification {
 
 export interface ClassifyInput {
   repo: RepoRef;
-  /** owner/repo#N, for hints. */
+  /** The target as a ghx argument, for hints: owner/repo#N or `run:<id> -R owner/repo`. */
   ref: string;
   headSha: string;
   ciState: CiSummary['state'];
@@ -144,7 +144,8 @@ export function nothingRerunnable(
       'RUN_IN_PROGRESS',
       `All failed runs for ${short} are still running; GitHub rejects reruns until a run completes.`,
       {
-        hint: `ghx ci wait ${ref} --until settled, then ghx ci rerun ${ref}.`,
+        // --until settled: the default first-failure would return at once on the failure already there.
+        hint: `Run ghx ci wait ${ref} --until settled with run_in_background: true; once it exits, ghx ci rerun ${ref}.`,
         details: { runs: running.map((s) => s.runId) },
       },
     );

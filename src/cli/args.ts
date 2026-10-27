@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import type { AnyCommandSpec } from '../core/command.ts';
 import { GhxError, mapZodIssues } from '../core/errors.ts';
-import { suggest } from '../core/suggest.ts';
+import { ghFlagAlias, suggest } from '../core/suggest.ts';
 import { parseJsonWithPosition } from '../util/json.ts';
 
 /** Global flags (01 §3.2): reserved, never derived from input. */
@@ -155,9 +155,13 @@ export interface ParsedArgv {
 
 function unknownFlagError(flag: string, commandName: string | undefined, known: readonly string[]): GhxError {
   const where = commandName ? `'ghx ${commandName}'` : 'ghx';
-  const suggestions = suggest(flag, known);
+  const alias = ghFlagAlias(commandName, flag);
+  const suggestions = alias === undefined ? suggest(flag, known) : alias.use !== undefined ? [alias.use] : [];
   let hint: string;
-  if (flag === '--json' || flag === '--jq' || flag === '-q' || flag === '--template') {
+  if (alias !== undefined) {
+    const use = alias.use !== undefined ? `gh's ${flag} is ${alias.use} in ghx` : `gh's ${flag} has no ghx flag`;
+    hint = `${use}${alias.note !== undefined ? `; ${alias.note}` : ''}.`;
+  } else if (flag === '--json' || flag === '--jq' || flag === '-q' || flag === '--template') {
     hint = `Output is a fixed schema; run '${commandName ? `ghx ${commandName}` : 'ghx <command>'} --schema' to see its fields.`;
   } else if (suggestions.length > 0) {
     hint = `Did you mean ${suggestions.join(' or ')}?`;
