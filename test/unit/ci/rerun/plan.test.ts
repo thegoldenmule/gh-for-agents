@@ -1,5 +1,5 @@
 // src/ci/rerun/plan.ts (02 §13.1; 03 M5.1): which runs ci rerun reruns, which it skips, the error when
-// none is left (NO_FAILED_RUNS > RUN_IN_PROGRESS > RERUN_LIMIT), and the per-run targeting.
+// none is left (WORKFLOW_INVALID > NO_FAILED_RUNS > RUN_IN_PROGRESS > RERUN_LIMIT), and the per-run targeting.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ActionsRun } from '../../../../src/ci/github.ts';
@@ -72,6 +72,26 @@ function codeOf(fn: () => unknown): string {
   return 'ok';
 }
 
+function codeAndError(fn: () => unknown): GhxError {
+  try {
+    fn();
+  } catch (e) {
+    assert.ok(e instanceof GhxError, String(e));
+    return e;
+  }
+  assert.fail('expected a GhxError');
+}
+
+/** A run GitHub rejected before any job ran, as checks.ts normalises it (invalid-runs.ts): no job id. */
+function rejected(runId: number): Check {
+  return {
+    ...check(0, runId, 'fail', '.github/workflows/ci.yml'),
+    jobId: null,
+    attempt: null,
+    url: `https://github.com/o/r/actions/runs/${runId}`,
+  };
+}
+
 /** Rows: [name, checks, run rows, expected outcome]. */
 const PRECEDENCE: [string, Check[], ActionsRun[], string][] = [
   ['no red check', [check(1, 10, 'pass')], [], 'NO_FAILED_RUNS'],
@@ -104,6 +124,20 @@ const PRECEDENCE: [string, Check[], ActionsRun[], string][] = [
     'ok',
   ],
   ['attempt 2 of 3', [check(1, 10, 'fail')], [row(10, { run_attempt: 2 })], 'ok'],
+  ['only a rejected run', [rejected(30), check(1, 10, 'pass')], [], 'WORKFLOW_INVALID'],
+  [
+    'a rejected run and one in progress: WORKFLOW_INVALID wins',
+    [rejected(30), check(1, 10, 'fail')],
+    [row(10, { status: 'in_progress' })],
+    'WORKFLOW_INVALID',
+  ],
+  [
+    'a rejected run and one at the limit: WORKFLOW_INVALID wins',
+    [rejected(30), check(1, 10, 'fail')],
+    [row(10, { run_attempt: 3 })],
+    'WORKFLOW_INVALID',
+  ],
+  ['a rejected run plus one rerunnable: no error', [rejected(30), check(1, 10, 'fail')], [row(10)], 'ok'],
 ];
 
 for (const [name, checks, rows, want] of PRECEDENCE) {
@@ -119,6 +153,42 @@ for (const [name, checks, rows, want] of PRECEDENCE) {
     );
   });
 }
+
+test('a rejected run is skipped as WORKFLOW_INVALID with its file, run page and the fix', () => {
+  const r = classifyRuns(input([rejected(30), check(1, 10, 'fail')]), new Map([[10, row(10)]]));
+  assert.deepEqual(
+    r.rerunnable.map((g) => g.runId),
+    [10],
+  );
+  const url = 'https://github.com/o/r/actions/runs/30';
+  assert.deepEqual(r.skipped, [
+    {
+      runId: 30,
+      workflow: '.github/workflows/ci.yml',
+      reason: 'WORKFLOW_INVALID',
+      attempt: null,
+      message: `Fix .github/workflows/ci.yml: GitHub rejected it before any job ran. Read the error on ${url}, then commit and push.`,
+      url,
+    },
+  ]);
+});
+
+test('WORKFLOW_INVALID names each rejected file and run page; --job matching no red job stays NO_FAILED_RUNS', () => {
+  const e = codeAndError(() => classifyRuns(input([rejected(30), rejected(31)]), new Map()));
+  assert.equal(e.code, 'WORKFLOW_INVALID');
+  assert.match(e.message, /\.github\/workflows\/ci\.yml \(run 30: https:\/\/github\.com\/o\/r\/actions\/runs\/30\)/);
+  assert.match(e.message, /run 31: https:\/\/github\.com\/o\/r\/actions\/runs\/31/);
+  assert.match(e.hint ?? '', /fix the file, then commit and push/);
+  assert.deepEqual(
+    ((e.details?.runs ?? []) as { runId: number }[]).map((x) => x.runId),
+    [30, 31],
+  );
+  const byJob = input([rejected(30), check(1, 10, 'fail', 'test')], { jobPatterns: [/^e2e$/] });
+  assert.equal(
+    codeOf(() => failingRunIds(byJob)),
+    'NO_FAILED_RUNS',
+  );
+});
 
 test('the RERUN_LIMIT override lets a run at the limit through', () => {
   const r = classifyRuns(

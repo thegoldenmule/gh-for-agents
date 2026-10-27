@@ -454,3 +454,63 @@ test('a run URL is a run target; a branch is not a ci rerun target', async () =>
   assert.match(branch.json.error.hint, /ci rerun does not take branch:.*it takes a PR .*run:<id>/);
   assert.match(branch.json.error.hint, /ghx ci why branch:main names the branch head's runs/);
 });
+
+// ── A run GitHub rejected before any job ran (invalid-runs.ts) ─────────────
+const BAD = 900;
+const BAD_URL = `https://github.com/${SLUG}/actions/runs/${BAD}`;
+const FIX = `Fix .github/workflows/ci.yml: GitHub rejected it before any job ran. Read the error on ${BAD_URL}, then commit and push.`;
+const rejectedWorld = (jobs: WJob[]) => world(jobs, { rejected: [{ id: BAD, path: '.github/workflows/ci.yml' }] });
+
+test('a PR whose only red is a rejected run is WORKFLOW_INVALID (exit 9) naming the file and run page; nothing is posted', async () => {
+  const fake = scene(rejectedWorld([{ id: 102, runId: 500, name: 'lint', conclusion: 'success' }]));
+  const r = await rerun(fake);
+  assert.equal(r.exitCode, EXIT.STATE, r.stdout);
+  assert.equal(r.json.error.code, 'WORKFLOW_INVALID');
+  assert.equal(
+    r.json.error.message,
+    `GitHub rejected .github/workflows/ci.yml (run ${BAD}: ${BAD_URL}) on aaaaaaa before any job ran. A rerun replays the same file, so nothing is rerun.`,
+  );
+  assert.match(r.json.error.hint, /fix the file, then commit and push/);
+  assert.deepEqual(r.json.error.details, { runs: [{ runId: BAD, file: '.github/workflows/ci.yml', url: BAD_URL }] });
+  fake.expectNoMutations();
+});
+
+test('run:<id> of a rejected run is WORKFLOW_INVALID, with --dry-run too (nothing to preview)', async () => {
+  for (const args of [[], ['--dry-run']]) {
+    const fake = scene(rejectedWorld([]));
+    const r = await rerunRun(fake, `run:${BAD}`, args);
+    assert.equal(r.exitCode, EXIT.STATE, r.stdout);
+    assert.equal(r.json.error.code, 'WORKFLOW_INVALID');
+    assert.deepEqual(posts(fake), []);
+  }
+});
+
+test('a rejected run beside a rerunnable one is skipped as WORKFLOW_INVALID, and next leads with the fix', async () => {
+  const fake = scene(rejectedWorld([red(101, 'test')]));
+  const r = await rerun(fake);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(
+    r.json.rerun.map((x: { runId: number }) => x.runId),
+    [500],
+  );
+  assert.deepEqual(r.json.skipped, [
+    {
+      runId: BAD,
+      workflow: '.github/workflows/ci.yml',
+      reason: 'WORKFLOW_INVALID',
+      attempt: null,
+      message: FIX,
+      url: BAD_URL,
+    },
+  ]);
+  assert.deepEqual(r.json.next, [FIX, 'ghx ci wait o/r#7']);
+  assert.deepEqual(posts(fake), [`repos/${SLUG}/actions/runs/500/rerun-failed-jobs`]);
+
+  const dry = await rerun(scene(rejectedWorld([red(101, 'test')])), ['--dry-run']);
+  assert.equal(dry.exitCode, EXIT.OK, dry.stdout);
+  assert.equal(dry.json.preview.rerun[0].runId, 500);
+  assert.deepEqual(
+    dry.json.preview.skipped.map((s: { runId: number; reason: string }) => [s.runId, s.reason]),
+    [[BAD, 'WORKFLOW_INVALID']],
+  );
+});

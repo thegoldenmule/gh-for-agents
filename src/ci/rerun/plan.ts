@@ -1,6 +1,8 @@
 // The pure half of `ghx ci rerun` (02 §13.1; 03 M5.1). Only red Actions checks on the head H count, grouped
 // by run. A run is skipped while still going (RUN_IN_PROGRESS, §3.1) or at ci.maxRerunAttempts
-// (RERUN_LIMIT, overridable). With nothing left: NO_FAILED_RUNS > RUN_IN_PROGRESS > RERUN_LIMIT.
+// (RERUN_LIMIT, overridable). A run GitHub rejected before any job ran (invalid-runs.ts) is never rerun:
+// its file is the same on every attempt, so it is skipped as WORKFLOW_INVALID. With nothing left:
+// WORKFLOW_INVALID > NO_FAILED_RUNS > RUN_IN_PROGRESS > RERUN_LIMIT.
 //
 // Targeting: a run is rerun with `rerun-failed-jobs`, except that one selected job (--job/--flaky) out of
 // several red ones goes through `jobs/{id}/rerun`. GitHub refuses a second job rerun while the run is going
@@ -12,12 +14,13 @@ import { GhxError } from '../../core/errors.ts';
 import type { RepoRef } from '../../gh/types.ts';
 import type { Check, CiSummary, Flake } from '../../schemas/ci.ts';
 import type { ActionsRun } from '../github.ts';
+import { invalidRunNext, isInvalidRunCheck } from '../invalid-runs.ts';
 import { isRed } from '../summary.ts';
 
 /** 02 §13.1: runs at this attempt or later are not rerun without an override. */
 export const DEFAULT_MAX_RERUN_ATTEMPTS = 3;
 
-export type SkipReason = 'RUN_IN_PROGRESS' | 'RERUN_LIMIT' | 'NOT_FLAKY' | 'DEFERRED' | 'REFUSED';
+export type SkipReason = 'RUN_IN_PROGRESS' | 'RERUN_LIMIT' | 'NOT_FLAKY' | 'DEFERRED' | 'REFUSED' | 'WORKFLOW_INVALID';
 
 export interface Skipped {
   runId: number;
@@ -25,10 +28,15 @@ export interface Skipped {
   reason: SkipReason;
   /** run_attempt when known. */
   attempt: number | null;
-  /** GitHub's refusal message (REFUSED, or a RUN_IN_PROGRESS race on the POST); when to rerun (DEFERRED). */
+  /**
+   * GitHub's refusal message (REFUSED, or a RUN_IN_PROGRESS race on the POST); when to rerun (DEFERRED);
+   * the file to fix and the run page (WORKFLOW_INVALID).
+   */
   message?: string;
   /** DEFERRED: the flaky candidates not rerun yet, because GitHub reruns one job per run at a time. */
   jobs?: string[];
+  /** WORKFLOW_INVALID: the run page, where GitHub shows why it rejected the file. */
+  url?: string;
 }
 
 export type RedJob = Check & { runId: number; jobId: number };
@@ -67,15 +75,21 @@ export interface ClassifyInput {
 export const isRedJob = (c: Check): c is RedJob =>
   c.kind === 'actions' && c.runId !== null && c.jobId !== null && isRed(c);
 
+/** A red check for a run GitHub rejected before any job ran: nothing to rerun, a file to fix. */
+export const isRejectedRun = (c: Check): boolean => isRed(c) && isInvalidRunCheck(c);
+
 export function runUrl(repo: RepoRef, runId: number): string {
   return `https://${repo.host}/${repo.owner}/${repo.name}/actions/runs/${runId}`;
 }
 
-/** The runs to read (`GET actions/runs/{id}`): runs with a red job --job selects. NO_FAILED_RUNS without any. */
+/**
+ * The runs to read (`GET actions/runs/{id}`): runs with a red job --job selects. NO_FAILED_RUNS without
+ * any, unless a rejected run is red (classifyRuns then names it).
+ */
 export function failingRunIds(i: Pick<ClassifyInput, 'checks' | 'jobPatterns' | 'headSha' | 'ciState'>): number[] {
   const red = i.checks.filter(isRedJob);
   const matched = red.filter((c) => matchesJob(c, i.jobPatterns));
-  if (matched.length === 0) throw noFailedRuns(i, red);
+  if (matched.length === 0 && (red.length > 0 || !i.checks.some(isRejectedRun))) throw noFailedRuns(i, red);
   return [...new Set(matched.map((c) => c.runId))];
 }
 
@@ -101,7 +115,7 @@ function noFailedRuns(i: Pick<ClassifyInput, 'headSha' | 'ciState' | 'jobPattern
 export function classifyRuns(i: ClassifyInput, runs: ReadonlyMap<number, ActionsRun>): RunClassification {
   const red = i.checks.filter(isRedJob);
   const rerunnable: RunGroup[] = [];
-  const skipped: Skipped[] = [];
+  const skipped: Skipped[] = i.checks.filter(isRejectedRun).map(rejectedSkip);
   for (const runId of new Set(red.filter((c) => matchesJob(c, i.jobPatterns)).map((c) => c.runId))) {
     const row = runs.get(runId);
     // Only runs on the head count [G-SHA]; a row for another commit is not this PR's CI.
@@ -128,7 +142,23 @@ export function classifyRuns(i: ClassifyInput, runs: ReadonlyMap<number, Actions
   return { rerunnable, skipped };
 }
 
-/** The error when no run is left: NO_FAILED_RUNS > RUN_IN_PROGRESS > RERUN_LIMIT > GitHub's refusal. */
+/** A rejected run, skipped: a rerun replays the same file, so GitHub would reject it again. `workflow` is the file. */
+function rejectedSkip(c: Check): Skipped {
+  return {
+    runId: c.runId as number,
+    workflow: c.name,
+    reason: 'WORKFLOW_INVALID',
+    attempt: c.attempt,
+    message: invalidRunNext([c]).join(''),
+    url: c.url,
+  };
+}
+
+/**
+ * The error when no run is left: WORKFLOW_INVALID > NO_FAILED_RUNS > RUN_IN_PROGRESS > RERUN_LIMIT >
+ * GitHub's refusal. A rejected file comes first: waiting or overriding the limit cannot fix it, and the
+ * push that does restarts every run.
+ */
 export function nothingRerunnable(
   i: Pick<ClassifyInput, 'ref' | 'headSha' | 'ciState' | 'jobPatterns' | 'maxAttempts'>,
   skipped: readonly Skipped[],
@@ -137,7 +167,10 @@ export function nothingRerunnable(
   const short = i.headSha.slice(0, 7);
   const { ref } = i;
   const of = (r: SkipReason) => skipped.filter((s) => s.reason === r);
-  if (skipped.length === 0) return noFailedRuns(i, red);
+  const rejected = of('WORKFLOW_INVALID');
+  // --job matching none of the red jobs: the names to pick from are the better answer.
+  if (rejected.length > 0 && !(red.length > 0 && i.jobPatterns.length > 0)) return workflowInvalid(i, rejected);
+  if (skipped.length === rejected.length) return noFailedRuns(i, red);
   const running = of('RUN_IN_PROGRESS');
   if (running.length > 0) {
     return new GhxError(
@@ -173,6 +206,20 @@ export function nothingRerunnable(
     hint: `Read the failure instead: ghx ci why ${ref}.`,
     details: { runs: refused.map((s) => ({ runId: s.runId, message: s.message ?? null })) },
   });
+}
+
+/** WORKFLOW_INVALID: each rejected file and its run page; the fix is a commit, never a rerun. */
+function workflowInvalid(i: Pick<ClassifyInput, 'headSha'>, rejected: readonly Skipped[]): GhxError {
+  const short = i.headSha.slice(0, 7);
+  const each = rejected.map((s) => `${s.workflow} (run ${s.runId}: ${s.url})`).join(', ');
+  return new GhxError(
+    'WORKFLOW_INVALID',
+    `GitHub rejected ${each} on ${short} before any job ran. A rerun replays the same file, so nothing is rerun.`,
+    {
+      hint: "Read GitHub's error on each run page, fix the file, then commit and push; the push starts CI again.",
+      details: { runs: rejected.map((s) => ({ runId: s.runId, file: s.workflow, url: s.url ?? null })) },
+    },
+  );
 }
 
 export interface JobFlake extends Flake {

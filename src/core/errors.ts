@@ -120,6 +120,8 @@ export const ERROR_CODES = {
   NO_FLAKY_CANDIDATES: { exit: ExitCode.STATE },
   HEAD_BRANCH_MISSING: { exit: ExitCode.STATE },
   MERGEABLE_UNKNOWN: { exit: ExitCode.STATE },
+  // ci rerun on a head whose only red is a run GitHub rejected before any job ran: fix the file, push.
+  WORKFLOW_INVALID: { exit: ExitCode.STATE },
 
   // ── 130 / 143 INTERRUPTED ────────────────────────────────────────────────
   INTERRUPTED: { exit: (d) => exitForSignal(typeof d?.signal === 'string' ? d.signal : undefined) },

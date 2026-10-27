@@ -46,7 +46,7 @@ const Input = z.strictObject({
   reason: z.string().optional().describe('Why the override is allowed (who asked); required with --override'),
 });
 
-const SkipReason = z.enum(['RUN_IN_PROGRESS', 'RERUN_LIMIT', 'NOT_FLAKY', 'DEFERRED', 'REFUSED']);
+const SkipReason = z.enum(['RUN_IN_PROGRESS', 'RERUN_LIMIT', 'NOT_FLAKY', 'DEFERRED', 'REFUSED', 'WORKFLOW_INVALID']);
 
 const Output = z.object({
   /** owner/repo#N for a PR; null for run:<id>. */
@@ -73,6 +73,8 @@ const Output = z.object({
       attempt: z.number().int().nullable(),
       message: z.string().optional(),
       jobs: z.array(z.string()).optional(),
+      /** WORKFLOW_INVALID: the run page, where GitHub shows the error. */
+      url: z.string().optional(),
     }),
   ),
   overrides: z.array(z.object({ code: z.literal('RERUN_LIMIT'), reason: z.string() })),
@@ -89,7 +91,8 @@ export default defineCommand({
     'without a PR, such as main). The run id pins a run target to its commit; --expect-head checks it. Runs still in progress are skipped ' +
     '(RUN_IN_PROGRESS) and runs at ci.maxRerunAttempts (RERUN_LIMIT, default 3). --job reruns matching jobs; ' +
     '--flaky only jobs with flake evidence (NO_FLAKY_CANDIDATES if none), never widening to a real failure: ' +
-    'one job per run at a time, the rest DEFERRED until that run completes. A rerun reuses the original merge ' +
+    'one job per run at a time, the rest DEFERRED until that run completes. A run GitHub rejected before any job ' +
+    'ran is never rerun (WORKFLOW_INVALID): fix the file and push. A rerun reuses the original merge ' +
     'ref: after a base change, use ghx ci retrigger.',
   kind: 'write',
   input: Input,
@@ -224,6 +227,8 @@ export default defineCommand({
       skipped: allSkipped,
       overrides: overrides ? [{ code: 'RERUN_LIMIT' as const, reason: overrides.reason }] : [],
       next: [
+        // A rejected file stays red after the rerun: fixing it is the other half of the work.
+        ...allSkipped.filter((s) => s.reason === 'WORKFLOW_INVALID').map((s) => s.message ?? ''),
         `ghx ci wait ${ref}`,
         ...deferred.map((s) => `ghx ci rerun ${ref} --flaky (after run ${s.runId} completes)`),
       ],
