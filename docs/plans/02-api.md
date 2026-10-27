@@ -872,7 +872,7 @@ This follows the user's decision of 2026-10-22 (brief): allowlisted reads only. 
 | Category | Subcommands | Behaviour |
 |---|---|---|
 | Allowlisted reads | `pr diff`, `pr list`, `issue view`, `issue list`, `search issues\|prs\|code\|repos\|commits`, `release list\|view`, `repo view`, `workflow list\|view`, `run list`, `run view` (without `--log`/`--log-failed`), `run download` (requires `-D <dir>`; writes local files only), `label list`, `api` (GET only) | Runs `gh` with `-R` injected when the repo has been resolved, and with env `GH_PAGER=cat GH_PROMPT_DISABLED=1 NO_COLOR=1 GH_NO_UPDATE_NOTIFIER=1` |
-| Refused, wrapped replacement exists (exit 2, `USAGE_UNKNOWN_COMMAND` with the replacement) | `pr view` → `pr status`. `pr checks` (including `--watch`) → `ci wait` (run in background, §11.0) or `pr status`. `run view --log*` → `ci why`. `run watch` → `ci wait`. `run rerun` → `ci rerun`. `pr create\|edit\|merge\|comment\|review` → the ghx equivalents. `pr ready` → `pr edit {"draft":false}` (a PR without a ghx block also needs `"adopt": true` and the full object). `pr close` → `pr comment --close`. `pr reopen` → `ci retrigger`, if retriggering is the intent. Guessed ghx commands that do not exist are refused the same way: `ci logs\|log\|view` → `ci why <pr\|run:<id>>`, `ci watch\|checks\|status` → `ci wait` (or `pr status`) | The hint carries the exact replacement argv; `details.suggestion` is that argv and `details.suggestions` the ghx command name, as for any unknown command |
+| Refused, wrapped replacement exists (exit 2, `USAGE_UNKNOWN_COMMAND` with the replacement) | `pr view` → `pr status`. `pr checks` (including `--watch`) → `ci wait` (run in background, §11.0) or `pr status`. `run view <id> --log*` → `ci why run:<id>`. `run watch <id>` → `ci wait run:<id>`. `run rerun <id>` (with or without `--failed`) → `ci rerun run:<id>`, and `--job <job-id>` → `--job '<job name>'`; without an id, `<pr\|run:<run-id>>`. `pr create\|edit\|merge\|comment\|review` → the ghx equivalents. `pr ready` → `pr edit {"draft":false}` (a PR without a ghx block also needs `"adopt": true` and the full object). `pr close` → `pr comment --close`. `pr reopen` → `ci retrigger`, if retriggering is the intent. Guessed ghx commands that do not exist are refused the same way: `ci logs\|log\|view` → `ci why <pr\|run:<id>>`, `ci watch\|checks\|status` → `ci wait` (or `pr status`) | The hint carries the exact replacement argv; `details.suggestion` is that argv and `details.suggestions` the ghx command name, as for any unknown command |
 | Refused writes (exit 6, `PASSTHROUGH_WRITE_REFUSED`) | Every other mutating subcommand: issue create/comment/edit/close, release create, repo/secret/variable/label writes, workflow run/enable, gist, `pr checkout` (it mutates local git). Also `api` with `-X`/`--method` other than GET, `api` with any of `-f`, `-F`, `--field`, `--raw-field` or `--input` (**gh silently switches these to POST**), and `api graphql` (always a POST) | |
 | Unknown | anything else | Exit 2, `USAGE_UNKNOWN_COMMAND` |
 
@@ -909,7 +909,7 @@ ghx ci wait <target> [<target>…] [--until first-failure|settled|mergeable] [--
             [--check <glob>]… [--no-diagnose] [--no-compare-main] [--stream]
 ```
 
-A target is a PR selector, `branch:<name>` or `branch:<name>@<sha>`.
+A target is a PR selector, `branch:<name>`, `branch:<name>@<sha>` or `run:<id>` (one workflow run; a run or job URL is that run). The same grammar, parsed in one place (`src/ci/wait/targets.ts`), is what `ci why` (§12) and `ci rerun` (§13.1) take. A bare word is never guessed to be a branch: `ghx ci wait main` is `USAGE_BAD_SELECTOR` (2) with `branch:main` in the hint, before any gh call.
 
 The command waits until CI for a bound SHA reaches a terminal state that ghx derives from CI itself. It then prints **one** self-contained JSON summary, with the diagnosis included, and exits with an outcome code. **The caller never supplies a duration.** It replaces 232 sleep loops, 44 Monitor scripts, 41 `--watch` calls, 74 perl alarms and 98 background runs (§5.2, §9.2). It is a pure read on 01's read-only client.
 
@@ -950,7 +950,7 @@ Why not Monitor:
 | `red` | 10 | A considered check failed and isn't shared with main |
 | `red-shared` | 11 | Every failure is shared with main (§1.5) |
 | `superseded` / `closed` | 12 | The head moved (with `--on-head-change stop`), or the PR closed or merged |
-| `no-checks` | 13 | Nothing registered within `--grace` (default 120 s) |
+| `no-checks` | 13 | Nothing registered within `--grace` (default 120 s). On a PR GitHub reports as conflicting, `reason` is `merge-conflict`: GitHub runs no `pull_request` workflow on a conflicting PR, so a `MERGE_CONFLICT` warning says to merge or rebase the base and push, and `next` names that merge instead of `ci retrigger` |
 | `stalled` | 14 | See the stall rules below |
 | `pending` | 15 | Self-return in an unattended session (below). Re-run the identical command |
 | `interrupted` | 130/143 | SIGINT or SIGTERM |
@@ -991,6 +991,7 @@ A stall ends the wait with the diagnosis so far, the stalled checks, and `next` 
 | `mergeable` | Settled, mergeable resolved (§4.3), and the merge CI gate evaluated (§8.2 rows 6–12) | green if no failures and MERGEABLE; red-shared if only shared failures and MERGEABLE; otherwise red, with `merge.blockers` |
 
 - red-shared exits 11 in every mode.
+- `mergeable` takes PR targets only. A branch or run target under it (`ghx ci wait branch:main --until mergeable`) is `VALIDATION` (2) before any gh call; use `--until settled`.
 - There is no `green` mode: it would be identical to `first-failure`.
 - Considered checks are the reported checks for the bound SHA, minus `ci.ignore` (§6), filtered by `--check`.
 
@@ -1022,6 +1023,9 @@ Phases:
 | PR | `headRefOid` at start | `restart`: emit `head-changed`, rebind, and reset grace and per-check state. The budget is not reset |
 | `branch:<name>` | Head at start | `stay`: keep the bound SHA and emit `branch-advanced`. Main moves with every merge; you want your own commit |
 | `branch:<name>@<sha>` | `<sha>` | `stay` |
+| `run:<id>` | The run's `head_sha` | Never changes. A rerun is a new attempt of the same run: its jobs replace the old ones, and the wait follows them |
+
+**Run targets.** `ci wait run:<id>` waits for one workflow run, all its jobs, with the same summary, diagnosis and exit codes; `target` is `run:<id>`. Each tick sends two conditional GETs, `actions/runs/{id}` and `actions/runs/{id}/jobs?filter=latest`; the jobs carry their run, so no suite mapping, and there is no GraphQL fallback (a failed tick is retried). There is no expected set (required and baseline checks belong to other workflows). A run whose status is not `completed` is never settled, even when every job listed so far is done, because jobs that `needs` others, a dynamic matrix and a rerun's new attempt appear later; and while it has no jobs yet it is waiting, not `no-checks`. `--until first-failure` still returns at the first failure, so after `ci rerun run:<id>` use `--until settled` to wait for the whole run. `next` names `ghx ci rerun run:<id> -R o/r --flaky` for flake candidates.
 
 - `--on-head-change stop` ends with `superseded` (12).
 - A PR that closes or merges mid-wait ends with `closed` (12).
@@ -1120,7 +1124,7 @@ const WaitSummary = z.object({ outcome: Outcome, exitCode: z.number(), results: 
 
 ### 11.10 Errors and gh calls
 
-- **Before the first line:** a plain error document: `USAGE_*` or `VALIDATION` (2), `PR_NOT_FOUND` (5), `ENV_*` (4), `GH_*` (7).
+- **Before the first line:** a plain error document: `USAGE_*` or `VALIDATION` (2), `PR_NOT_FOUND`, `RUN_NOT_FOUND` or `REF_NOT_FOUND` (5), `ENV_*` (4), `GH_*` (7).
 - **Mid-wait fatal:** a terminal `error` line, exit 7.
 
 gh calls:
@@ -1136,9 +1140,16 @@ gh calls:
 ## 12. `ci why`
 
 ```
-ghx ci why <pr> [--job <glob>]… [--no-compare-main] [--max-jobs 5] [--excerpt-lines 20]
-ghx ci why --run <run-id|run-url> [-R owner/repo]
+ghx ci why <pr|run:<id>|branch:<name>[@<sha>]> [--job <glob>]… [--no-compare-main] [--max-jobs 5] [--excerpt-lines 20]
+ghx ci why --run <run-id|run-url> [-R owner/repo]      # the same as run:<id>
 ```
+
+Targets are §11's grammar:
+- **A PR:** the failing checks on its head.
+- **`run:<id>`** (or `--run`, kept as an alias, or a run or job URL): that run's jobs.
+- **`branch:<name>`** (or `branch:<name>@<sha>`): "is main red, and why". It reads the branch head (or that commit), then every workflow's newest run on it, `actions/runs?head_sha=<sha>&branch=<name>`. One run per workflow (a re-triggered workflow counts once; a PR run that shares the commit is left out), at most 20. Every failing workflow on the head is diagnosed in one call, not just one run. `target` is `branch:<name>@<sha7>`, and `next` names `ghx ci rerun run:<id> -R o/r --flaky` per run with flake candidates, since `ci rerun` takes a PR or one run.
+
+Run and branch targets carry Actions checks only (commit statuses come with a PR's rollup), and `ref` is null; every output carries `target`.
 
 Answers "why is CI red?" in one call (§5.1, §9.1).
 
@@ -1149,7 +1160,7 @@ const FailingJob = z.object({ workflow: z.string(), job: z.string(), jobId: z.nu
   tests: z.array(z.string()).max(30), errors: z.array(z.string()).max(20), exitLine: z.string().nullable(),
   excerpt: z.string(),                // ≤ --excerpt-lines (default 20, cap 60), ≤ 2,000 chars
   logPath: z.string().nullable(), logBytes: z.number().nullable(), sameOnMain: SameOnMain, flake: Flake });
-const CiWhyOutput = z.object({ ref: PrRef.nullable(), headSha: Sha, ci: CiSummary, failing: z.array(FailingJob),
+const CiWhyOutput = z.object({ ref: PrRef.nullable(), target: z.string(), headSha: Sha, ci: CiSummary, failing: z.array(FailingJob),
   nonActionsFailing: z.array(Check),
   suspicious: z.array(z.object({ workflow: z.string(), job: z.string(), jobId: z.number(), step: z.string(),
     reason: z.enum(["key-step-skipped","no-tests-ran"]) })),          // §6 misleading green
@@ -1168,13 +1179,14 @@ With the defaults, 5 jobs fit under 16 KB; the spill is the safety net.
 | Exit | Codes |
 |---|---|
 | 0 | No failures (`failing: []`) |
-| 5 | `PR_NOT_FOUND`, `RUN_NOT_FOUND` |
+| 2 | `USAGE_BAD_SELECTOR` (a bare branch name: the hint says `branch:<name>`), `VALIDATION` |
+| 5 | `PR_NOT_FOUND`, `RUN_NOT_FOUND`, `REF_NOT_FOUND` (no such branch or commit) |
 | 7 | `GH_*` |
 
 An expired log sets `logPath:null` and warns `LOGS_UNAVAILABLE`.
 
 gh calls:
-1. Rollup with the oid check **[G-SHA]** (or `actions/runs/{id}` with `--run`).
+1. Rollup with the oid check **[G-SHA]**; for `run:<id>`, `actions/runs/{id}` and its jobs; for `branch:<name>`, `branches/<name>` (or `commits/<sha>`), `actions/runs?head_sha=&branch=`, and each run's jobs.
 2. For each failing job: `GET actions/jobs/{id}` and `…/logs` **[G-LOGS]**. Never `gh run view --log`.
 3. `GET actions/runs/{id}/jobs` for `ci.keySteps`.
 4. Main comparison (§1.5).
@@ -1187,23 +1199,24 @@ gh calls:
 ### 13.1 `ci rerun`
 
 ```
-ghx ci rerun <pr> [--job <glob>]… [--flaky] [--expect-head <sha>] [--override RERUN_LIMIT --reason "…"] [--dry-run]
+ghx ci rerun <pr|run:<id>> [--job <glob>]… [--flaky] [--expect-head <sha>] [--override RERUN_LIMIT --reason "…"] [--dry-run]
 ```
 
 Reruns failed jobs of completed runs for the current head only. §5.4 found 44 reruns, mostly after hand-parsing ids.
 
 - **Scope.** Only failing Actions runs with `head_sha == H` are considered.
+- **`run:<id>`** (or a run or job URL): that one run, for CI without a PR (main). It is read once, `actions/runs/{id}` plus its jobs, and the same selection, skips, limits, `--job`, `--flaky` and policy checks apply. There is no head to pin: the run id is the pin, since a run belongs to one commit and a rerun is a new attempt of the same run. `--expect-head` checks the run's commit (`HEAD_MOVED` names the other commit), `RERUN_LIMIT` reads the run's attempt, and GitHub itself refuses a rerun of a run in progress. A branch is not a `ci rerun` target (`USAGE_BAD_SELECTOR`): `ci why branch:<name>` lists the failing runs.
 - **Skips.** Runs not yet completed are skipped as `RUN_IN_PROGRESS` (§3.1). Runs at `run_attempt ≥ ci.maxRerunAttempts` (default 3) are skipped as `RERUN_LIMIT`.
 - **Targeting.** `--job` reruns matching jobs via `POST actions/jobs/{id}/rerun`. Otherwise ghx calls `POST actions/runs/{id}/rerun-failed-jobs`.
 - **`--flaky`** limits the rerun to jobs with a flake score of medium or higher (§11.8), reports their `flake` evidence, and fails with `NO_FLAKY_CANDIDATES` if there are none.
-- **Nothing to rerun:** the error is `NO_FAILED_RUNS`, `RUN_IN_PROGRESS` or `RERUN_LIMIT`, in that order of precedence.
+- **Nothing to rerun:** the error is `NO_FAILED_RUNS`, `RUN_IN_PROGRESS` or `RERUN_LIMIT`, in that order of precedence. GitHub rejects a rerun while any job of the run is still going, so `RUN_IN_PROGRESS`'s hint says what to do: `ghx ci wait <target> --until settled` with `run_in_background: true` (`<target>` is the PR, or `run:<id> -R o/r`), then the same `ci rerun`.
 - **Hint:** a rerun reuses the original merge ref. After a base change, use `ci retrigger`.
 
-Output: `{ref, headSha, rerun: [{runId, workflow, jobs, previousAttempt, url, flake}], skipped: [{runId, workflow, reason}], next: ["ghx ci wait <ref>"], warnings}`.
+Output: `{ref, target, headSha, rerun: [{runId, workflow, jobs, previousAttempt, url, flake}], skipped: [{runId, workflow, reason}], next: ["ghx ci wait <target>"], warnings}`. `ref` is null for `run:<id>`.
 
 gh calls:
-1. Rollup **[G-SHA]**.
-2. `GET actions/runs/{id}`.
+1. Rollup **[G-SHA]** (for `run:<id>`: `GET actions/runs/{id}` and its jobs, read once).
+2. `GET actions/runs/{id}` (a PR's failing runs).
 3. Flake checks (`--flaky` only).
 4. The rerun POSTs.
 
