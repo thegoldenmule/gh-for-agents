@@ -107,7 +107,13 @@ test('unknown flag gets a suggestion; --json gets the schema hint', async () => 
   assert.equal(r.json.error.code, 'USAGE_UNKNOWN_FLAG');
   assert.deepEqual(r.json.error.details, { flag: '--nmae', suggestions: ['--name'] });
   const j = await runInProcess(['version', '--json']);
-  assert.match(j.json.error.hint, /fixed schema.*ghx version --schema/);
+  assert.equal(
+    j.json.error.hint,
+    "Output is a fixed schema; --fields a.b,c[].d keeps the parts you need ('ghx version --schema' lists them).",
+  );
+  const brief = await runInProcess(['pr', 'status', '1', '--jq', '.state']);
+  assert.match(brief.json.error.hint, /^Output is a fixed schema; --fields a\.b,c\[\]\.d or --brief keeps the parts/);
+  assert.match(brief.json.error.hint, /'ghx pr status --schema' lists them/);
 });
 
 test('gh merge flags on ghx pr merge name the ghx form, and the policy that may refuse it', async () => {

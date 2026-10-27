@@ -153,7 +153,12 @@ export interface ParsedArgv {
   positionals: string[];
 }
 
-function unknownFlagError(flag: string, commandName: string | undefined, known: readonly string[]): GhxError {
+function unknownFlagError(
+  flag: string,
+  commandName: string | undefined,
+  known: readonly string[],
+  hasBrief = false,
+): GhxError {
   const where = commandName ? `'ghx ${commandName}'` : 'ghx';
   const alias = ghFlagAlias(commandName, flag);
   const suggestions = alias === undefined ? suggest(flag, known) : alias.use !== undefined ? [alias.use] : [];
@@ -162,7 +167,8 @@ function unknownFlagError(flag: string, commandName: string | undefined, known: 
     const use = alias.use !== undefined ? `gh's ${flag} is ${alias.use} in ghx` : `gh's ${flag} has no ghx flag`;
     hint = `${use}${alias.note !== undefined ? `; ${alias.note}` : ''}.`;
   } else if (flag === '--json' || flag === '--jq' || flag === '-q' || flag === '--template') {
-    hint = `Output is a fixed schema; run '${commandName ? `ghx ${commandName}` : 'ghx <command>'} --schema' to see its fields.`;
+    const cmd = commandName ? `ghx ${commandName}` : 'ghx <command>';
+    hint = `Output is a fixed schema; --fields a.b,c[].d${hasBrief ? ' or --brief' : ''} keeps the parts you need ('${cmd} --schema' lists them).`;
   } else if (suggestions.length > 0) {
     hint = `Did you mean ${suggestions.join(' or ')}?`;
   } else {
@@ -196,7 +202,9 @@ export function parseCommandArgv(
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
     const m = /'(-{1,2}[^'\s]+)'/.exec(err.message);
-    if (err.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') throw unknownFlagError(m?.[1] ?? '?', commandName, known);
+    if (err.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') {
+      throw unknownFlagError(m?.[1] ?? '?', commandName, known, spec?.brief !== undefined);
+    }
     throw new GhxError('VALIDATION', err.message.split('\n')[0] ?? 'invalid arguments', {
       details: { issues: [{ path: m?.[1] ?? '(argv)', code: 'invalid_flag', message: err.message.split('\n')[0] }] },
     });
