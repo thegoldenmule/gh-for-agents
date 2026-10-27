@@ -151,6 +151,12 @@ export interface Context {
   preview(value: unknown): void;
   /** stderr NDJSON, only with --verbose. */
   readonly log: Logger;
+  /**
+   * The --fields/--brief projection the runner applies to the returned document (src/core/fields.ts), or
+   * undefined. The handler still returns the whole document (it is validated and gives the exit code); one
+   * that bounds its own output measures and cuts what project(doc) keeps, so unselected parts cost nothing.
+   */
+  readonly project?: ((doc: unknown) => unknown) | undefined;
 }
 
 export interface StreamContext extends Context {

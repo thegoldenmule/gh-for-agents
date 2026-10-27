@@ -31,6 +31,8 @@ export interface ContextDeps {
   log: Logger;
   /** --repo */
   flagRepo?: string | undefined;
+  /** --fields/--brief, as the runner will apply it (Context.project). */
+  project?: ((doc: unknown) => unknown) | undefined;
 }
 
 export interface BuiltContext {
@@ -117,6 +119,7 @@ export function createContext(d: ContextDeps): BuiltContext {
     artifacts: d.artifacts,
     dryRun: d.dryRun,
     log: d.log,
+    ...(d.project ? { project: d.project } : {}),
     async repo(o = {}) {
       const r = await resolve(o.ref);
       if (!r) throw new GhxError('REPO_NOT_FOUND', 'Could not determine a repo.');

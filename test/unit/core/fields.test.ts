@@ -164,6 +164,21 @@ test('a results[] element keeps its identity, its error and its warnings whateve
   });
 });
 
+test('projection is idempotent: projecting a projected document changes nothing', () => {
+  // pr status measures project(doc) while fitting and the runner projects the returned document again.
+  const failed = { selector: '9', ref: null, error: { code: 'TIMEOUT', message: 'm', hint: null, details: null } };
+  const cases: [unknown, string[]][] = [
+    [doc, ['state', 'head.sha', 'merge.blockers[].code', 'meta.rev', 'ci']],
+    [{ results: [doc, failed], outcome: 'x' }, ['merge.blockers[].code', 'ci.failing[].name']],
+    [{ results: [failed] }, ['state']],
+  ];
+  for (const [d, fields] of cases) {
+    const tree = fieldTree(parseFields(fields));
+    const once = projectDocument(d, tree);
+    assert.deepEqual(projectDocument(once, tree), once, fields.join(','));
+  }
+});
+
 test('checkFields accepts real paths, records and nullable objects', () => {
   checkFields(statusSpec, parseFields(['state,head.sha,merge.blockers[].code,ci.failing[].name,meta.rev']));
   checkFields(statusSpec, parseFields(['extra.anything.below', 'warnings[].code']));

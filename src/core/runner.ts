@@ -275,6 +275,7 @@ export async function runCommandWith(
       verbose: globals.verbose === true,
       log,
       flagRepo: globals.repo,
+      project: out.project,
     });
     warnings = built.warnings;
     previews = built.previews;
