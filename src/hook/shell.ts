@@ -15,7 +15,8 @@ export interface ShellScan {
   invocations: Invocation[];
   /** A `|` or `|&` outside quotes. */
   pipe: boolean;
-  /** A while/until/for loop, or a `watch` wrapper. */
+  /** A while/until loop or a `watch` wrapper: repeats until something changes. A `for` over a fixed list
+   * (`for n in 3296 3297`) is not polling on its own; with a `sleep` in it, `sleep` catches it. */
   loop: boolean;
   /** A `sleep` command. */
   sleep: boolean;
@@ -52,6 +53,7 @@ const KEYWORDS = new Set([
   'time',
 ]);
 const LOOP_WORDS = new Set(['while', 'until', 'for', 'select']);
+const POLL_WORDS = new Set(['while', 'until']);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const REDIRECT = /^\d*(>>?|<<?<?|>&|<&|&>>?)(.*)$/;
 const MAX_DEPTH = 3;
@@ -211,7 +213,7 @@ export function scanShell(command: string, depth = 0): ShellScan {
       const t = w.text;
       if (!w.quoted && KEYWORDS.has(t)) {
         if (LOOP_WORDS.has(t)) {
-          out.loop = true;
+          if (POLL_WORDS.has(t)) out.loop = true;
           // `for x in a b c`: no command in this segment.
           if (t === 'for' || t === 'select') {
             i = words.length;

@@ -164,6 +164,20 @@ test('loops and sleeps around gh CI reads, in Bash or Monitor, name ghx ci wait'
   }
 });
 
+test('a for over a fixed list of PRs is not polling; one with a sleep is', () => {
+  for (const c of [
+    'for n in 3296 3297; do ghx pr status $n > /tmp/status-$n.json; done',
+    'for pr in 12 13; do gh pr checks $pr; done',
+  ]) {
+    const out = decideHook(bash(c), 'deny');
+    assert.doesNotMatch(out ? reason(out) : '', /Don't poll CI/, c);
+  }
+  assert.match(
+    reason(decideHook(bash('for i in 1 2 3; do ghx pr status 12; sleep 60; done'), 'deny')),
+    /ghx ci wait 12/,
+  );
+});
+
 test('Monitor running ghx ci wait is redirected to Bash with run_in_background', () => {
   const out = decideHook(monitor('ghx ci wait 12'), 'ask');
   assert.equal(out?.hookSpecificOutput.permissionDecision, 'ask');
