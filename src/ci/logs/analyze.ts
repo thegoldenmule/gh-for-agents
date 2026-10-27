@@ -1,12 +1,13 @@
 // One failed job, diagnosed (02 §12 steps 1–5): jobs-API row → log fetch and clean → step
 // attribution → extraction over the failing step's lines → excerpt. ci why builds FailingJob from
 // this; compare-main and flake use its test lists. Expired or not-ready logs degrade to warnings with
-// `logPath: null`; the step still comes from the API.
+// `logPath: null`; the step still comes from the API. A job that never got a runner (isNoRunner) has no
+// log to fetch: it is returned as is, `noRunner: true`, with no warning.
 import { readFileSync } from 'node:fs';
 import type { ArtifactStore } from '../../core/artifacts.ts';
 import type { Gh } from '../../gh/index.ts';
 import type { RepoRef } from '../../gh/types.ts';
-import { type ActionsJob, failingStep, fetchJob } from '../github.ts';
+import { type ActionsJob, failingStep, fetchJob, isNoRunner } from '../github.ts';
 import { excerpt, extractFailures } from './extract/index.ts';
 import { fetchJobLog, type LogWarning } from './fetch.ts';
 import { attributeSteps, spansFor } from './steps.ts';
@@ -27,6 +28,8 @@ export interface JobAnalysis {
   /** The cleaned lines the extractors read (the failing step, or the whole log). Not for output. */
   lines: string[];
   warnings: LogWarning[];
+  /** The job ended before any runner picked it up, so no log was fetched (isNoRunner). */
+  noRunner?: boolean;
 }
 
 export interface AnalyzeJobOptions {
@@ -45,6 +48,22 @@ export async function analyzeJob(o: AnalyzeJobOptions): Promise<JobAnalysis> {
   const job = o.job ?? (await fetchJob({ gh: o.gh, repo: o.repo, jobId: o.jobId }));
   const steps = job.steps ?? [];
   const step = failingStep(steps);
+  // What a job without a log yields: its step from the API, nothing extracted.
+  const none = {
+    job,
+    step,
+    tests: [],
+    testsTruncated: false,
+    errors: [],
+    exitLine: null,
+    excerpt: '',
+    runners: [],
+    logPath: null,
+    logBytes: null,
+    lines: [],
+  };
+  // No runner, no step: the log was never written, and its 404 would read as "still running".
+  if (isNoRunner(job)) return { ...none, warnings: [], noRunner: true };
   const fetched = await fetchJobLog({
     gh: o.gh,
     artifacts: o.artifacts,
@@ -52,22 +71,7 @@ export async function analyzeJob(o: AnalyzeJobOptions): Promise<JobAnalysis> {
     jobId: o.jobId,
     ...(o.timeoutMs !== undefined ? { timeoutMs: o.timeoutMs } : {}),
   });
-  if (!fetched.ok) {
-    return {
-      job,
-      step,
-      tests: [],
-      testsTruncated: false,
-      errors: [],
-      exitLine: null,
-      excerpt: '',
-      runners: [],
-      logPath: null,
-      logBytes: null,
-      lines: [],
-      warnings: [fetched.warning],
-    };
-  }
+  if (!fetched.ok) return { ...none, warnings: [fetched.warning] };
   const all = readFileSync(fetched.log.path, 'utf8').split('\n');
   if (all.at(-1) === '') all.pop();
   const own = step ? spansFor(attributeSteps(fetched.log.segments, steps, step), step.number) : [];

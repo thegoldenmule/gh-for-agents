@@ -77,7 +77,13 @@ export const SameOnMain = z.object({
 });
 
 export const FlakeScore = z.enum(['high', 'medium', 'low', 'none']);
-export const FlakeSignalKind = z.enum(['same-sha-passed', 'main-intermittent', 'known-flaky', 'infra-error']);
+export const FlakeSignalKind = z.enum([
+  'same-sha-passed',
+  'main-intermittent',
+  'known-flaky',
+  'infra-error',
+  'no-runner',
+]);
 
 export const Flake = z.object({
   candidate: z.boolean(),

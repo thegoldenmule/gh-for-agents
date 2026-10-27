@@ -29,6 +29,8 @@ export const ActionsJob = z.object({
   head_branch: z.string().nullish(),
   runner_id: z.number().int().nullish(),
   runner_name: z.string().nullish(),
+  /** The `runs-on` labels. */
+  labels: z.array(z.string()).nullish(),
   steps: z.array(ActionsStep).nullish(),
 });
 
@@ -42,6 +44,24 @@ export async function fetchJob(o: { gh: Gh; repo: RepoRef; jobId: number }): Pro
   });
   if (r.notModified) throw new Error('unreachable: unconditional request returned 304');
   return r.data;
+}
+
+/** Job conclusions that, with no runner and no step, mean the job never ran (isNoRunner). */
+const NO_RUNNER_CONCLUSIONS = ['cancelled', 'failure'];
+
+/**
+ * A job GitHub ended before any runner picked it up: completed red with no runner and no step, so it
+ * has no log (its log URL is a blob 404, which otherwise reads as "not ready"). Seen when a hosted
+ * runner pool is starved: the job sits queued, then GitHub cancels it. A run someone cancelled while
+ * the job was still queued looks the same from the job alone.
+ */
+export function isNoRunner(j: Pick<ActionsJob, 'status' | 'conclusion' | 'runner_name' | 'steps'>): boolean {
+  return (
+    j.status === 'completed' &&
+    NO_RUNNER_CONCLUSIONS.includes(j.conclusion ?? '') &&
+    !j.runner_name &&
+    (j.steps ?? []).length === 0
+  );
 }
 
 const RED_STEP = ['failure', 'timed_out', 'cancelled'];

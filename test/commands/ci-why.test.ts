@@ -9,6 +9,7 @@ import {
   httpReply,
   install,
   mainRun,
+  noRunnerJob,
   okJson,
   recordedJob,
   sha,
@@ -201,6 +202,23 @@ test('a flaky candidate (infra error in the log) puts ci rerun --flaky in next',
   });
   assert.equal(r.json.failing[0].flake.score, 'high');
   assert.ok(r.json.next.includes('ghx ci rerun o/flaky#8 --flaky'));
+});
+
+test('a job GitHub cancelled before any runner picked it up (recorded): no-runner, no LOGS_NOT_READY, rerun in next', async () => {
+  const job = noRunnerJob();
+  const r = await why({ slug: 'o/r', number: 9, headSha: sha('a'), jobs: [job] });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.ci.state, 'red');
+  const f = FailingJob.parse(r.json.failing[0]);
+  assert.equal(f.job, 'pack-test (macos-latest)');
+  assert.equal(f.conclusion, 'cancelled');
+  assert.equal(f.logPath, null);
+  assert.equal(f.flake.candidate, true);
+  assert.match(f.flake.signals[0]?.detail ?? '', /never got a runner: cancelled after 15m queued/);
+  assert.equal(f.flake.signals[0]?.kind, 'no-runner');
+  assert.deepEqual(r.json.warnings ?? [], []);
+  assert.deepEqual(r.json.next, ['ghx ci rerun o/r#9 --flaky']);
+  r.fake.expectNoCall((a) => a.some((x) => x.endsWith('/logs')));
 });
 
 test('a PR that does not exist is PR_NOT_FOUND, exit 5', async () => {

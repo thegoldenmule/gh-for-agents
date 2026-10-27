@@ -12,7 +12,7 @@ import type { ProcessRunner, ProcRequest, ProcResult } from '../../src/proc/runn
 import { type FakeClock, flush } from '../helpers/fake-clock.ts';
 import { fakeGit } from '../helpers/fake-git.ts';
 import { type HarnessOptions, runInProcess, scratchDir } from '../helpers/harness.ts';
-import { httpReply, vitestLog } from './ci-why-world.ts';
+import { httpReply, recorded, vitestLog } from './ci-why-world.ts';
 
 export { vitestLog };
 export const sha = (c: string): string => c.repeat(40);
@@ -30,6 +30,8 @@ export interface SimJob {
   startedAt?: number;
   completedAt?: number;
   runnerId?: number | null;
+  /** GitHub ended it before any runner picked it up: no runner, no steps, and its log is a blob 404. */
+  noRunner?: boolean;
   /** Failing tests for the log (vitest format). */
   tests?: string[];
   /** Extra log lines (e.g. an infra error). */
@@ -270,6 +272,7 @@ export class GitHubSim {
           number: 2,
         },
       ],
+      ...(j.noRunner ? { runner_id: 0, runner_name: '', labels: ['macos-latest'], steps: [] } : {}),
     };
   }
 
@@ -434,6 +437,7 @@ export class GitHubSim {
     if (m) {
       const hit = this.#allJobs().find((x) => x.job.id === Number(m?.[1]));
       if (!hit) return this.#notFound();
+      if (hit.job.noRunner) return { status: 404, ...recorded('logs/no-runner-cancelled/002-logs.json') };
       const BOM = String.fromCharCode(0xfeff);
       return {
         status: 200,

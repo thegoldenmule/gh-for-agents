@@ -7,9 +7,12 @@ import {
   detectIntermittent,
   type FlakeJob,
   matchKnownFlaky,
+  noRunnerSignal,
   scoreFlake,
 } from '../../../src/ci/flake.ts';
+import { ActionsJob } from '../../../src/ci/github.ts';
 import { Flake } from '../../../src/schemas/ci.ts';
+import { noRunnerRow } from '../../commands/ci-why-world.ts';
 import { ciEnv, ok, repoOf } from './_helpers.ts';
 import { analyzeRecorded, corpusLog } from './logs/_recorded.ts';
 
@@ -42,11 +45,24 @@ test('score table: high, medium, none; candidate is medium or higher', () => {
   assert.deepEqual(scoreFlake([]), { candidate: false, score: 'none', signals: [] });
   assert.equal(scoreFlake([sig('same-sha-passed')]).score, 'high');
   assert.equal(scoreFlake([sig('infra-error')]).score, 'high');
+  assert.equal(scoreFlake([sig('no-runner')]).score, 'high');
   assert.equal(scoreFlake([sig('main-intermittent')]).score, 'medium');
   assert.equal(scoreFlake([sig('known-flaky')]).score, 'medium');
   assert.equal(scoreFlake([sig('known-flaky'), sig('infra-error')]).score, 'high');
   assert.equal(scoreFlake([sig('known-flaky')]).candidate, true);
   Flake.parse(scoreFlake([sig('main-intermittent')]));
+});
+
+test('no-runner on the recorded job (run 40523740737): how long it queued, no log, rerun, and its labels', () => {
+  const row = ActionsJob.parse(noRunnerRow());
+  assert.deepEqual(noRunnerSignal(row), {
+    kind: 'no-runner',
+    detail:
+      'pack-test (macos-latest) never got a runner: cancelled after 15m queued, before any step ran, so there ' +
+      'is no log. Rerun it; if it repeats, check its runs-on labels (macos-latest).',
+  });
+  const bare = noRunnerSignal({ ...row, created_at: null, labels: null });
+  assert.match(bare.detail, /never got a runner: cancelled, before any step ran.*runs-on labels\.$/);
 });
 
 test('infra-error patterns: ECONNRESET, 429 Too Many Requests, No space left on device, runner shutdown', () => {

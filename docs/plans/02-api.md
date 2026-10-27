@@ -1082,8 +1082,9 @@ Phases:
 | `main-intermittent` | Test names parsed from ≤5 recent failed main runs interleave with passing runs. Parsed lists are cached by job id (logs are immutable) |
 | `known-flaky` | Matches `ci.knownFlaky: [{job, test?}]` |
 | `infra-error` | Log patterns: runner shutdown, `ECONNRESET`, `429 Too Many Requests` (Docker Hub, §1), `No space left on device`, plus `ci.infraPatterns` |
+| `no-runner` | The jobs API row alone: completed `cancelled` or `failure` with no runner (`runner_name` empty) and no steps. GitHub ended the job before any runner picked it up (a starved hosted pool: queued, then cancelled), so it has no log; its log URL is a blob 404 that would read as "not ready". No log is fetched, no `LOGS_NOT_READY` is warned and there is no main comparison (`sameOnMain: not-compared`). The detail says how long it queued and names its `runs-on` labels, to check if a rerun does not help. A run cancelled by hand while the job was queued looks the same |
 
-- **Score:** high = same-sha-passed or infra-error; medium = main-intermittent or known-flaky; otherwise low or none. A score of medium or higher makes the job a candidate.
+- **Score:** high = same-sha-passed, infra-error or no-runner; medium = main-intermittent or known-flaky; otherwise low or none. A score of medium or higher makes the job a candidate.
 - **Summary:** lists `rerunCandidates` and suggests `next: ["ghx ci rerun <ref> --flaky"]`.
 - **`ci wait` never reruns anything itself** (Pushback).
 

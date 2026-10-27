@@ -16,7 +16,7 @@ import {
 import { createGh } from '../../../src/gh/index.ts';
 import type { ProcessRunner } from '../../../src/proc/runner.ts';
 import { type Check, CI_CAPS, CompactDiagnosis, DiagnosisJob, type FailingJob } from '../../../src/schemas/ci.ts';
-import { install, logReply, sha, vitestLog, type WJob, type World } from '../../commands/ci-why-world.ts';
+import { install, logReply, noRunnerJob, sha, vitestLog, type WJob, type World } from '../../commands/ci-why-world.ts';
 import { ciEnv, repoOf } from './_helpers.ts';
 
 const HEAD = sha('a');
@@ -149,6 +149,37 @@ test('diagnose: a log that is not ready yet degrades to logPath null with LOGS_N
   assert.equal(d.partial, false);
   assert.equal(d.jobs[0]?.logPath, null);
   assert.ok(env.warnings.some((w) => w.code === 'LOGS_NOT_READY' && w.message.startsWith('job 1: ')));
+});
+
+test('diagnose: a job that never got a runner is no-runner (high, a rerun candidate), with no log fetch or warning', async () => {
+  const j = noRunnerJob();
+  const { env, diagnoser } = setup([j]);
+  const d = await diagnoser.diagnose([check(j, { bucket: 'cancelled', conclusion: 'cancelled' })]);
+  const f = d.jobs[0] as FailingJob;
+  assert.equal(f.conclusion, 'cancelled');
+  assert.equal(f.step, null);
+  assert.equal(f.logPath, null);
+  assert.equal(f.flake.score, 'high');
+  assert.equal(f.flake.candidate, true);
+  assert.deepEqual(
+    f.flake.signals.map((s) => s.kind),
+    ['no-runner'],
+  );
+  assert.equal(f.sameOnMain.verdict, 'not-compared', 'nothing ran, so nothing to compare');
+  assert.deepEqual(env.warnings, []);
+  env.fake.expectNoCall((a) => a.some((x) => x.endsWith('/logs')));
+  env.fake.expectNoCall((a) => a.some((x) => x.includes('/actions/workflows/')));
+  assert.deepEqual(compactDiagnosis(f), {
+    job: 'pack-test (macos-latest)',
+    workflow: 'CI',
+    jobId: j.id,
+    step: null,
+    tests: [],
+    firstError: null,
+    logPath: null,
+    sameOnMain: 'not-compared',
+    flake: 'high',
+  });
 });
 
 test('diagnose: a job the jobs API cannot find degrades with DIAGNOSIS_INCOMPLETE; other jobs are unaffected', async () => {

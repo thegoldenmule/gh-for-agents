@@ -59,6 +59,29 @@ test('run:<id>: a flaky failure suggests ci rerun run:<id> -R, not a PR', async 
   assert.ok(r.json.results[0].next.includes(`ghx ci rerun run:${RUN} -R o/r --flaky`), r.stdout);
 });
 
+test('run:<id>: a job cancelled before any runner picked it up is a no-runner rerun candidate, not LOGS_NOT_READY', async () => {
+  const starved = job(1, 'pack-test (macos-latest)', { conclusion: 'cancelled', noRunner: true });
+  const sim = new GitHubSim(new FakeClock(), state([starved, job(2, 'check')]));
+  const r = await wait(sim, [`run:${RUN}`, '-R', 'o/r']);
+  assert.equal(r.exitCode, EXIT.CI_RED, r.stdout);
+  const t = r.json.results[0];
+  assert.deepEqual(t.diagnosis.jobs[0], {
+    job: 'pack-test (macos-latest)',
+    workflow: 'CI',
+    jobId: 1,
+    step: null,
+    tests: [],
+    firstError: null,
+    logPath: null,
+    sameOnMain: 'not-compared',
+    flake: 'high',
+  });
+  assert.deepEqual(t.rerunCandidates, [1]);
+  assert.ok(t.next.includes(`ghx ci rerun run:${RUN} -R o/r --flaky`), r.stdout);
+  assert.ok(!(r.json.warnings ?? []).some((w: { code: string }) => w.code === 'LOGS_NOT_READY'), r.stdout);
+  assert.equal(sim.callsTo(/\/actions\/jobs\/1\/logs$/).length, 0, 'no log was ever written');
+});
+
 test('run:<id>: every listed job done while the run is still going is not settled; later jobs count', async () => {
   const sim = new GitHubSim(new FakeClock(), state([job(1, 'build')], { runs: { [RUN]: { status: 'in_progress' } } }));
   // A job that `needs` build appears at 3 min, completes green at 5 min; the run completes then.

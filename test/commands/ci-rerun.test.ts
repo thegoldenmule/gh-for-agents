@@ -11,6 +11,7 @@ import {
   install,
   jobRow,
   mainRun,
+  noRunnerRow,
   okJson,
   prRun,
   sha,
@@ -306,6 +307,16 @@ const flakyCases: FlakyCase[] = [
         red(9011, 'e2e', { runId: 901, headSha: sha('d'), log: { text: vitestLog([T]) } }),
       ],
     },
+  },
+  {
+    name: 'no-runner: GitHub cancelled it before any runner picked it up (recorded row)',
+    kind: 'no-runner',
+    score: 'high',
+    job: red(101, 'e2e', {
+      conclusion: 'cancelled',
+      row: { ...noRunnerRow(), id: 101, run_id: 500, name: 'e2e', head_sha: H },
+      log: undefined,
+    }),
   },
 ];
 

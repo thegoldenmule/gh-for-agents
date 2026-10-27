@@ -3,14 +3,16 @@
 // - main-intermittent: a failing test whose pass/fail sequence over recent main push runs changes at
 //   least twice; ≤5 failed main runs are parsed (cached by job id).
 // - known-flaky: ci.knownFlaky. infra-error: INFRA_PATTERNS plus ci.infraPatterns.
-// Score: high = same-sha-passed or infra-error; medium = main-intermittent or known-flaky; otherwise
-// none. 02 names `low`, but no rule produces it. gh-backed checks are skipped once they cannot change
-// the score.
+// - no-runner: the job ended before any runner picked it up (isNoRunner): no step ran and there is no
+//   log. Infrastructure, so a rerun is the fix; the diagnosis engine sets it without reading anything.
+// Score: high = same-sha-passed, infra-error or no-runner; medium = main-intermittent or known-flaky;
+// otherwise none. 02 names `low`, but no rule produces it. gh-backed checks are skipped once they cannot
+// change the score.
 import type { Gh } from '../gh/index.ts';
 import type { RepoRef } from '../gh/types.ts';
 import type { Flake } from '../schemas/ci.ts';
 import type { MainComparer } from './compare-main.ts';
-import { type ActionsRun, listRunJobs, listRunsForSha, listWorkflowRuns } from './github.ts';
+import { type ActionsJob, type ActionsRun, listRunJobs, listRunsForSha, listWorkflowRuns } from './github.ts';
 import { compilePatterns } from './logs/extract/generic.ts';
 import { capLine } from './logs/extract/index.ts';
 
@@ -37,7 +39,7 @@ export const MAX_SAME_SHA_LOOKUPS = 3;
 export function scoreFlake(signals: readonly FlakeSignal[]): Flake {
   const kinds = new Set(signals.map((s) => s.kind));
   const score =
-    kinds.has('same-sha-passed') || kinds.has('infra-error')
+    kinds.has('same-sha-passed') || kinds.has('infra-error') || kinds.has('no-runner')
       ? 'high'
       : kinds.has('main-intermittent') || kinds.has('known-flaky')
         ? 'medium'
@@ -52,6 +54,29 @@ export function detectInfraError(lines: readonly string[], extra: readonly strin
     if (hit) return { kind: 'infra-error', detail: capLine(`${hit.label}: ${l.trim()}`) };
   }
   return null;
+}
+
+/** no-runner for a job isNoRunner matched: how long it waited, and what to check if a rerun does not help. */
+export function noRunnerSignal(
+  j: Pick<ActionsJob, 'name' | 'conclusion' | 'created_at' | 'completed_at' | 'labels'>,
+): FlakeSignal {
+  const waited = elapsed(j.created_at, j.completed_at);
+  const labels = (j.labels ?? []).join(', ');
+  return {
+    kind: 'no-runner',
+    detail: capLine(
+      `${j.name} never got a runner: ${j.conclusion ?? 'cancelled'}${waited ? ` after ${waited} queued` : ''}, ` +
+        `before any step ran, so there is no log. Rerun it; if it repeats, check its runs-on labels${labels ? ` (${labels})` : ''}.`,
+    ),
+  };
+}
+
+/** `15m`, `40s`; '' when either end is unknown. */
+function elapsed(from: string | null | undefined, to: string | null | undefined): string {
+  const ms = from && to ? Date.parse(to) - Date.parse(from) : Number.NaN;
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.round(s / 60)}m`;
 }
 
 /** `*` matches any run of characters, `?` one; everything else is literal (test names contain `/` and `>`). */

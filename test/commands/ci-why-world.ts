@@ -77,7 +77,8 @@ export const serverError = (): GhReply => ({
   stderr: 'gh: HTTP 502\n',
 });
 
-function recorded(file: string): GhReply {
+/** A recorded reply under test/fixtures/gh/. */
+export function recorded(file: string): GhReply {
   const f = JSON.parse(readFileSync(join(GH_FIXTURE_ROOT, file), 'utf8')) as GhReply;
   return { exitCode: f.exitCode, stdout: f.stdout, stderr: f.stderr };
 }
@@ -336,6 +337,25 @@ export function recordedJob(runner: string, o: Partial<WJob> = {}): WJob {
     conclusion: 'failure',
     row,
     log: { file: join(dir, '002-logs.log') },
+    ...o,
+  };
+}
+
+/** The recorded jobs-API row of a job GitHub cancelled before any runner picked it up (no runner, no steps). */
+export function noRunnerRow(): Record<string, unknown> {
+  const { stdout } = recorded('logs/no-runner-cancelled/001-job.json');
+  return JSON.parse(stdout.split('\r\n\r\n')[1] ?? '{}') as Record<string, unknown>;
+}
+
+/** That job as a red PR job. No `log`: a log fetch for it has no rule, so it fails the test loudly. */
+export function noRunnerJob(o: Partial<WJob> = {}): WJob {
+  const row = noRunnerRow();
+  return {
+    id: row.id as number,
+    runId: row.run_id as number,
+    name: row.name as string,
+    conclusion: 'cancelled',
+    row,
     ...o,
   };
 }

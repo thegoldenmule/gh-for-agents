@@ -6,7 +6,9 @@
 // A job starts as a complete FailingJob built from its check alone; log analysis, then the main
 // comparison, then the flake signals overwrite its fields as they land, so a budget overrun
 // still returns everything finished. A gh failure in one stage degrades that job (warning
-// DIAGNOSIS_INCOMPLETE); control flow (TIMEOUT, INTERRUPTED, aborts) always propagates.
+// DIAGNOSIS_INCOMPLETE); control flow (TIMEOUT, INTERRUPTED, aborts) always propagates. A job that
+// never got a runner stops after the jobs-API read: flake `no-runner` (high, so a rerun candidate), no
+// log, and no main comparison (nothing ran to compare).
 import type { ArtifactStore } from '../core/artifacts.ts';
 import type { Clock } from '../core/clock.ts';
 import { rethrowControlFlow } from '../core/control-flow.ts';
@@ -21,7 +23,7 @@ import {
   type MainComparer,
   notCompared,
 } from './compare-main.ts';
-import { assessFlake, type KnownFlakyRule, scoreFlake } from './flake.ts';
+import { assessFlake, type KnownFlakyRule, noRunnerSignal, scoreFlake } from './flake.ts';
 import { analyzeJob, type JobAnalysis } from './logs/analyze.ts';
 import { capLine } from './logs/extract/index.ts';
 
@@ -207,6 +209,10 @@ export function createDiagnoser(o: DiagnoserOptions): Diagnoser {
       logPath: analysis.logPath,
       logBytes: analysis.logBytes,
     } satisfies Partial<FailingJob>);
+    if (analysis.noRunner) {
+      out.flake = scoreFlake([noRunnerSignal(analysis.job)]);
+      return;
+    }
     const workflowId = o.runs?.[String(c.runId)]?.workflowId ?? null;
     // Sequential, not concurrent: both may parse the same main job's log (comparer.jobTests), and the
     // second call must hit the comparer's disk cache rather than race the first on the same log file.
