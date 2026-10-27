@@ -710,6 +710,8 @@ ghx pr merge <pr> [--expect-head <sha>] [--method merge|squash|rebase]
 
 Merges only when policy allows. The merge is pinned to the evaluated head and the result is verified. This replaces §5.3. A squash uses the title `{PR title} (#N)` with the description as the commit message.
 
+gh's merge flags are not ghx flags. `USAGE_UNKNOWN_FLAG` names the ghx form in its hint and `details.suggestions` (the table is `GH_FLAG_ALIASES` in `src/core/suggest.ts`): `--merge|-m`, `--squash|-s`, `--rebase|-r` → `--method merge|squash|rebase` (argv is parsed before config loads, so the hint states the `merge.allowedMethods` rule rather than this repo's list), `--match-head-commit` → `--expect-head`, `-d` → `--delete-branch`. `--auto` and `--admin` have no ghx flag; the hint says what to do instead.
+
 ### 8.1 Flow and gh calls
 
 1. **Resolve and load config.** No config means `CONFIG_MISSING` (3).

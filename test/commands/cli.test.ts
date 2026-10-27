@@ -110,6 +110,31 @@ test('unknown flag gets a suggestion; --json gets the schema hint', async () => 
   assert.match(j.json.error.hint, /fixed schema.*ghx version --schema/);
 });
 
+test('gh merge flags on ghx pr merge name the ghx form, and the policy that may refuse it', async () => {
+  const rows: [argv: string[], suggestions: string[], hint: RegExp][] = [
+    [['--merge'], ['--method merge'], /^gh's --merge is --method merge in ghx; omit it to use merge\.method/],
+    [
+      ['--squash'],
+      ['--method squash'],
+      /--method squash.*METHOD_NOT_ALLOWED unless merge\.allowedMethods .* lists squash/,
+    ],
+    [['-s'], ['--method squash'], /^gh's -s is --method squash in ghx/],
+    [['-r'], ['--method rebase'], /lists rebase/],
+    [['--match-head-commit', 'abc1234'], ['--expect-head <sha>'], /--expect-head <sha>/],
+    [['--auto'], [], /no ghx flag.*ghx ci wait <pr> --until mergeable/],
+  ];
+  for (const [flags, suggestions, hint] of rows) {
+    const r = await runInProcess(['pr', 'merge', '3289', ...flags]);
+    assert.equal(r.exitCode, EXIT.USAGE, r.stdout);
+    assert.equal(r.json.error.code, 'USAGE_UNKNOWN_FLAG');
+    assert.deepEqual(r.json.error.details, { flag: flags[0], suggestions });
+    assert.match(r.json.error.hint, hint);
+    assert.equal(r.calls.length, 0);
+  }
+  const other = await runInProcess(['pr', 'status', '1', '--squash']);
+  assert.match(other.json.error.hint, /Run 'ghx pr status --help'/, 'the table is per command');
+});
+
 test('flags, positionals, variadic rest, numbers, repeats and negation', async () => {
   const r = await runInProcess([
     'test',
