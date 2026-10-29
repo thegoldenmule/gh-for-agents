@@ -1,7 +1,7 @@
 // Tier 2 replay oracle (plan 07, M4): the measurement pieces, world composition, and the done-when: every
 // question is answered correctly by the ghx and gh-expert scripts, the same way on every run.
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import {
@@ -14,6 +14,7 @@ import {
   selectQuestions,
   serializeReport,
 } from '../../scripts/eval/oracle/index.ts';
+import { fillPosted, isJsonWrite } from '../../scripts/eval/oracle/gh-shim.ts';
 import { SCRUB_ROOT, scrub } from '../../scripts/eval/oracle/scrub.ts';
 import { charCount } from '../../scripts/eval/oracle/tokens.ts';
 import { ARMS } from '../../scripts/eval/oracle/types.ts';
@@ -85,6 +86,27 @@ test('composeWorld: base scenarios then extras, in source order; stdoutFile copi
     () => composeWorld({ repo: 'o/r', base: [{ scenario: 'smoke/ci-why', skip: ['nope.json'] }] }, `${out}-2`),
     /no nope\.json to skip/,
   );
+});
+
+test('gh shim: a JSON write is recorded, and {{posted:<field>}} quotes it JSON-escaped', () => {
+  assert.ok(isJsonWrite(['api', '--include', '-X', 'POST', 'repos/o/r/pulls', '--input', '-']));
+  assert.ok(!isJsonWrite(['api', '--include', '-X', 'GET', 'repos/o/r/pulls/1']));
+  assert.ok(!isJsonWrite(['pr', 'create', '--title', 't']));
+  const posted = { title: 'feat: "x"', body: 'line 1\nline 2' };
+  assert.equal(
+    fillPosted('{"title":"{{posted:title}}","body":"{{posted:body}}","x":"{{posted:nope}}"}', posted),
+    '{"title":"feat: \\"x\\"","body":"line 1\\nline 2","x":"{{posted:nope}}"}',
+  );
+  assert.equal(fillPosted('{{posted:title}}', null), '{{posted:title}}');
+});
+
+test('every question file under oracle/questions is registered', () => {
+  const dir = join(import.meta.dirname, '..', '..', 'scripts', 'eval', 'oracle', 'questions');
+  const ids = readdirSync(dir)
+    .filter((f) => f.endsWith('.ts') && /export const question\b/.test(readFileSync(join(dir, f), 'utf8')))
+    .map((f) => f.slice(0, -3))
+    .sort();
+  assert.deepEqual(ids, QUESTIONS.map((q) => q.id).sort(), 'a question file is its id, and QUESTIONS lists it');
 });
 
 test('every question has a unique id, one answer per arm, and at least one fact', () => {

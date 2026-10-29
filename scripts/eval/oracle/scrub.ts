@@ -14,6 +14,8 @@ export interface ScrubRule {
 export const SCRUB_RULES: readonly ScrubRule[] = [
   // ci wait's events file: ci-wait-<epoch ms>-<random hex>.ndjson
   { id: 'ci-wait-events-name', pattern: /ci-wait-\d{13}-[0-9a-f]{8}/g, replace: 'ci-wait-0000000000000-00000000' },
+  // A new ghx block id (pr create): random.
+  { id: 'ghx-pr-block-id', pattern: /\bp_[0-9a-z]{6}\b/g, replace: 'p_000000' },
   // Seconds a ci wait ran: wall clock.
   { id: 'elapsed-sec', pattern: /"elapsedSec":\d+/g, replace: '"elapsedSec":0' },
 ];

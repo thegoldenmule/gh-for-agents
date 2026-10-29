@@ -1,10 +1,11 @@
 // Run a question's answers against the fake gh and measure them (plan 07, tier 2).
 //
 // Every answer gets its own directory: a composed scenario, a `git init` checkout whose origin is the world's
-// repo (the cwd of every step, carrying the world's .github/ghx.json), HOME, GHX_ARTIFACT_DIR and the fake gh's reply counters, so successive replies
-// (pending, pending, done) advance across the answer's steps and never leak into another answer. Steps run
-// through `bash -c` with an environment built from scratch: PATH is the fake gh, a `ghx` shim for this
-// checkout's bin/ghx.js, node, /usr/bin and /bin. Pipes, `tail` and `grep` in a script are real.
+// repo (the cwd of every step, carrying the world's .github/ghx.json), HOME, GHX_ARTIFACT_DIR and the fake gh's
+// reply counters, so successive replies (pending, pending, done) advance across the answer's steps and never
+// leak into another answer. Steps run through `bash -c` with an environment built from scratch: PATH is `gh`
+// (the fake gh behind gh-shim.ts), `ghx` (this checkout's bin/ghx.js), node, /usr/bin and /bin. Pipes, `tail`
+// and `grep` in a script are real.
 import { spawn, spawnSync } from 'node:child_process';
 import {
   chmodSync,
@@ -28,7 +29,7 @@ import { composeWorld, worldConfig } from './world.ts';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 const GHX_BIN = join(ROOT, 'bin', 'ghx.js');
-const FAKE_GH_DIR = join(ROOT, 'test', 'fixtures', 'bin');
+const GH_SHIM = join(import.meta.dirname, 'gh-shim.ts');
 const STEP_TIMEOUT_MS = 120_000;
 
 export interface StepResult {
@@ -99,12 +100,16 @@ function stepCall(s: Step): string {
   }
 }
 
-/** A directory with `ghx` (this checkout's bin) and `node`, shared by every answer of a run. */
+/** A directory with `gh` (the fake gh behind gh-shim.ts), `ghx` (this checkout's bin) and `node`. */
 function makeBinDir(dir: string): string {
   mkdirSync(dir, { recursive: true });
-  const ghx = join(dir, 'ghx');
-  writeFileSync(ghx, `#!/bin/sh\nexec '${process.execPath}' '${GHX_BIN}' "$@"\n`);
-  chmodSync(ghx, 0o755);
+  for (const [name, script] of [
+    ['gh', GH_SHIM],
+    ['ghx', GHX_BIN],
+  ] as const) {
+    writeFileSync(join(dir, name), `#!/bin/sh\nexec '${process.execPath}' '${script}' "$@"\n`);
+    chmodSync(join(dir, name), 0o755);
+  }
   if (!existsSync(join(dir, 'node'))) symlinkSync(process.execPath, join(dir, 'node'));
   return dir;
 }
@@ -183,7 +188,7 @@ export async function runAnswer(q: Question, a: Answer, dir: string, binDir: str
     if (s.tool === 'bash' || s.tool === 'bash-background') {
       const log = join(dir, 'logs', `${i}.ndjson`);
       const env: Record<string, string> = {
-        PATH: [FAKE_GH_DIR, binDir, '/usr/bin', '/bin'].join(':'),
+        PATH: [binDir, '/usr/bin', '/bin'].join(':'),
         HOME: join(dir, 'home'),
         TZ: 'UTC',
         LC_ALL: 'C',
