@@ -5,20 +5,6 @@ CLI. It wraps `gh`, which still handles auth and HTTP. Writes go through strict
 validation, and each common question takes one plain call that returns JSON.
 Callers don't need pipes, `--jq`, `sleep` or `timeout`.
 
-## Why
-
-Thirty days of agent transcripts (1,676 commands, 2,661 `gh` invocations)
-showed that real `gh` errors are rare. The cost is in call volume and the glue
-around it.
-
-- 55% of all `gh` invocations babysit CI. Finding out why CI failed takes a
-  median of 6 calls.
-- Agents improvised their own polling: 232 commands with `sleep`/`until`/`while`,
-  and 44 hand-written Monitor scripts.
-- The user corrected PR bodies twice to "2–3 sentences, no sections, no test
-  logs". The median body went from 2,406 characters to 568.
-- Only 8 of 52 merges pinned the head commit.
-
 ## What it does
 
 These are the v1 commands, specified in [02-api](docs/plans/02-api.md).
