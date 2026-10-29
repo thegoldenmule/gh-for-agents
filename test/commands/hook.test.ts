@@ -317,6 +317,44 @@ test('a foreground ghx ci wait chained with a raw write is denied, not rewritten
   assert.equal(out?.hookSpecificOutput.permissionDecision, 'deny');
 });
 
+// --- heredocs and command substitution ---
+
+test('a heredoc written to a file is data; one a shell reads is a script', () => {
+  const script = '#!/bin/bash\nwhile true; do gh pr checks 12; sleep 30; done\ngh pr merge 12 --merge\nEOF';
+  for (const c of [
+    `cat > /tmp/w/land.sh <<'EOF'\n${script}\nchmod +x /tmp/w/land.sh`,
+    `cat >> notes.md <<-EOF\n\tran gh pr merge 12\n\tEOF`,
+    `python3 - <<'PY'\nimport subprocess\nsubprocess.run(['gh', 'pr', 'merge', '12'])\nPY`,
+  ]) {
+    assert.equal(decideHook(bash(c), 'deny'), null, c);
+  }
+  for (const c of [`bash <<'EOF'\n${script}`, `timeout 600 sh -s 12 <<EOF\n${script}`]) {
+    assert.equal(decideHook(bash(c), 'ask')?.hookSpecificOutput.permissionDecision, 'deny', c);
+  }
+});
+
+test('the command after a heredoc is still seen, whatever quotes its body holds', () => {
+  const c =
+    "cat > /tmp/w/body.md <<'EOF'\nIt's \"done\" (mostly\nEOF\ngh pr create --title t --body-file /tmp/w/body.md";
+  assert.match(reason(decideHook(bash(c), 'ask')), /ghx pr create --input pr\.json/);
+  assert.match(reason(decideHook(bash('echo $((1<<2)); gh pr view 12 --comments'), 'ask')), /ghx pr feedback 12/);
+});
+
+test('"$(gh …)" inside double quotes is a call; the heredoc of a --body "$(cat <<EOF …)" is not', () => {
+  const cases: [string, RegExp][] = [
+    ['for p in 1 2; do echo "$(gh pr view $p --json state)"; done', /ghx pr status \$p/],
+    ['X="$(gh pr checks 12)"; echo "$X"', /ghx ci wait 12/],
+    ['until [ "$(gh pr checks 12 --json bucket -q length)" = 0 ]; do sleep 60; done', /`ghx ci wait 12`/],
+    ['echo "head: `gh pr view 12 --json headRefOid -q .headRefOid`"', /ghx pr status 12/],
+  ];
+  for (const [c, re] of cases) assert.match(reason(decideHook(bash(c), 'ask')), re, c);
+  const body = 'gh pr comment 12 --body "$(cat <<\'EOF\'\nSee "gh pr view 12" (it\'s red)\nEOF\n)"';
+  const out = decideHook(bash(body), 'off');
+  assert.equal(out?.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(reason(out), /ghx pr comment 12/);
+  assert.doesNotMatch(reason(out), /pr status/);
+});
+
 test('wrapped reads and pr reopen follow GHX_HOOK_MODE, with a leading -R too', () => {
   for (const c of ['gh -R o/r pr view 1', 'gh pr reopen 1', 'gh -R o/r pr checks 1']) {
     assert.equal(decideHook(bash(c), 'ask')?.hookSpecificOutput.permissionDecision, 'ask', c);

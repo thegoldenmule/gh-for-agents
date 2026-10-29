@@ -23,6 +23,35 @@ test('command: gh, ghx, mixed and other, with the subcommand after leading -R', 
   assert.equal(cmd('cd /tmp/w && GH_PAGER= ghx ci why 12').cli, 'ghx');
 });
 
+test('command: a heredoc body is data unless a shell runs it', () => {
+  const script = '#!/usr/bin/env bash\nfor pr in "$@"; do gh pr view $pr --json state; done\nEOF';
+  assert.equal(cmd(`cat > /tmp/w/x.sh <<'EOF'\n${script}\nchmod +x /tmp/w/x.sh`).cli, 'other');
+  assert.equal(cmd(`cat >> notes.md <<EOF\nmerged with gh pr merge 12\nEOF`).cli, 'other');
+  assert.equal(cmd(`git commit -q -F - <<'EOF'\nfeat: wrap gh pr create\nEOF`).cli, 'other');
+  assert.equal(cmd(`bash <<'EOF'\n${script}`).subcommand, 'gh pr view');
+  const after = cmd("cat > /tmp/w/body.md <<'EOF'\nIt's done\nEOF\ngh pr create --body-file /tmp/w/body.md");
+  assert.deepEqual(
+    after.invocations.map((i) => i.subcommand),
+    ['pr create'],
+    'an apostrophe in the body does not hide the call after it',
+  );
+});
+
+test('command: "$(gh …)" and "`gh …`" inside double quotes are calls, after the command that holds them', () => {
+  assert.equal(cmd('for p in 1 2; do echo "$(gh pr view $p --json state)"; done').subcommand, 'gh pr view');
+  assert.equal(cmd('X="$(gh pr checks 12)"').subcommand, 'gh pr checks');
+  assert.equal(cmd('echo "sha `ghx pr status 12 --fields headSha`"').cli, 'ghx');
+  const nested = cmd('echo "$(gh pr view "$p" --json state -q .state)"');
+  assert.deepEqual(nested.invocations[0]?.args, ['pr', 'view', '$p', '--json', 'state', '-q', '.state']);
+  const body = cmd('gh pr comment 12 --body "$(cat <<\'EOF\'\nRan "gh pr view 12" (it\'s red)\nEOF\n)"');
+  assert.deepEqual(
+    body.invocations.map((i) => i.subcommand),
+    ['pr comment'],
+    'the heredoc inside the substitution is still data',
+  );
+  assert.equal(cmd('echo "gh pr view $p"').cli, 'other', 'a variable alone is not a substitution');
+});
+
 test('command: dogfood launchers count as ghx (npx, pnpm exec, node bin/ghx.js)', () => {
   for (const c of [
     'npx -y @thegoldenmule/ghx pr status 12',

@@ -39,8 +39,11 @@ import {
 import { type BaselineDiff, buildReport, type Report, summarizeTables } from './report/json.ts';
 import { buildUnits } from './units/index.ts';
 
-/** Bump when model/session.ts changes a row's shape or meaning: the cache key does not cover that code. */
-export const TABLES_CACHE_SCHEMA = 'ghx-eval/tables@1';
+/**
+ * Bump when model/session.ts or the classifiers it calls (classify/, src/hook/shell.ts) change a row's shape
+ * or meaning: the cache key does not cover that code. @2: heredoc bodies are data and "$(…)" is scanned.
+ */
+export const TABLES_CACHE_SCHEMA = 'ghx-eval/tables@2';
 const TABLE_NAMES = ['sessions', 'agents', 'turns', 'api_calls', 'tool_calls'] as const;
 
 /** What reading the manifest's files turned up; counted, never dropped silently (determinism 6). */
