@@ -42,6 +42,8 @@ export function waitDraft(idx: TableIndex, f: FileIndex, ep: RawEpisode): Draft 
     category: backgroundMechanism(launch),
     intent: episodeIntent(ep.gh),
     pr: null,
+    prs: [],
+    callPrs: new Map(),
     flags,
     calls,
     span,

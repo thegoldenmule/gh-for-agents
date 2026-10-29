@@ -29,6 +29,8 @@ export function sessionDrafts(idx: TableIndex, atoms: readonly Draft[]): Draft[]
       category: 'session',
       intent: null,
       pr: null,
+      prs: [],
+      callPrs: new Map(),
       flags: new Set(s.has_main_file ? [] : ['no-main-file']),
       calls,
       span: sortCalls(

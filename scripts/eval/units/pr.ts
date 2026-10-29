@@ -99,6 +99,15 @@ export function assignPrs(idx: TableIndex, drafts: readonly Draft[]): void {
     }
     for (const d of ds) {
       const gh = d.calls.filter(isGitHubCall);
+      for (const t of gh) {
+        const own = named.get(t.tool_use_id) ?? [];
+        const before = lastBefore.get(t.tool_use_id) ?? null;
+        // Prototype pr_lifecycles: a call naming no PR is charged to the file's last-named PR, unless it is
+        // an unrelated read.
+        const prs = own.length > 0 ? own : t.intent === 'other_read' || before === null ? [] : [before];
+        d.callPrs.set(t.tool_use_id, prs);
+      }
+      d.prs = [...new Set(gh.flatMap((t) => d.callPrs.get(t.tool_use_id) ?? []))];
       const prs = [...new Set(gh.flatMap((t) => named.get(t.tool_use_id) ?? []))];
       if (prs.length > 0) {
         d.pr = prs.at(-1) as string;
@@ -210,7 +219,7 @@ export function buildCycles(idx: TableIndex, atoms: readonly Draft[]): Draft[] {
   return out;
 }
 
-/** Created in the unit: a create call. Merged: a merge call that exited 0 with no ghx error. */
+/** Created: a create call on the PR. Merged: a merge call on the PR that exited 0 with no ghx error. */
 function lifecycleFlags(calls: readonly ToolCallRow[]): string[] {
   const out: string[] = [];
   if (calls.some((t) => t.intents.includes('create'))) out.push('created');
@@ -232,11 +241,13 @@ function lifecycleFlags(calls: readonly ToolCallRow[]): string[] {
 export function buildLifecycles(idx: TableIndex, atoms: readonly Draft[]): Draft[] {
   const groups = new Map<string, Draft[]>();
   for (const d of atoms) {
-    if (d.pr === null || d.flags.has('derived')) continue;
-    const k = `${d.session_id}\u0000${d.pr}`;
-    const l = groups.get(k);
-    if (l) l.push(d);
-    else groups.set(k, [d]);
+    if (d.flags.has('derived')) continue;
+    for (const pr of d.prs) {
+      const k = `${d.session_id}\u0000${pr}`;
+      const l = groups.get(k);
+      if (l) l.push(d);
+      else groups.set(k, [d]);
+    }
   }
   const pushes = new Map<string, number[]>();
   for (const t of idx.tables.tool_calls) {
@@ -249,15 +260,18 @@ export function buildLifecycles(idx: TableIndex, atoms: readonly Draft[]): Draft
   for (const k of [...groups.keys()].sort()) {
     const ds = groups.get(k) as Draft[];
     const first = ds[0] as Draft;
+    const pr = k.slice(k.indexOf('\u0000') + 1);
     const contexts = new Set(ds.map((d) => d.context));
     const u = union(
       idx,
-      `pr_lifecycle:${first.session_id}:${first.pr}`,
-      { ...first, kind: 'pr_lifecycle', agent_id: null, context: contexts.has('main') ? 'main' : 'subagent' },
+      `pr_lifecycle:${first.session_id}:${pr}`,
+      { ...first, kind: 'pr_lifecycle', agent_id: null, context: contexts.has('main') ? 'main' : 'subagent', pr },
       ds,
     );
     if (contexts.size > 1) u.flags.add('mixed-context');
-    for (const f of lifecycleFlags(u.calls)) u.flags.add(f);
+    if (ds.some((d) => d.prs.length > 1)) u.flags.add('multi-pr');
+    const onPr = ds.flatMap((d) => d.calls.filter((t) => d.callPrs.get(t.tool_use_id)?.includes(pr) === true));
+    for (const f of lifecycleFlags(onPr)) u.flags.add(f);
     const shas = new Set(u.calls.flatMap((t) => t.result_head_shas.map(shaKey)));
     if (shas.size > 0) u.rounds = shas.size;
     else {

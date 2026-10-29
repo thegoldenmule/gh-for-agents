@@ -22,6 +22,12 @@ export interface Draft {
   category: string;
   intent: string | null;
   pr: string | null;
+  /**
+   * Every PR the unit's GitHub calls name or are charged to (prototype pr_lifecycles charges per call), and
+   * per call. A multi-PR unit joins each PR's lifecycle.
+   */
+  prs: string[];
+  callPrs: Map<string, string[]>;
   flags: Set<string>;
   /** Tool calls, global table order. */
   calls: ToolCallRow[];

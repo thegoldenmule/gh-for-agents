@@ -233,6 +233,8 @@ export function episodeDraft(idx: TableIndex, f: FileIndex, ep: RawEpisode): Dra
     category: intent,
     intent,
     pr: null,
+    prs: [],
+    callPrs: new Map(),
     flags,
     calls,
     span,
