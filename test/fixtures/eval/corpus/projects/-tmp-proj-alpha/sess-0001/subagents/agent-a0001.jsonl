@@ -1,0 +1,4 @@
+{"type":"user","sessionId":"sess-0001","agentId":"a0001","isSidechain":true,"uuid":"s-0001","timestamp":"2026-10-01T09:01:00.000Z","message":{"role":"user","content":"diagnose CI"}}
+{"type":"assistant","sessionId":"sess-0001","agentId":"a0001","isSidechain":true,"uuid":"s-0002","message":{"id":"msg-0002"
+
+{"type":"assistant","sessionId":"sess-0001","agentId":"a0001","isSidechain":true,"uuid":"s-0003","timestamp":"2026-10-01T09:01:04.000Z","message":{"id":"msg-0003","role":"assistant","content":[{"type":"text","text":"done"}]}}

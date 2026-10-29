@@ -1,0 +1,65 @@
+{
+  "schema": "ghx-eval/manifest@1",
+  "hash": "dce77bb3181eec5acd26e64cfd9d3b5be97f71f37d445c26713b1596bc25ad3d",
+  "root": "projects",
+  "createdAt": "2100-01-01T00:00:00.000Z",
+  "cutoff": "2099-12-31T18:00:00.000Z",
+  "windowHours": 6,
+  "include": [
+    "*.jsonl",
+    "*.meta.json",
+    "*.forked-skill*.json"
+  ],
+  "counts": {
+    "files": 6,
+    "bytes": 1635
+  },
+  "excluded": {
+    "recent": {
+      "files": 0,
+      "bytes": 0
+    },
+    "unmatched": {
+      "files": 5,
+      "bytes": 506
+    }
+  },
+  "files": [
+    {
+      "path": "-tmp-proj-alpha/sess-0001.jsonl",
+      "size": 714,
+      "mtime": "2026-10-29T15:54:03.288Z",
+      "sha256": "a199d526b35913bdc002a02789cd992744c49bbd5a2313bf115602a6b199704d"
+    },
+    {
+      "path": "-tmp-proj-alpha/sess-0001/subagents/agent-a0001.jsonl",
+      "size": 534,
+      "mtime": "2026-10-29T15:54:03.288Z",
+      "sha256": "758fc109d19b7fb69672b6cd21ec21886b358ee809063a768187258a34169ae3"
+    },
+    {
+      "path": "-tmp-proj-alpha/sess-0001/subagents/agent-a0001.meta.json",
+      "size": 169,
+      "mtime": "2026-10-29T15:54:03.288Z",
+      "sha256": "2eb7eabf21b62c082b98c26ef4878fd3a6e1ad6c4c71baf4157aefa660791b76"
+    },
+    {
+      "path": "-tmp-proj-alpha/sess-0001/subagents/agent-a0002.forked-skill.json",
+      "size": 55,
+      "mtime": "2026-10-29T15:54:03.288Z",
+      "sha256": "40532d906d2c104a9063b82c9db020edc45118845b4f16a96eb92e40679f8129"
+    },
+    {
+      "path": "-tmp-proj-alpha/sess-0001/subagents/agent-a0002.forked-skill.marker.json",
+      "size": 19,
+      "mtime": "2026-10-29T15:54:03.288Z",
+      "sha256": "4dfe7aae701668d304ced030094f9b2f956247fa0adb76cabe4f595f133837e8"
+    },
+    {
+      "path": "-tmp-proj-beta/sess-0002.jsonl",
+      "size": 144,
+      "mtime": "2026-10-29T15:54:03.288Z",
+      "sha256": "5d8dafbca9ba9d49673ef2cfb5862ed6e3685b41f4243ad16daab2c5082daf83"
+    }
+  ]
+}

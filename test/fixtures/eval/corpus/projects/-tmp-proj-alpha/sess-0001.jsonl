@@ -1,0 +1,4 @@
+{"type":"user","sessionId":"sess-0001","uuid":"u-0001","timestamp":"2026-10-01T09:00:00.000Z","message":{"role":"user","content":"héllo ✓ status of PR 1"}}
+{"type":"assistant","sessionId":"sess-0001","uuid":"u-0002","timestamp":"2026-10-01T09:00:05.000Z","message":{"id":"msg-0001","role":"assistant","content":[{"type":"tool_use","id":"toolu-0001","name":"Bash","input":{"command":"ghx pr status 1"}}]}}
+{"type":"user","sessionId":"sess-0001","uuid":"u-0003","timestamp":"2026-10-01T09:00:07.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu-0001","content":"{\"results\":[]}"}]}}
+{"type":"assistant","sessionId":"sess-0001","uuid":"u-0004","timestamp":"2026-10-01T09:00:09.0
