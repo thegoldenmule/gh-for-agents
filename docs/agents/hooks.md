@@ -115,3 +115,14 @@ The `run_in_background` rewrite never carries a decision in any mode.
 **It fails open.** Any internal error, unparseable stdin, an unknown tool, a missing `tool_input`, or a `cwd` it can't resolve to a configured repo exits 0 with no output (for gh calls), so a broken ghx never blocks the agent. It makes no gh or network calls, and loads only its own module, which keeps it well under the 100 ms budget.
 
 **Version note.** `updatedInput` without a permission decision was verified on Claude Code 2.1.280. Re-check it after a Claude Code upgrade with `node scripts/spike-hook.ts`, which works in a temp directory and never touches your settings.
+
+## Logs for evaluation (opt-in)
+
+Two local NDJSON logs record what the hook and ghx do, for measuring ghx against raw gh ([plan 07](../plans/07-ghx-eval.md)). Both are **off by default**: nothing is written unless the variable is set. They append to the path you give, write nothing else anywhere, never print to stdout or stderr, and a failed write (a missing directory, say) changes no reply, output or exit code. Neither sends anything over the network.
+
+| Variable | Written by | One line per |
+|---|---|---|
+| `GHX_HOOK_LOG=<path>` | `ghx hook claude-pretooluse` | Bash or Monitor command the hook sees, raw gh included: `session_id`, `tool_use_id`, `cwd`, `command`, the reply as `decision` (`allow`, `rewrite`, `ask`, `deny`) and the `rule` that fired |
+| `GHX_LOG=<path>` | every other ghx invocation | ghx call, written when it exits: `argv`, exit code, duration, stdout and stderr bytes, `session_id` (from `CLAUDE_CODE_SESSION_ID`) and `cwd`, and each gh and git call behind it with its argv, exit code and duration |
+
+Set them in the settings `env` block, which reaches both the Bash tool and hooks: `"env": { "GHX_HOOK_LOG": "/abs/path/hook.ndjson", "GHX_LOG": "/abs/path/ghx.ndjson" }`. Use absolute paths; a relative one resolves against each process's working directory. `joinInvocations` in `src/hook/join.ts` joins the two logs, giving each ghx invocation the `tool_use_id` of the Bash call that ran it.

@@ -150,6 +150,11 @@ and links `ghx` onto your `PATH`. `pnpm check` runs typecheck, lint and tests;
 `pnpm pack:test` packs and installs the package into a temp prefix. Releases:
 [RELEASING.md](RELEASING.md).
 
+`GHX_HOOK_LOG=<path>` and `GHX_LOG=<path>` turn on two local NDJSON logs, of what
+the hook decided and of each ghx call with the gh calls behind it, for measuring
+ghx against raw gh. Both are off by default and write only to the file you name.
+See [docs/agents/hooks.md](docs/agents/hooks.md#logs-for-evaluation-opt-in).
+
 This repo's own config is [.github/ghx.json](.github/ghx.json).
 
 ## Design docs
