@@ -56,7 +56,7 @@ let seq = 0;
 function unit(o: Partial<Unit> & { m?: Record<string, number | null> }): Unit {
   seq++;
   const { m, ...rest } = o;
-  return {
+  const u = {
     unit_id: `u${String(seq).padStart(4, '0')}`,
     kind: 'episode',
     session_id: 'sess-a',
@@ -74,8 +74,10 @@ function unit(o: Partial<Unit> & { m?: Record<string, number | null> }): Unit {
     metrics: { round_trips: 1, tool_calls: 1, cost_norm: 0.1, errors: 0, ...m },
     children: [],
     start_pos: seq,
+    intent: null,
     ...rest,
   };
+  return u as Unit;
 }
 
 /** n units spread over `sessions` sessions, metric values from `values` cycled. */
