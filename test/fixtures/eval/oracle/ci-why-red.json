@@ -1,0 +1,142 @@
+{
+  "note": "ci-why red world (smoke/ci-why, #3301): Test Reactor (shard 1/3) fails; its job log is the public vitest e2e log (logs/vitest-fail) so both arms read the same, realistically sized log.",
+  "fixtures": [
+    {
+      "name": "job-vitest",
+      "argv": [
+        "api",
+        "--include",
+        "-X",
+        "GET",
+        "--hostname",
+        "github.com",
+        "repos/powerhouse-inc/powerhouse/actions/jobs/111978835495"
+      ],
+      "exitCode": 0,
+      "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"id\":111978835495,\"run_id\":37948190914,\"workflow_name\":\"CI\",\"head_branch\":\"fix/reactor-bind-document-id\",\"run_url\":\"https://api.github.com/repos/powerhouse-inc/powerhouse/actions/runs/37948190914\",\"run_attempt\":1,\"node_id\":\"CR_kwDOGekgx88AAAAb47m9VQ\",\"head_sha\":\"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d\",\"url\":\"https://api.github.com/repos/powerhouse-inc/powerhouse/actions/jobs/111978835495\",\"html_url\":\"https://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835495\",\"status\":\"completed\",\"conclusion\":\"failure\",\"created_at\":\"2026-10-22T10:57:32Z\",\"started_at\":\"2026-10-22T10:57:34Z\",\"completed_at\":\"2026-10-22T11:03:16Z\",\"name\":\"Test Reactor (shard 1/3)\",\"steps\":[{\"name\":\"Set up job\",\"status\":\"completed\",\"conclusion\":\"success\",\"number\":1,\"started_at\":\"2026-10-22T10:57:35Z\",\"completed_at\":\"2026-10-22T10:57:40Z\"},{\"name\":\"Initialize containers\",\"status\":\"completed\",\"conclusion\":\"success\",\"number\":2,\"started_at\":\"2026-10-22T10:57:40Z\",\"completed_at\":\"2026-10-22T10:58:05Z\"},{\"name\":\"Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\",\"status\":\"completed\",\"conclusion\":\"success\",\"number\":3,\"started_at\":\"2026-10-22T10:58:05Z\",\"completed_at\":\"2026-10-22T10:58:07Z\"},{\"name\":\"Run vitest-dev/vitest/.github/actions/setup-and-cache@ae0cde6f4491367d44384cb1b26116e3aa2339c6\",\"status\":\"completed\",\"conclusion\":\"success\",\"number\":4,\"started_at\":\"2026-10-22T10:58:07Z\",\"completed_at\":\"2026-10-22T10:58:15Z\"},{\"name\":\"Install\",\"status\":\"completed\",\"conclusion\":\"success\",\"number\":5,\"started_at\":\"2026-10-22T10:58:15Z\",\"completed_at\":\"2026-10-22T10:58:40Z\"},{\"name\":\"Run vitest-dev/vitest/.github/actions/setup-playwright@ae0cde6f4491367d44384cb1b26116e3aa2339c6\",\"status\":\"completed\",\"conclusion\":\"success\",\"number\":6,\"started_at\":\"2026-10-22T10:58:40Z\",\"completed_at\":\"2026-10-22T10:58:45Z\"},{\"name\":\"Build\",\"status\":\"completed\",\"conclusion\":\"success\",\"number\":7,\"started_at\":\"2026-10-22T10:58:45Z\",\"completed_at\":\"2026-10-22T10:59:03Z\"},{\"name\":\"Test E2E\",\"status\":\"completed\",\"conclusion\":\"failure\",\"number\":8,\"started_at\":\"2026-10-22T10:59:03Z\",\"completed_at\":\"2026-10-22T11:03:12Z\"},{\"name\":\"Test Browser (playwright)\",\"status\":\"completed\",\"conclusion\":\"skipped\",\"number\":9,\"started_at\":\"2026-10-22T11:03:12Z\",\"completed_at\":\"2026-10-22T11:03:12Z\"},{\"name\":\"Post Run vitest-dev/vitest/.github/actions/setup-playwright@ae0cde6f4491367d44384cb1b26116e3aa2339c6\",\"status\":\"completed\",\"conclusion\":\"success\",\"number\":15,\"started_at\":\"2026-10-22T11:03:12Z\",\"completed_at\":\"2026-10-22T11:03:12Z\"},{\"name\":\"Post Run vitest-dev/vitest/.github/actions/setup-and-cache@ae0cde6f4491367d44384cb1b26116e3aa2339c6\",\"status\":\"completed\",\"conclusion\":\"success\",\"number\":16,\"started_at\":\"2026-10-22T11:03:12Z\",\"completed_at\":\"2026-10-22T11:03:12Z\"},{\"name\":\"Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\",\"status\":\"completed\",\"conclusion\":\"success\",\"number\":17,\"started_at\":\"2026-10-22T11:03:12Z\",\"completed_at\":\"2026-10-22T11:03:12Z\"},{\"name\":\"Stop containers\",\"status\":\"completed\",\"conclusion\":\"success\",\"number\":18,\"started_at\":\"2026-10-22T11:03:12Z\",\"completed_at\":\"2026-10-22T11:03:13Z\"},{\"name\":\"Complete job\",\"status\":\"completed\",\"conclusion\":\"success\",\"number\":19,\"started_at\":\"2026-10-22T11:03:13Z\",\"completed_at\":\"2026-10-22T11:03:13Z\"}],\"check_run_url\":\"https://api.github.com/repos/powerhouse-inc/powerhouse/check-runs/111978835495\",\"labels\":[\"ubuntu-latest\"],\"runner_id\":1000165892,\"runner_name\":\"GitHub Actions 1000165892\",\"runner_group_id\":0,\"runner_group_name\":\"GitHub Actions\"}",
+      "stderr": "",
+      "meta": {
+        "source": "live:public",
+        "note": "logs/vitest-fail/001-job.json (its real steps), renumbered into the #3301 world"
+      }
+    },
+    {
+      "name": "job-log-vitest",
+      "argv": [
+        "api",
+        "--include",
+        "-X",
+        "GET",
+        "--hostname",
+        "github.com",
+        "repos/powerhouse-inc/powerhouse/actions/jobs/111978835495/logs"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": "",
+      "stdoutFile": "../../gh/logs/vitest-fail/002-logs.log",
+      "meta": {
+        "source": "live:public",
+        "note": "logs/vitest-fail/002-logs.log, served for job 111978835495"
+      }
+    },
+    {
+      "name": "pr-checks",
+      "argv": [
+        "pr",
+        "checks",
+        "3301"
+      ],
+      "stdout": "Test Reactor (shard 1/3)\tfail\t1m0s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835495\t\nLint\tpass\t1m0s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835497\t\nTest Reactor (shard 2/3)\tpass\t1m0s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835496\t\n",
+      "exitCode": 1,
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    },
+    {
+      "name": "pr-checks-json-jq",
+      "argv": [
+        "pr",
+        "checks",
+        "3301",
+        "--json",
+        "name,bucket,link",
+        "--jq",
+        "(group_by(.bucket) | map({(.[0].bucket): length}) | add), (.[] | select(.bucket == \"fail\" or .bucket == \"pending\") | [.bucket, .name, .link] | @tsv)"
+      ],
+      "exitCode": 0,
+      "stdout": "{\"fail\":1,\"pass\":2}\nfail\tTest Reactor (shard 1/3)\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835495\n",
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    },
+    {
+      "name": "run-view",
+      "argv": [
+        "run",
+        "view",
+        "37948190914"
+      ],
+      "exitCode": 0,
+      "stdout": "\nX fix/reactor-bind-document-id CI · 37948190914\nTriggered via pull_request about 1 hour ago\n\nJOBS\nX Test Reactor (shard 1/3) in 5m42s (ID 111978835495)\n  ✓ Set up job\n  ✓ Initialize containers\n  ✓ Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n  ✓ Run vitest-dev/vitest/.github/actions/setup-and-cache@ae0cde6f4491367d44384cb1b26116e3aa2339c6\n  ✓ Install\n  ✓ Run vitest-dev/vitest/.github/actions/setup-playwright@ae0cde6f4491367d44384cb1b26116e3aa2339c6\n  ✓ Build\n  X Test E2E\n  - Test Browser (playwright)\n  ✓ Post Run vitest-dev/vitest/.github/actions/setup-playwright@ae0cde6f4491367d44384cb1b26116e3aa2339c6\n  ✓ Post Run vitest-dev/vitest/.github/actions/setup-and-cache@ae0cde6f4491367d44384cb1b26116e3aa2339c6\n  ✓ Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n  ✓ Stop containers\n  ✓ Complete job\n✓ Test Reactor (shard 2/3) in 1m0s (ID 111978835496)\n✓ Lint in 1m0s (ID 111978835497)\n\nANNOTATIONS\nX Process completed with exit code 1.\nTest Reactor (shard 1/3): .github#2\n\n\nTo see what failed, try: gh run view 37948190914 --log-failed\nView this run on GitHub: https://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914\n",
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    },
+    {
+      "name": "run-view-log-failed",
+      "argv": [
+        "run",
+        "view",
+        "37948190914",
+        "--log-failed"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": "",
+      "stdoutFile": "ci-why-red.log-failed.log",
+      "meta": {
+        "source": "synthetic"
+      }
+    },
+    {
+      "name": "job-view-log-failed",
+      "argv": [
+        "run",
+        "view",
+        "--job",
+        "111978835495",
+        "--log-failed"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": "",
+      "stdoutFile": "ci-why-red.log-failed.log",
+      "meta": {
+        "source": "synthetic"
+      }
+    },
+    {
+      "name": "run-list-main",
+      "argv": [
+        "run",
+        "list",
+        "--branch",
+        "main",
+        "--workflow",
+        "ci.yml",
+        "--limit",
+        "5"
+      ],
+      "exitCode": 0,
+      "stdout": "completed\tfailure\tchore: bump reactor deps\tCI\tmain\tpush\t37940000001\t1m0s\t2026-10-22T09:00:00Z\n",
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    }
+  ]
+}

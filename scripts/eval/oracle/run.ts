@@ -151,9 +151,11 @@ export function judge(truth: readonly Fact[], seen: readonly string[], calls: re
     const ok =
       f.kind === 'seen'
         ? f.pattern.test(text)
-        : f.kind === 'call'
-          ? argvs.some((a) => f.pattern.test(a))
-          : !argvs.some((a) => f.pattern.test(a));
+        : f.kind === 'not-seen'
+          ? !f.pattern.test(text)
+          : f.kind === 'call'
+            ? argvs.some((a) => f.pattern.test(a))
+            : !argvs.some((a) => f.pattern.test(a));
     return { id: f.id, kind: f.kind, ok };
   });
 }

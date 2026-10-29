@@ -1,0 +1,118 @@
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T10:59:03.6371978Z ##[group]Run pnpm run test:ci:e2e
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T10:59:03.6372327Z [36;1mpnpm run test:ci:e2e[0m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T10:59:03.6372676Z shell: sh -e {0}
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T10:59:03.6372857Z env:
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T10:59:03.6373563Z   PLAYWRIGHT_BROWSERS_PATH: /home/runner/work/vitest/vitest/.cache/ms-playwright
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T10:59:03.6373912Z   PNPM_CONFIG_TRUST_LOCKFILE: true
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T10:59:03.6374168Z   PNPM_HOME: /github/home/setup-pnpm/node_modules/.bin
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T10:59:03.6374415Z ##[endgroup]
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T10:59:04.2948488Z $ CI=true pnpm --filter @vitest/test-e2e run test
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T10:59:04.8580809Z $ vitest
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T10:59:05.0621560Z [33mTesting types with tsc and vue-tsc is an experimental feature.
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T10:59:05.0622540Z Breaking changes might not follow SemVer, please pin Vitest's version when using it.[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T10:59:05.0839238Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T10:59:05.0840611Z [1m[30m[46m RUN [49m[39m[22m [36mv5.1.0-beta.1 [39m[90m/__w/vitest/vitest/test/e2e[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T10:59:05.0841159Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:00:49.8255333Z ----------|---------|----------|---------|---------|-------------------
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:00:49.8256015Z File      | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:00:49.8256613Z ----------|---------|----------|---------|---------|-------------------
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:00:49.8263898Z All files |       0 |        0 |       0 |       0 |                   
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:00:49.8265097Z ----------|---------|----------|---------|---------|-------------------
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:01:06.7851827Z  [31m❯[39m [30m[45m main [49m[39m test/watch/snapshot-review.test.ts [2m([22m[2m2 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 3123[2mms[22m[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:01:06.7852929Z [31m   [31m×[31m updates accepted snapshots[39m[33m 1926[2mms[22m[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:01:22.6191141Z Testing types with tsc and vue-tsc is an experimental feature.
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:01:22.6191815Z Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9343608Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9344557Z [31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9344820Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9355630Z [41m[1m FAIL [22m[49m [30m[45m main [49m[39m test/watch/snapshot-review.test.ts[2m:18[22m[2m > [22mupdates accepted snapshots
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9356477Z [31m[1mError[22m: Snapshot `updates accepted snapshots > review-11-47 1` mismatched[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9356842Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9356929Z - Expected
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9357101Z + Received
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9357192Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9357281Z @@ -1,7 +1,7 @@
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9357552Z   "Reviewing [11/47] |browser (chromium)|:
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9358046Z - Source: second.test.ts:70:64 (rejected and resolved promises)
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9358632Z + Source: second.test.ts:70:63 (rejected and resolved promises)
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9359038Z   Snapshot: rejected and resolved promises > rejection 1
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9359446Z   Snapshot file: __snapshots__/second.test.ts.snap
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9359829Z   ──────────────────────────────
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9360145Z   - Expected
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9360366Z   + Received
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9360490Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9360901Z [36m [2m❯[22m test/watch/snapshot-review.test.ts:[2m113:32[22m[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9375449Z     [90m111|[39m     await vitest.waitForStdout(`Reviewing [${index}/${FAILED_TESTS}]`)
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9376154Z     [90m112|[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9376790Z     [90m113|[39m     expect.soft(vitest.stdout).toMatchSnapshot(`review-${index}-${FAIL…
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9377469Z     [90m   |[39m                                [31m^[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9378194Z     [90m114|[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9378510Z     [90m115|[39m     vitest.write('a')
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9379966Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9380363Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯[22m[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9380659Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9381849Z [41m[1m FAIL [22m[49m [30m[45m main [49m[39m test/watch/snapshot-review.test.ts[2m:18[22m[2m > [22mupdates accepted snapshots
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9383306Z [31m[1mError[22m: Snapshot `updates accepted snapshots > review-12-47 1` mismatched[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9383813Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9384016Z - Expected
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9384267Z + Received
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9384443Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9384561Z @@ -1,7 +1,7 @@
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9384871Z   "Reviewing [12/47] |browser (chromium)|:
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9386035Z - Source: second.test.ts:71:62 (rejected and resolved promises)
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9386935Z + Source: second.test.ts:71:61 (rejected and resolved promises)
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9387617Z   Snapshot: rejected and resolved promises 1
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9389181Z   ──────────────────────────────
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9389723Z   - Expected
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9390195Z   + Received
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9419422Z   ────────────┬─────────────────
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9419704Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9420251Z [36m [2m❯[22m test/watch/snapshot-review.test.ts:[2m113:32[22m[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9421071Z     [90m111|[39m     await vitest.waitForStdout(`Reviewing [${index}/${FAILED_TESTS}]`)
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9421626Z     [90m112|[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9422232Z     [90m113|[39m     expect.soft(vitest.stdout).toMatchSnapshot(`review-${index}-${FAIL…
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9422887Z     [90m   |[39m                                [31m^[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9423479Z     [90m114|[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9423833Z     [90m115|[39m     vitest.write('a')
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9424060Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9424356Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯[22m[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9424531Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9425157Z [41m[1m FAIL [22m[49m [30m[45m main [49m[39m test/watch/snapshot-review.test.ts[2m:18[22m[2m > [22mupdates accepted snapshots
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9426189Z [31m[1mError[22m: Snapshot `updates accepted snapshots > review-13-47 1` mismatched[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9426557Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9426671Z - Expected
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9426901Z + Received
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9427029Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9427133Z @@ -1,7 +1,7 @@
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9427410Z   "Reviewing [13/47] |browser (chromium)|:
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9427921Z - Source: second.test.ts:72:57 (rejected and resolved promises)
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9428440Z + Source: second.test.ts:72:56 (rejected and resolved promises)
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9428859Z   Snapshot: rejected and resolved promises 2
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9429266Z   ──────────────────────────────
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9429564Z   - Expected
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9429814Z   + Received
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9430129Z   ────────────┬─────────────────
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9430311Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9430762Z [36m [2m❯[22m test/watch/snapshot-review.test.ts:[2m113:32[22m[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9431492Z     [90m111|[39m     await vitest.waitForStdout(`Reviewing [${index}/${FAILED_TESTS}]`)
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9432016Z     [90m112|[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9432617Z     [90m113|[39m     expect.soft(vitest.stdout).toMatchSnapshot(`review-${index}-${FAIL…
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9433532Z     [90m   |[39m                                [31m^[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9433950Z     [90m114|[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9434311Z     [90m115|[39m     vitest.write('a')
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9434540Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9434902Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯[22m[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9435134Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9435142Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9435390Z [2m  Snapshots [22m [1m[31m3 failed[39m[22m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9436160Z [2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m193 passed[39m[22m[2m | [22m[33m2 skipped[39m[90m (196)[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9437354Z [2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m1720 passed[39m[22m[2m | [22m[33m8 skipped[39m[2m | [22m[90m1 todo[39m[90m (1730)[39m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9437858Z [2mType Errors [22m [2mno errors[22m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9438160Z [2m   Start at [22m 10:59:05
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9438640Z [2m   Duration [22m 246.84s[2m (tests 98%, import 1%)[22m
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9438954Z 
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9958363Z /__w/vitest/vitest/test/e2e:
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9958999Z [ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @vitest/test-e2e@ test: `vitest`
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:11.9959478Z Exit status 1
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:12.0465171Z [ELIFECYCLE] Command failed with exit code 1.
+Test Reactor (shard 1/3)	Test E2E	2026-10-22T11:03:12.0868365Z ##[error]Process completed with exit code 1.

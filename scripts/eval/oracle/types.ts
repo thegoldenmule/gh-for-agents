@@ -47,12 +47,14 @@ export interface GhCall {
 
 /**
  * A ground-truth predicate. `seen` facts must be readable in what the agent was shown (every tool result,
- * concatenated); `call` facts must match a gh invocation (the joined argv) and `no-call` facts must not.
+ * joined by newlines) and `not-seen` facts must not (a false alarm); `call` facts must match a gh invocation
+ * (its argv joined by spaces) and `no-call` facts must match none.
  */
-export type Fact =
-  | { id: string; kind: 'seen'; pattern: RegExp }
-  | { id: string; kind: 'call'; pattern: RegExp }
-  | { id: string; kind: 'no-call'; pattern: RegExp };
+export interface Fact {
+  id: string;
+  kind: 'seen' | 'not-seen' | 'call' | 'no-call';
+  pattern: RegExp;
+}
 
 export interface Question {
   /** Stable id: the report is sorted by it. */
