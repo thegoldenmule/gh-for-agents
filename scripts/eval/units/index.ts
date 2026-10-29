@@ -4,7 +4,7 @@
 import { CONSTANTS } from '../metrics/catalog.ts';
 import type { EraConfig, Tables } from '../model/session.ts';
 import { type Draft, finalize } from './draft.ts';
-import { episodeDraft, type RawEpisode, segmentFile } from './episode.ts';
+import { episodeDraft, segmentFile } from './episode.ts';
 import { assignPrs, buildCycles, buildLifecycles } from './pr.ts';
 import { sessionDrafts } from './session.ts';
 import { indexTables } from './tables.ts';
@@ -14,7 +14,7 @@ import { derivedWait, waitDraft } from './wait.ts';
 export type { Context, MetricDef, Unit, UnitKind } from './types.ts';
 
 export interface BuildUnitsOptions {
-  /** Override CONSTANTS.EPISODE_SLACK (0, the prototype's segmentation). */
+  /** Override CONSTANTS.EPISODE_SLACK (default 0). */
   slack?: number;
   /** Override CONSTANTS.EPISODE_GAP_MS. */
   gapMs?: number;
@@ -37,24 +37,6 @@ export function compareUnits(a: Unit, b: Unit): number {
     a.start_pos - b.start_pos ||
     cmp(a.unit_id, b.unit_id)
   );
-}
-
-/** Raw segmentation of every file (episodes.py segment()), for diagnostics and the prototype comparison. */
-export function segmentTables(
-  tables: Tables,
-  opts: BuildUnitsOptions = {},
-): { file: string; session_id: string; agent_id: string | null; episodes: RawEpisode[] }[] {
-  const idx = indexTables(tables);
-  const seg = { slack: opts.slack ?? CONSTANTS.EPISODE_SLACK, gapMs: opts.gapMs ?? CONSTANTS.EPISODE_GAP_MS };
-  return idx.fileOrder.map((file) => {
-    const f = idx.files.get(file);
-    return {
-      file,
-      session_id: f?.session_id ?? '',
-      agent_id: f?.agent_id ?? null,
-      episodes: f ? segmentFile(f, seg) : [],
-    };
-  });
 }
 
 export function buildUnits(tables: Tables, opts: BuildUnitsOptions = {}): Unit[] {

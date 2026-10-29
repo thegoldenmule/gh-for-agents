@@ -3,6 +3,7 @@
 // session shares and determinism. Builders: test/fixtures/eval/units/scenarios.ts.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { CONSTANTS } from '../../scripts/eval/metrics/catalog.ts';
 import {
   buildTables,
   headShasIn,
@@ -11,7 +12,9 @@ import {
   prRefsIn,
   type Tables,
 } from '../../scripts/eval/model/session.ts';
-import { type BuildUnitsOptions, buildUnits, segmentTables } from '../../scripts/eval/units/index.ts';
+import { segmentFile } from '../../scripts/eval/units/episode.ts';
+import { type BuildUnitsOptions, buildUnits } from '../../scripts/eval/units/index.ts';
+import { indexTables } from '../../scripts/eval/units/tables.ts';
 import type { Unit } from '../../scripts/eval/units/types.ts';
 import { bash, call, ghxStatus, human, main, notify, S, sub, TASKS } from '../fixtures/eval/units/scenarios.ts';
 
@@ -446,10 +449,13 @@ test('determinism: same tables, same units in the same order; ids derive from co
   );
 });
 
-test('segmentTables exposes the raw segmentation the prototype comparison uses', () => {
-  const seg = segmentTables(tables([waitScenario(false)]), { slack: 0 });
+test('segmentFile: an output-file Read is glue of the wait it reads', () => {
+  const idx = indexTables(tables([waitScenario(false)]));
+  const seg = idx.fileOrder.flatMap((file) =>
+    segmentFile(idx.files.get(file)!, { slack: 0, gapMs: CONSTANTS.EPISODE_GAP_MS }),
+  );
   assert.deepEqual(
-    seg.flatMap((f) => f.episodes.map((e) => [e.kind, e.closed_by])),
+    seg.map((e) => [e.kind, e.closed_by]),
     [
       ['wait_bg', 'notification:completed'],
       ['contiguous', 'eof'],

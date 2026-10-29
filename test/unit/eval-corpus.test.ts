@@ -5,14 +5,10 @@ import { spawnSync } from 'node:child_process';
 import {
   appendFileSync,
   cpSync,
-  existsSync,
-  mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
   rmSync,
   statSync,
-  truncateSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
@@ -20,7 +16,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { listCommands } from '../../scripts/eval/cli.ts';
-import { ingest, readState } from '../../scripts/eval/corpus/ingest.ts';
 import {
   comparePaths,
   manifestHash,
@@ -30,14 +25,7 @@ import {
   verifyManifest,
   writeManifest,
 } from '../../scripts/eval/corpus/manifest.ts';
-import { defaultStore, evalHome, storeLayout } from '../../scripts/eval/corpus/paths.ts';
-import {
-  lastNewlineOffset,
-  parseJsonl,
-  readJsonl,
-  readJsonlAll,
-  readJsonlSync,
-} from '../../scripts/eval/corpus/read.ts';
+import { parseJsonl, readJsonl, readJsonlAll, readJsonlSync } from '../../scripts/eval/corpus/read.ts';
 import { isCorpusFile, snapshot, walkCorpus } from '../../scripts/eval/corpus/snapshot.ts';
 
 const ROOT = join(import.meta.dirname, '..', '..');
@@ -109,7 +97,6 @@ test('readJsonl stops at the last newline of a live file and resumes from stats.
   assert.ok(entries.every((e) => e.ok));
   assert.equal(stats.end, lastNl);
   assert.equal(stats.trailing, bytes.length - lastNl, 'the partial last line is not yielded');
-  assert.equal(lastNewlineOffset(MAIN), lastNl);
   for (const e of entries) assert.equal(bytes.subarray(e.offset, e.next).toString('utf8'), `${e.line}\n`);
 
   // The writer finishes the line and adds another; an incremental read sees exactly the new lines.
@@ -254,145 +241,17 @@ test('manifests round-trip with a root relative to the file, and tampering is ca
   assert.deepEqual(verifyManifest(manifest, rootDir).changed, ['-tmp-proj-beta/sess-0002.jsonl']);
 });
 
-// --- ingest ---
-
-function storeFiles(store: string): string[] {
-  return walkCorpus(storeLayout(store).files).files.map((w) => w.path);
-}
-
-test('ingest: new files copied up to the last newline with the source mtime; unmatched counted, not copied', () => {
-  const src = corpusCopy(new Date('2026-10-01T00:00:00Z'));
-  const store = join(temp(), 'store');
-  const run = ingest({ source: src, store, now: FUTURE, label: 'first' });
-  assert.deepEqual(
-    { ...run.counts, bytesAdded: 0 },
-    { new: 6, grown: 0, unchanged: 0, divergent: 0, pending: 0, unmatched: 5, bytesAdded: 0 },
-  );
-  const copied = join(storeLayout(store).files, '-tmp-proj-alpha', 'sess-0001.jsonl');
-  assert.equal(statSync(copied).size, lastNewlineOffset(MAIN));
-  assert.equal(statSync(copied).mtime.toISOString(), '2026-10-01T00:00:00.000Z');
-  assert.equal(storeFiles(store).length, 6);
-  assert.equal(readState(store).runs[0]!.label, 'first');
-
-  const again = ingest({ source: src, store, now: FUTURE });
-  assert.deepEqual([again.counts.new, again.counts.unchanged, again.counts.bytesAdded], [0, 6, 0]);
-});
-
-test('ingest: grown files get the appended bytes; new and pending files are handled', () => {
-  const src = corpusCopy(new Date('2026-10-01T00:00:00Z'));
-  const store = join(temp(), 'store');
-  ingest({ source: src, store, now: FUTURE });
-  const live = join(src, '-tmp-proj-alpha', 'sess-0001.jsonl');
-  appendFileSync(live, '0Z"}\n{"type":"user","uuid":"u-0005"}\n{"partial');
-  mkdirSync(join(src, '-tmp-proj-gamma'));
-  writeFileSync(join(src, '-tmp-proj-gamma', 'sess-0003.jsonl'), '{"type":"user"}\n');
-  writeFileSync(join(src, '-tmp-proj-gamma', 'sess-0004.jsonl'), '{"no newline yet"');
-
-  const run = ingest({ source: src, store, now: FUTURE });
-  assert.deepEqual(
-    [run.counts.new, run.counts.grown, run.counts.unchanged, run.counts.pending, run.counts.divergent],
-    [1, 1, 5, 1, 0],
-  );
-  const stored = readFileSync(join(storeLayout(store).files, '-tmp-proj-alpha', 'sess-0001.jsonl'));
-  const source = readFileSync(live);
-  assert.deepEqual(stored, source.subarray(0, source.lastIndexOf(0x0a) + 1));
-  assert.equal(
-    snapshot({ root: storeLayout(store).files, now: FUTURE }).files.find(
-      (f) => f.path === '-tmp-proj-alpha/sess-0001.jsonl',
-    )?.size,
-    stored.length,
-  );
-  assert.ok(!storeFiles(store).includes('-tmp-proj-gamma/sess-0004.jsonl'));
-});
-
-test('ingest: a shrunk, rewritten or deleted source never changes the store; the new version is recorded', () => {
-  const src = corpusCopy(new Date('2026-10-01T00:00:00Z'));
-  const store = join(temp(), 'store');
-  ingest({ source: src, store, now: FUTURE });
-  const before = snapshot({ root: storeLayout(store).files, now: FUTURE });
-
-  const shrunk = join(src, '-tmp-proj-beta', 'sess-0002.jsonl');
-  truncateSync(shrunk, 0);
-  writeFileSync(shrunk, '{"a":1}\n');
-  const meta = join(src, '-tmp-proj-alpha', 'sess-0001', 'subagents', 'agent-a0001.meta.json');
-  const rewritten = readFileSync(meta, 'utf8').replace('foreground', 'background');
-  writeFileSync(meta, rewritten);
-  rmSync(join(src, '-tmp-proj-alpha', 'sess-0001', 'subagents', 'agent-a0002.forked-skill.json'));
-
-  const run = ingest({ source: src, store, now: FUTURE });
-  assert.equal(run.counts.divergent, 2);
-  assert.equal(snapshot({ root: storeLayout(store).files, now: FUTURE }).hash, before.hash, 'store unchanged');
-  const div = readState(store).divergent;
-  assert.deepEqual(
-    div.map((d) => [d.path, d.kind]),
-    [
-      ['-tmp-proj-alpha/sess-0001/subagents/agent-a0001.meta.json', 'rewritten'],
-      ['-tmp-proj-beta/sess-0002.jsonl', 'shrunk'],
-    ],
-  );
-  assert.equal(readFileSync(join(store, div[0]!.savedAs), 'utf8'), rewritten);
-
-  const rerun = ingest({ source: src, store, now: FUTURE });
-  assert.equal(rerun.counts.divergent, 2);
-  assert.equal(readState(store).divergent.length, 2, 'the same divergent version is recorded once');
-});
-
-test('ingest: a lost state.json is rebuilt from the store files', () => {
-  const src = corpusCopy(new Date('2026-10-01T00:00:00Z'));
-  const store = join(temp(), 'store');
-  ingest({ source: src, store, now: FUTURE });
-  rmSync(storeLayout(store).state);
-  const run = ingest({ source: src, store, now: FUTURE });
-  assert.deepEqual([run.counts.new, run.counts.unchanged, run.counts.divergent], [0, 6, 0]);
-});
-
-test('ingest: a tar.gz archive imports like its directory and leaves no staging behind', () => {
-  const src = corpusCopy(new Date('2026-10-01T00:00:00Z'));
-  const tarball = join(temp(), 'projects.tar.gz');
-  const tar = spawnSync('tar', ['-czf', tarball, '-C', src, '.'], { env: { ...process.env, COPYFILE_DISABLE: '1' } });
-  assert.equal(tar.status, 0, String(tar.stderr));
-  const store = join(temp(), 'store');
-  const run = ingest({ source: tarball, store, now: FUTURE });
-  assert.equal(run.kind, 'archive');
-  assert.equal(run.counts.new, 6);
-  assert.deepEqual(readdirSync(store).sort(), ['files', 'state.json']);
-  const fromDir = join(temp(), 'store');
-  ingest({ source: src, store: fromDir, now: FUTURE });
-  assert.equal(
-    snapshot({ root: storeLayout(store).files, now: FUTURE }).hash,
-    snapshot({ root: storeLayout(fromDir).files, now: FUTURE }).hash,
-  );
-  assert.ok(existsSync(tarball), 'the archive is left in place');
-});
-
 // --- cli and paths ---
 
 const cli = (args: string[], env: NodeJS.ProcessEnv = process.env) =>
   spawnSync(process.execPath, [join(ROOT, 'scripts', 'eval', 'cli.ts'), ...args], { encoding: 'utf8', env });
 
 test('cli: subcommands come from scripts/eval/commands; unknown is usage on stderr and exit 2', () => {
-  assert.ok(listCommands().includes('snapshot') && listCommands().includes('ingest'));
+  assert.ok(listCommands().includes('snapshot') && listCommands().includes('observe'));
   const unknown = cli(['nope']);
   assert.equal(unknown.status, 2);
   assert.match(unknown.stderr, /unknown subcommand "nope"[\s\S]*snapshot/);
   const help = cli(['--help']);
   assert.equal(help.status, 0);
-  assert.match(help.stdout, /ingest[\s\S]*snapshot/);
-});
-
-test('cli: ingest into GHX_EVAL_HOME, then snapshot --store reproduces the store manifest hash', () => {
-  const src = corpusCopy(new Date('2026-10-01T00:00:00Z'));
-  const home = temp();
-  const env = { ...process.env, GHX_EVAL_HOME: home };
-  assert.equal(defaultStore(env), join(home, 'corpus'));
-  assert.equal(evalHome({}), join(process.env.HOME ?? '', '.ghx-eval'));
-  const now = '2026-10-29T12:00:00.000Z';
-  const ing = cli(['ingest', '--from', src, '--now', now], env);
-  assert.equal(ing.status, 0, ing.stderr);
-  const summary = JSON.parse(ing.stdout);
-  assert.equal(summary.manifest.path, join(home, 'corpus', 'manifests', '20261029T120000Z.json'));
-  const snap = cli(['snapshot', '--store', join(home, 'corpus'), '--now', now, '--out', join(home, 'again.json')], env);
-  assert.equal(snap.status, 0, snap.stderr);
-  assert.equal(JSON.parse(snap.stdout).hash, summary.manifest.hash);
-  assert.equal(readManifest(summary.manifest.path).manifest.hash, summary.manifest.hash);
+  assert.match(help.stdout, /observe[\s\S]*snapshot/);
 });

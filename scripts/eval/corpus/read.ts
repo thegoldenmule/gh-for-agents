@@ -192,26 +192,3 @@ export function parseJsonl(input: Uint8Array | string, base = 0): { entries: Jso
   stats.trailing = base + buf.length - stats.end;
   return { entries, stats };
 }
-
-/**
- * Byte offset just past the last newline in `path` within [start, end), or `start` when there is none. The
- * ingest step uses it to copy only complete lines.
- */
-export function lastNewlineOffset(path: string, start = 0, end?: number): number {
-  const fd = openSync(path, 'r');
-  try {
-    const limit = Math.min(end ?? Number.POSITIVE_INFINITY, fstatSync(fd).size);
-    const buf = Buffer.allocUnsafe(64 * 1024);
-    let hi = limit;
-    while (hi > start) {
-      const lo = Math.max(start, hi - buf.length);
-      const n = readSync(fd, buf, 0, hi - lo, lo);
-      const at = buf.subarray(0, n).lastIndexOf(NL);
-      if (at !== -1) return lo + at + 1;
-      hi = lo;
-    }
-    return start;
-  } finally {
-    closeSync(fd);
-  }
-}
