@@ -110,6 +110,8 @@ export interface NotificationSighting {
   order: number;
   file: string;
   source: NotificationSource;
+  /** Record index in its file (session.ts sets it; used to find the API call the notification wakes). */
+  index?: number;
 }
 
 /**

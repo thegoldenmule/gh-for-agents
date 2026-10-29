@@ -285,6 +285,17 @@ export interface ToolCallRow {
   next_call_index: number | null;
   /** Agent or Skill (forked) results name the agent they started. */
   spawned_agent_id: string | null;
+  /**
+   * Index (in this file) of the API call after each of this call's notifications, ascending and unique: the
+   * call a notification woke or fed. From the first copy of each notification in this file.
+   */
+  notif_wake_call_indexes: number[];
+  /** `owner/repo#n` for each github.com pull URL in the result, in order of appearance (M2: PR of a create). */
+  result_pr_refs: string[];
+  /** Head SHAs in the result: `headRefOid`/`headSha`/`headOid` JSON values, or bare hex when the command asked for one. */
+  result_head_shas: string[];
+  /** Paths the result says output went to: `saved to`/`written to` text and ghx `logPath` values. */
+  result_paths: string[];
 }
 
 export interface Counts {
@@ -500,9 +511,9 @@ function modelFile(path: string, info: FileInfo, records: readonly unknown[], co
   let promptId: string | null = null;
   let cur: RawTurn | null = null;
 
-  const sight = (text: string, ts: string | null, source: NotificationSighting['source']): void => {
+  const sight = (text: string, ts: string | null, source: NotificationSighting['source'], index: number): void => {
     const n = parseNotification(text);
-    if (n) sightings.push({ notification: n, ts, file: path, source });
+    if (n) sightings.push({ notification: n, ts, file: path, source, index });
   };
 
   for (const [i, p] of parsed.entries()) {
@@ -535,7 +546,7 @@ function modelFile(path: string, info: FileInfo, records: readonly unknown[], co
       }
       if (/^\s*\[Request interrupted/.test(userText(u)) && cur) cur.interrupted = true;
       const c = u.message.content;
-      if (typeof c === 'string') sight(c, ts, 'user');
+      if (typeof c === 'string') sight(c, ts, 'user', i);
       else if (Array.isArray(c)) {
         for (const b of c) {
           if (b.type === 'tool_result' && b.tool_use_id) {
@@ -547,7 +558,7 @@ function modelFile(path: string, info: FileInfo, records: readonly unknown[], co
               toolUseResult: u.toolUseResult,
               denialKind: u.toolDenialKind ?? null,
             });
-          } else if (b.type === 'text' && typeof b.text === 'string') sight(b.text, ts, 'user');
+          } else if (b.type === 'text' && typeof b.text === 'string') sight(b.text, ts, 'user', i);
         }
       }
     } else if (p.type === 'assistant') {
@@ -558,7 +569,7 @@ function modelFile(path: string, info: FileInfo, records: readonly unknown[], co
       ts = p.record.timestamp ?? null;
       const a = p.record.attachment;
       if (a.type === 'queued_command') {
-        sight(typeof a.prompt === 'string' ? a.prompt : textOf(a.prompt), ts, 'attachment');
+        sight(typeof a.prompt === 'string' ? a.prompt : textOf(a.prompt), ts, 'attachment', i);
       }
       if (a.hookEvent === 'PreToolUse' && a.toolUseID) {
         const d = hookDecision(a.stdout);
@@ -567,7 +578,7 @@ function modelFile(path: string, info: FileInfo, records: readonly unknown[], co
     } else if (p.type === 'queue-operation') {
       ts = p.record.timestamp ?? null;
       const c = p.record.content;
-      sight(typeof c === 'string' ? c : textOf(c), ts, 'queue');
+      sight(typeof c === 'string' ? c : textOf(c), ts, 'queue', i);
     } else if (p.type === 'system') {
       ts = p.record.timestamp ?? null;
       if (p.record.subtype === 'compact_boundary') compactions.push(i);
@@ -1001,6 +1012,51 @@ export function buildSessionTables(input: readonly InputFile[], opts: BuildOptio
   };
 }
 
+const notifKey = (s: Omit<NotificationSighting, 'order'>): string =>
+  `${s.notification.taskId}\u0000${s.notification.body.trimEnd()}`;
+
+/** The API call after the first copy, in this file, of each notification. */
+function wakeCallIndexes(fm: FileModel, own: readonly NotificationSighting[], firsts: readonly number[]): number[] {
+  if (own.length === 0) return [];
+  const keys = new Set(own.map(notifKey));
+  const seen = new Set<string>();
+  const out = new Set<number>();
+  for (const s of fm.sightings) {
+    const k = notifKey(s);
+    if (!keys.has(k) || seen.has(k) || s.index === undefined) continue;
+    seen.add(k);
+    const next = nextCallAfter(firsts, s.index);
+    if (next !== null) out.add(next);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+const uniq = (xs: Iterable<string>): string[] => [...new Set(xs)];
+
+export function prRefsIn(text: string): string[] {
+  return uniq(
+    [...text.matchAll(/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/g)].map((m) => `${m[1]}/${m[2]}#${m[3]}`),
+  );
+}
+
+const SHA_FIELD = /"(?:headSha|headRefOid|headOid)"\s*:\s*"([0-9a-f]{7,40})"/g;
+const SHA_ASKED = /\b(?:headSha|headRefOid|headOid)\b/;
+const BARE_SHA = /\b(?=[0-9a-f]*[a-f])[0-9a-f]{40}\b/g;
+
+/** Head SHAs: JSON field values, else (when the command asked for a head SHA field) bare 40-hex tokens. */
+export function headShasIn(text: string, command: string | null): string[] {
+  const fields = [...text.matchAll(SHA_FIELD)].map((m) => m[1] as string);
+  if (fields.length > 0 || command === null || !SHA_ASKED.test(command)) return uniq(fields);
+  return uniq([...text.matchAll(BARE_SHA)].map((m) => m[0]));
+}
+
+/** `saved to /path`, `written to: /path` and ghx `"logPath": "/path"`. */
+export function pathsIn(text: string): string[] {
+  const said = [...text.matchAll(/(?:saved to|written to):?\s*(\/[^\s"]+)/g)].map((m) => m[1] as string);
+  const logs = [...text.matchAll(/"logPath"\s*:\s*"(\/[^"]+)"/g)].map((m) => m[1] as string);
+  return uniq([...said.slice(0, 3), ...logs]);
+}
+
 function toolCallRow(
   fm: FileModel,
   g: AssistantGroup,
@@ -1097,6 +1153,10 @@ function toolCallRow(
     output_file_read_bytes: 0,
     next_call_index: r ? nextCallAfter(firsts, r.index) : null,
     spawned_agent_id: spawned,
+    notif_wake_call_indexes: wakeCallIndexes(fm, own, firsts),
+    result_pr_refs: prRefsIn(text),
+    result_head_shas: headShasIn(text, command),
+    result_paths: pathsIn(text),
   };
 }
 
