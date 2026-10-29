@@ -1,0 +1,84 @@
+{
+  "note": "ci-wait world (smoke/ci-wait, #3301 at 9f2c4e1: Typecheck and Test). ghx sees CI settled green on its first poll; the gh polls see pending, then Typecheck done, then both green (successive replies).",
+  "fixtures": [
+    {
+      "name": "pr-checks-poll-1",
+      "argv": [
+        "pr",
+        "checks",
+        "3301"
+      ],
+      "stdout": "Test\tpending\t0\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835002\t\nTypecheck\tpending\t0\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835001\t\n",
+      "exitCode": 8,
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    },
+    {
+      "name": "pr-checks-poll-2",
+      "argv": [
+        "pr",
+        "checks",
+        "3301"
+      ],
+      "stdout": "Test\tpending\t0\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835002\t\nTypecheck\tpass\t5m0s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835001\t\n",
+      "exitCode": 8,
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    },
+    {
+      "name": "pr-checks-poll-3",
+      "argv": [
+        "pr",
+        "checks",
+        "3301"
+      ],
+      "stdout": "Test\tpass\t8m0s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835002\t\nTypecheck\tpass\t5m0s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835001\t\n",
+      "exitCode": 0,
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    },
+    {
+      "name": "pr-checks-watch",
+      "argv": [
+        "pr",
+        "checks",
+        "3301",
+        "--watch",
+        "--fail-fast",
+        "--interval",
+        "30"
+      ],
+      "stdout": "Test\tpass\t8m0s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835002\t\nTypecheck\tpass\t5m0s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835001\t\n",
+      "exitCode": 0,
+      "stderr": "",
+      "meta": {
+        "source": "synthetic",
+        "note": "the last table --watch prints; real gh polls every --interval until done"
+      }
+    },
+    {
+      "name": "pr-checks-json-jq",
+      "argv": [
+        "pr",
+        "checks",
+        "3301",
+        "--json",
+        "name,bucket,link",
+        "--jq",
+        "(group_by(.bucket) | map({(.[0].bucket): length}) | add), (.[] | select(.bucket == \"fail\" or .bucket == \"pending\") | [.bucket, .name, .link] | @tsv)"
+      ],
+      "exitCode": 0,
+      "stdout": "{\"pass\":2}\n",
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    }
+  ]
+}
