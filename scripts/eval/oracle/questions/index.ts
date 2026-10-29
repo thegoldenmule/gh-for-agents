@@ -1,5 +1,6 @@
 // Every canonical question, one per file. Order here does not matter: the runner sorts by id.
 import type { Question } from '../types.ts';
+import { question as ciRerun } from './ci-rerun.ts';
 import { question as ciWhyGreen } from './ci-why-green.ts';
 import { question as ciWhyPending } from './ci-why-pending.ts';
 import { question as ciWhyRed } from './ci-why-red.ts';
