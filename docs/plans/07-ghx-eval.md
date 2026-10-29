@@ -126,7 +126,7 @@ Units compose, from atomic to roll-up:
 3. **PR lifecycle.** One session and its subagents, one PR, create to merge. Unlike a cycle, a lifecycle takes every unit on the PR.
 4. **Session.** GitHub's share of a session's calls and cost. Too few pure-ghx sessions exist for an arm comparison here; report shares by era instead.
 
-**The post-wake rule (METRIC_VERSION 1.1.0).** After a background wait's notification wakes the agent, the wait keeps its glue (output-file reads, TaskOutput, TaskStop) and status reads or foreground waits on its own target. Any other GitHub call opens a new episode flagged `after-wake`, linked to the wait through `parent_unit_id`. Before 1.1.0, a merge or rerun made after a wake was charged to the wait. The prototype's units went further and merged wait, wake and merge into one unit, so a findings "merge" corresponds to a ghx-eval merge episode plus its parent wait.
+**The post-wake rule (METRIC_VERSION 1.1.0).** After a background wait's notification wakes the agent, the wait keeps its glue (output-file reads, TaskOutput, TaskStop) and status reads or foreground waits on its own target. Any other GitHub call opens a new episode flagged `after-wake`, linked to the wait through `parent_unit_id`. Before 1.1.0, a merge or rerun made after a wake continued whichever episode was open when the wait launched; now that episode closes at the wake. The prototype's units went further and merged wait, wake and merge into one unit, so a findings "merge" corresponds to a ghx-eval merge episode plus its parent wait.
 
 The wakeup counts in findings §4.4 disagree between wait-level and lifecycle-level. M2 resolves it by counting rounds by head SHA and reporting both levels.
 
@@ -234,7 +234,7 @@ For a provisional report, ingest and snapshot the store with `--window-hours 0`.
 
 ## Follow-ups for ghx itself
 
-Findings §4 and §5 pointed at product work, to be confirmed by M3 before acting. Figures below are from the provisional report `13aa09e4bdb8` (powerhouse, claude-opus-5-5, gh-pre → ghx-post, medians) and the oracle run beside it.
+Findings §4 and §5 pointed at product work, to be confirmed by M3 before acting. Figures below are from the provisional report `13aa09e4bdb8` (powerhouse, claude-opus-5-5, gh-pre → ghx-post, medians) and the oracle run beside it. Error-code and output-file counts are taken from its tables over every repo except this one.
 
 - **Confirmed: `pr create` and `pr edit` validation.** 50% of ghx create episodes and 47% of edit episodes hit an error (58% of creates in the 5aef2a686ca7 baseline), against 2–6% with gh. `VALIDATION` is still the top ghx error code (34). In subagents, a create costs 3 tool calls against 1 and $0.085 against $0.053. A shorter error hint or a smaller `ghx schema pr create` view is still the fix to try first.
 - **Confirmed: unknown commands.** 23 `USAGE_UNKNOWN_COMMAND` errors, the same agents guessing gh's shape. Aliases or hints that name the ghx equivalent would turn each into one call.
