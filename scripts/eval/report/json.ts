@@ -41,6 +41,24 @@ export const COMPARISON_PAIRS: readonly (readonly [UnitBucket, UnitBucket])[] = 
   ['gh-pre', 'ghx-post'],
   ['gh-post', 'ghx-post'],
 ];
+/**
+ * How units are filed into cells. unit: by kind and category (intent for episodes, mechanism for waits).
+ * intent: episodes plus non-derived waits by intent (findings §4.1). created_merged: PR lifecycles created and
+ * merged in their session (findings §4.4).
+ */
+export type View = 'unit' | 'intent' | 'created_merged';
+export const VIEWS: readonly View[] = ['unit', 'intent', 'created_merged'];
+
+/** The category a unit is filed under in a view, or null when the view does not take it. */
+export function viewCategory(view: View, u: Unit): string | null {
+  if (view === 'unit') return u.category;
+  if (view === 'intent') {
+    const atom = u.kind === 'episode' || (u.kind === 'wait' && !u.flags.includes('derived'));
+    return atom && typeof u.intent === 'string' ? u.intent : null;
+  }
+  return u.kind === 'pr_lifecycle' && u.flags.includes('created') && u.flags.includes('merged') ? u.category : null;
+}
+
 /** Units that are atoms (not roll-ups); bucket shares and dominant sessions count these. */
 export const ATOMIC_KINDS: readonly UnitKind[] = ['episode', 'wait'];
 
@@ -97,6 +115,8 @@ export interface MetricSummary {
 }
 
 export interface CellKey {
+  view: View;
+  /** The units' kind; 'episode' for the intent view, which also takes waits. */
   kind: UnitKind;
   category: string;
   context: Context;
@@ -124,6 +144,7 @@ export interface ComparisonMetric {
 
 export interface Comparison {
   id: string;
+  view: View;
   kind: UnitKind;
   category: string;
   context: Context;
@@ -237,13 +258,16 @@ function bump(m: Record<string, number>, k: string, by = 1): void {
 }
 
 export function cellId(k: CellKey): string {
-  return [k.kind, k.category, k.context, k.project, k.model, k.bucket].join('|');
+  return [k.view, k.kind, k.category, k.context, k.project, k.model, k.bucket].join('|');
 }
 
-function keyOf(u: Unit): CellKey {
+function keyOf(u: Unit, view: View): CellKey | null {
+  const category = viewCategory(view, u);
+  if (category === null) return null;
   return {
-    kind: u.kind,
-    category: u.category,
+    view,
+    kind: view === 'intent' ? 'episode' : u.kind,
+    category,
     context: u.context,
     project: u.project,
     model: u.model,
@@ -258,6 +282,7 @@ function orderOf<T>(list: readonly T[], x: T): number {
 
 export function compareKeys(a: CellKey, b: CellKey): number {
   return (
+    orderOf(VIEWS, a.view) - orderOf(VIEWS, b.view) ||
     orderOf(KINDS, a.kind) - orderOf(KINDS, b.kind) ||
     cmp(a.category, b.category) ||
     orderOf(CONTEXTS, a.context) - orderOf(CONTEXTS, b.context) ||
@@ -284,18 +309,21 @@ function valuesOf(units: readonly Unit[], id: string): { cluster: string; value:
 // ---------------------------------------------------------------------------------------------- cells
 
 /**
- * One cell: units that share kind, category, context, repo, model and bucket. Throws when they do not, so no
- * caller can pool main with subagent, or two repos, models or buckets.
+ * One cell: units that share a view's category, kind, context, repo, model and bucket. Throws when they do
+ * not, so no caller can pool main with subagent, or two repos, models or buckets.
  */
-export function buildCell(units: readonly Unit[], catalog: readonly MetricDef[]): Cell {
+export function buildCell(units: readonly Unit[], catalog: readonly MetricDef[], view: View = 'unit'): Cell {
   const first = units[0];
   if (!first) throw new Error('buildCell: no units');
-  const key = keyOf(first);
+  const key = keyOf(first, view);
+  if (!key) throw new Error(`buildCell: the ${view} view does not take ${first.kind} units`);
   for (const u of units) {
-    if (u.context !== key.context) throw new Error(`buildCell: pools ${key.context} and ${u.context} units`);
+    const k = keyOf(u, view);
+    if (!k) throw new Error(`buildCell: the ${view} view does not take ${u.kind} units`);
+    if (k.context !== key.context) throw new Error(`buildCell: pools ${key.context} and ${k.context} units`);
     for (const f of ['kind', 'category', 'project', 'model', 'bucket'] as const) {
-      if (u[f] !== key[f])
-        throw new Error(`buildCell: pools ${f} ${JSON.stringify(key[f])} and ${JSON.stringify(u[f])}`);
+      if (k[f] !== key[f])
+        throw new Error(`buildCell: pools ${f} ${JSON.stringify(key[f])} and ${JSON.stringify(k[f])}`);
     }
   }
   const n = units.length;
@@ -328,22 +356,25 @@ export function buildCell(units: readonly Unit[], catalog: readonly MetricDef[])
   };
 }
 
-/** Units grouped by cell key, in report order. */
+/** Units grouped by cell key in every view, in report order. */
 export function groupUnits(units: readonly Unit[]): { key: CellKey; units: Unit[] }[] {
   const by = new Map<string, { key: CellKey; units: Unit[] }>();
-  for (const u of units) {
-    const key = keyOf(u);
-    const id = cellId(key);
-    const g = by.get(id);
-    if (g) g.units.push(u);
-    else by.set(id, { key, units: [u] });
+  for (const view of VIEWS) {
+    for (const u of units) {
+      const key = keyOf(u, view);
+      if (!key) continue;
+      const id = cellId(key);
+      const g = by.get(id);
+      if (g) g.units.push(u);
+      else by.set(id, { key, units: [u] });
+    }
   }
   return [...by.values()].sort((a, b) => compareKeys(a.key, b.key));
 }
 
 // ---------------------------------------------------------------------------------------------- comparisons
 
-const COMPARISON_FIELDS = ['kind', 'category', 'context', 'project', 'model'] as const;
+const COMPARISON_FIELDS = ['view', 'kind', 'category', 'context', 'project', 'model'] as const;
 
 /**
  * Compare two cells that differ only in bucket. Throws otherwise: a comparison never crosses contexts, repos,
@@ -377,7 +408,8 @@ export function compareCells(
     metrics[d.id] = m;
   }
   return {
-    id: `${[a.kind, a.category, a.context, a.project, a.model].join('|')}|${a.bucket}→${b.bucket}`,
+    id: `${[a.view, a.kind, a.category, a.context, a.project, a.model].join('|')}|${a.bucket}→${b.bucket}`,
+    view: a.view,
     kind: a.kind,
     category: a.category,
     context: a.context,
@@ -517,7 +549,7 @@ export function buildReport(input: ReportInput): Report {
   const { definitions: defs } = input;
   const units = [...input.units];
   const groups = groupUnits(units);
-  const cells = groups.map((g) => buildCell(g.units, defs.catalog));
+  const cells = groups.map((g) => buildCell(g.units, defs.catalog, g.key.view));
   const comparisons = buildComparisons(groups, cells, defs.catalog);
   const byKind: Record<string, number> = {};
   const byBucket: Record<string, number> = {};

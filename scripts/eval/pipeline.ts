@@ -290,7 +290,7 @@ export function observe(manifestPath: string, opts: ObserveOptions = {}): { repo
     ...(opts.cache !== undefined ? { cache: opts.cache } : {}),
     ...(opts.cacheRoot !== undefined ? { cacheRoot: opts.cacheRoot } : {}),
   });
-  const units = buildUnits(corpus.tables);
+  const units = buildUnits(corpus.tables, { era });
   const report = buildReport({
     manifest: corpus.manifest,
     corpus: summarizeTables(corpus.tables),

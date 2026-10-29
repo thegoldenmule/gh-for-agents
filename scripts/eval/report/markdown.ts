@@ -1,7 +1,7 @@
 // report.md from report.json only (plan 07 M3): render() reads nothing but its argument, so a report.json
 // re-renders to the same bytes anywhere. Tables mirror ghx-impact-findings §4.1–4.4 plus the plan's three
 // "turns" numbers. Greyed cells (n < MIN_N) are marked ° and italic, carry no CI and never reach the summary.
-import type { BucketHeader, Cell, Comparison, MetricSummary, Report } from './json.ts';
+import type { BucketHeader, Cell, Comparison, MetricSummary, Report, View } from './json.ts';
 
 const GREY = '°';
 
@@ -40,13 +40,13 @@ function table(head: string[], rows: string[][]): string[] {
   ];
 }
 
-interface View {
+interface Ctx {
   report: Report;
   unitOf: Map<string, string>;
   cells: Map<string, Cell>;
 }
 
-function view(report: Report): View {
+function view(report: Report): Ctx {
   return {
     report,
     unitOf: new Map(report.metrics.map((m) => [m.id, m.unit])),
@@ -60,7 +60,7 @@ function scale(x: number | undefined, by: number): number | undefined {
 
 /** median [lo–hi] for a metric of a cell; italic with ° when the cell is greyed. */
 function stat(
-  v: View,
+  v: Ctx,
   cell: Cell | undefined,
   id: string,
   opts: { p90?: boolean; per?: number; unit?: string } = {},
@@ -91,21 +91,26 @@ function nonzeroOf(cell: Cell | undefined, id: string): string {
 const nOf = (cell: Cell | undefined): string => (cell ? `${cell.n}${cell.greyed ? GREY : ''}` : '0');
 const arrow = (a: string, b: string): string => `${a} → ${b}`;
 
+export function fmtP(p: number): string {
+  return p < 0.001 ? '<0.001' : p.toFixed(3);
+}
+
 function pOf(c: Comparison | undefined, id: string): string {
   const t = c?.metrics[id]?.test;
-  return t ? fmt(t.p, 'ratio') : '–';
+  return t ? fmtP(t.p) : '–';
 }
 
 /** Comparisons of a kind grouped by (project, model) for a pair, in report order. */
 function comparisonGroups(
   report: Report,
+  view: View,
   kinds: readonly string[],
   a: string,
   b: string,
 ): { project: string; model: string; comps: Comparison[] }[] {
   const out: { project: string; model: string; comps: Comparison[] }[] = [];
   for (const c of report.comparisons) {
-    if (!kinds.includes(c.kind) || c.a !== a || c.b !== b) continue;
+    if (c.view !== view || !kinds.includes(c.kind) || c.a !== a || c.b !== b) continue;
     let g = out.find((x) => x.project === c.project && x.model === c.model);
     if (!g) {
       g = { project: c.project, model: c.model, comps: [] };
@@ -116,12 +121,20 @@ function comparisonGroups(
   return out.sort((x, y) => (x.project + x.model < y.project + y.model ? -1 : 1));
 }
 
-function cellFor(v: View, c: Comparison, bucket: string): Cell | undefined {
-  return v.cells.get([c.kind, c.category, c.context, c.project, c.model, bucket].join('|'));
+function cellFor(v: Ctx, c: Comparison, bucket: string): Cell | undefined {
+  return v.cells.get([c.view, c.kind, c.category, c.context, c.project, c.model, bucket].join('|'));
 }
 
-const label = (c: { kind: string; category: string }): string =>
-  c.kind === 'episode' ? c.category : c.kind === 'wait' ? `wait: ${c.category}` : c.kind.replace('_', ' ');
+const label = (c: { view: View; kind: string; category: string }): string =>
+  c.view === 'intent'
+    ? `intent: ${c.category}`
+    : c.view === 'created_merged'
+      ? 'pr lifecycle (created + merged)'
+      : c.kind === 'episode'
+        ? c.category
+        : c.kind === 'wait'
+          ? `wait: ${c.category}`
+          : c.kind.replace('_', ' ');
 
 // ---------------------------------------------------------------------------------------------- sections
 
@@ -147,7 +160,7 @@ function buckets(r: Report): string[] {
     group(b.units),
     group(b.sessions),
     b.dominant.length
-      ? `**${b.dominant.length} session${b.dominant.length > 1 ? 's' : ''} hold ${pct(b.dominant.reduce((s, d) => s + d.share, 0))}**: ` +
+      ? `**${b.dominant.length > 1 ? `${b.dominant.length} sessions hold` : '1 session holds'} ${pct(b.dominant.reduce((s, d) => s + d.share, 0))}**: ` +
         b.dominant.map((d) => `\`${short(d.session_id, 8)}\` (${esc(d.project)}, ${pct(d.share)})`).join(', ')
       : '–',
   ]);
@@ -209,7 +222,7 @@ function excluded(r: Report): string[] {
 
 const HEADLINE = ['round_trips', 'tool_calls', 'cost_norm'];
 
-function summary(v: View): string[] {
+function summary(v: Ctx): string[] {
   const r = v.report;
   const lines = [
     '## Summary',
@@ -223,7 +236,7 @@ function summary(v: View): string[] {
     const parts = HEADLINE.filter((id) => c.metrics[id]).map((id) => {
       const m = c.metrics[id] as Comparison['metrics'][string];
       const u = v.unitOf.get(id) ?? '';
-      return `${id.replace('_', ' ')} ${arrow(fmt(m.a, u), fmt(m.b, u))}${m.test ? ` (p ${fmt(m.test.p, 'ratio')})` : ''}`;
+      return `${id.replace('_', ' ')} ${arrow(fmt(m.a, u), fmt(m.b, u))}${m.test ? ` (p ${fmtP(m.test.p)})` : ''}`;
     });
     lines.push(
       `- **${label(c)}**, ${c.context}, \`${esc(c.project)}\`, ${c.model}, ${c.a} → ${c.b} (n ${c.n_a} → ${c.n_b}): ${parts.join('; ')}`,
@@ -233,11 +246,11 @@ function summary(v: View): string[] {
   return lines;
 }
 
-function turns(v: View): string[] {
+function turns(v: Ctx): string[] {
   const r = v.report;
   const rows: string[][] = [];
   for (const c of r.cells) {
-    if (c.kind !== 'session' && c.kind !== 'pr_lifecycle' && c.kind !== 'wait') continue;
+    if (c.view !== 'unit' || (c.kind !== 'session' && c.kind !== 'pr_lifecycle' && c.kind !== 'wait')) continue;
     rows.push([
       label(c),
       c.context,
@@ -265,15 +278,16 @@ function turns(v: View): string[] {
   ];
 }
 
-function byIntent(v: View): string[] {
+function byIntent(v: Ctx): string[] {
   const out = [
     '## By intent (findings §4.1)',
     '',
-    'Episodes, gh-pre → ghx-post, one table per repo and model; findings §4.1 pooled main and subagent, this ' +
+    'Episodes and background waits by intent (derived waits excluded), gh-pre → ghx-post, one table per repo ' +
+      'and model; findings §4.1 pooled main and subagent, this ' +
       'splits them. Tool calls and result characters: median [95% CI] p90.',
     '',
   ];
-  const groups = comparisonGroups(v.report, ['episode'], 'gh-pre', 'ghx-post');
+  const groups = comparisonGroups(v.report, 'intent', ['episode'], 'gh-pre', 'ghx-post');
   if (groups.length === 0) out.push('_No repo has episodes on both sides._', '');
   for (const g of groups) {
     out.push(`### \`${esc(g.project)}\`, ${g.model}`, '');
@@ -301,7 +315,7 @@ function byIntent(v: View): string[] {
   return out;
 }
 
-function byUnit(v: View): string[] {
+function byUnit(v: Ctx): string[] {
   const out = [
     '## By unit, split by context (findings §4.2)',
     '',
@@ -309,7 +323,7 @@ function byUnit(v: View): string[] {
       'findings §4.2 reports; cost_norm is the headline dollar figure. Medians [95% CI]; the rest are means per unit.',
     '',
   ];
-  const groups = comparisonGroups(v.report, ['episode', 'pr_cycle', 'pr_lifecycle'], 'gh-pre', 'ghx-post');
+  const groups = comparisonGroups(v.report, 'unit', ['episode', 'pr_cycle', 'pr_lifecycle'], 'gh-pre', 'ghx-post');
   if (groups.length === 0) out.push('_No repo has units on both sides._', '');
   for (const g of groups) {
     out.push(`### \`${esc(g.project)}\`, ${g.model}`, '');
@@ -352,10 +366,10 @@ function byUnit(v: View): string[] {
   return out;
 }
 
-function waits(v: View): string[] {
+function waits(v: Ctx): string[] {
   const rows: string[][] = [];
   for (const c of v.report.cells) {
-    if (c.kind !== 'wait') continue;
+    if (c.view !== 'unit' || c.kind !== 'wait') continue;
     rows.push([
       c.category,
       c.context,
@@ -405,14 +419,15 @@ const LIFECYCLE: { id: string; name: string; per?: number; unit?: string }[] = [
   { id: 'cost_norm', name: 'cost_norm' },
 ];
 
-function lifecycle(v: View): string[] {
+function lifecycle(v: Ctx): string[] {
   const out = [
     '## Whole PR lifecycle (findings §4.4)',
     '',
-    'One session (with its subagents) and one PR, gh-pre vs ghx-post. Medians [95% CI].',
+    'One session (with its subagents) and one PR, created and merged in that session; gh-pre vs ghx-post. ' +
+      'A lifecycle is filed under main when any of its work ran in the main thread. Medians [95% CI].',
     '',
   ];
-  const groups = comparisonGroups(v.report, ['pr_lifecycle'], 'gh-pre', 'ghx-post');
+  const groups = comparisonGroups(v.report, 'created_merged', ['pr_lifecycle'], 'gh-pre', 'ghx-post');
   if (groups.length === 0) out.push('_No repo has PR lifecycles on both sides._', '');
   for (const g of groups) {
     out.push(`### \`${esc(g.project)}\`, ${g.model}`, '');

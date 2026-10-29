@@ -343,3 +343,26 @@ test('diffDefinitions reports changed constants and prices, and an unbumped METR
   const withBase = { ...bumped, baseline: e };
   assert.match(render(withBase), /## Definition changes since the baseline[\s\S]*metrics\.errors\.formula/);
 });
+
+test('views: intent takes episodes and non-derived waits by intent; created_merged takes finished lifecycles', () => {
+  const ep = many(5, { ...PRE, intent: 'wait', category: 'wait' } as Partial<Unit>, [1]);
+  const bg = many(2, { ...PRE, kind: 'wait', category: 'bg-gh-loop', intent: 'wait' } as Partial<Unit>, [3]);
+  const derived = many(
+    3,
+    { ...PRE, kind: 'wait', category: 'fg-sleep-loop', intent: 'wait', flags: ['derived'] } as Partial<Unit>,
+    [9],
+  );
+  const life = [
+    ...many(2, { ...PRE, kind: 'pr_lifecycle', category: 'pr', flags: ['created', 'merged'] }, [5]),
+    ...many(2, { ...PRE, kind: 'pr_lifecycle', category: 'pr', flags: ['created'] }, [7]),
+  ];
+  const r = buildReport(input([...ep, ...bg, ...derived, ...life]));
+  const byId = new Map(r.cells.map((c) => [c.id, c]));
+  const intent = byId.get('intent|episode|wait|main|-tmp-repo|claude-opus-5-5|gh-pre');
+  assert.equal(intent?.n, 7, '5 episodes + 2 background waits, no derived waits');
+  assert.equal(byId.get('unit|wait|fg-sleep-loop|main|-tmp-repo|claude-opus-5-5|gh-pre')?.n, 3);
+  assert.equal(byId.get('unit|pr_lifecycle|pr|main|-tmp-repo|claude-opus-5-5|gh-pre')?.n, 4);
+  assert.equal(byId.get('created_merged|pr_lifecycle|pr|main|-tmp-repo|claude-opus-5-5|gh-pre')?.n, 2);
+  assert.throws(() => buildCell(derived, CATALOG, 'intent'), /intent view does not take wait units/);
+  assert.throws(() => buildCell(ep, CATALOG, 'created_merged'), /does not take episode units/);
+});
