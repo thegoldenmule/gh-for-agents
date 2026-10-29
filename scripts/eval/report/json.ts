@@ -62,6 +62,11 @@ export function viewCategory(view: View, u: Unit): string | null {
 /** Units that are atoms (not roll-ups); bucket shares and dominant sessions count these. */
 export const ATOMIC_KINDS: readonly UnitKind[] = ['episode', 'wait'];
 
+/** An atom, counted once: a derived wait re-files a polling episode's rows, so it is skipped. */
+export function isAtom(u: Unit): boolean {
+  return ATOMIC_KINDS.includes(u.kind) && !u.flags.includes('derived');
+}
+
 export const ADOPTION_STATEMENT =
   'Pre/post compares the adoption bundle, not ghx alone: ghx, its PreToolUse hook, the CLAUDE.md block and the ' +
   'no-sleep memory arrived together. The data are observational: sessions differ in their work, model mix and ' +
@@ -451,7 +456,7 @@ export function buildComparisons(
 export function bucketHeaders(units: readonly Unit[]): BucketHeader[] {
   const out: BucketHeader[] = [];
   for (const bucket of BUCKETS) {
-    const atoms = units.filter((u) => u.bucket === bucket && ATOMIC_KINDS.includes(u.kind));
+    const atoms = units.filter((u) => u.bucket === bucket && isAtom(u));
     if (atoms.length === 0) continue;
     const by = new Map<string, { project: string; units: number }>();
     for (const u of atoms) {
@@ -557,7 +562,7 @@ export function buildReport(input: ReportInput): Report {
   for (const b of BUCKETS) byBucket[b] = 0;
   for (const u of units) {
     bump(byKind, u.kind);
-    if (ATOMIC_KINDS.includes(u.kind)) bump(byBucket, u.bucket);
+    if (isAtom(u)) bump(byBucket, u.bucket);
   }
   const adoptions: Record<string, string> = {};
   for (const k of Object.keys(input.era.adoptions).sort(cmp)) adoptions[k] = input.era.adoptions[k] as string;

@@ -257,6 +257,9 @@ test('the header states the adoption bundle and names dominant sessions', () => 
   );
   // Ten sessions of one unit each: nobody dominates.
   assert.deepEqual(bucketHeaders(many(10, POST, [1]))[0]?.dominant, []);
+  // A derived wait re-files an episode's rows: it does not count again.
+  const withDerived = bucketHeaders([...many(4, POST, [1]), unit({ ...POST, kind: 'wait', flags: ['derived'] })]);
+  assert.equal(withDerived[0]?.units, 4);
   // Roll-up units do not count.
   assert.deepEqual(bucketHeaders([unit({ ...POST, kind: 'session' })]), []);
 });

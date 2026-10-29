@@ -39,6 +39,7 @@ import {
 import { type BaselineDiff, buildReport, type Report, summarizeTables } from './report/json.ts';
 import { buildUnits } from './units/index.ts';
 
+/** Bump when model/session.ts changes a row's shape or meaning: the cache key does not cover that code. */
 export const TABLES_CACHE_SCHEMA = 'ghx-eval/tables@1';
 const TABLE_NAMES = ['sessions', 'agents', 'turns', 'api_calls', 'tool_calls'] as const;
 
