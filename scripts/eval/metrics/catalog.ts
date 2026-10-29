@@ -21,9 +21,11 @@ export const CONSTANTS = {
   RECOVERY_MIN_SHARE,
   /**
    * Episode slack: consecutive non-GitHub, non-glue tool calls tolerated inside an episode before it closes.
-   * The prototype (episodes/episodes.py) closes on the first one, i.e. slack 0; buildUnits takes an override.
+   * 0 is episodes/episodes.py, which produced the findings' 1,439 episodes. Plan 07 lists 3, from findings §3,
+   * which took the metrics prototype's GAP_CALLS (API calls, another segmentation) for this; 3 gives about 17%
+   * fewer episodes on the 2026-10-29 snapshot. Changing it bumps METRIC_VERSION. buildUnits takes an override.
    */
-  EPISODE_SLACK: 3,
+  EPISODE_SLACK: 0,
   /** An episode closes when the next GitHub call starts more than this long after the episode's last event. */
   EPISODE_GAP_MS: 10 * 60 * 1000,
   /** Reference context for cost_norm (tokens). */

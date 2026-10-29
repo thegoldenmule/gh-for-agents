@@ -136,7 +136,7 @@ test('constants: the versioned set of plan 07 Determinism item 4, the result con
   assert.equal(CONSTANTS.RESULT_OVERHEAD, RESULT_OVERHEAD);
   assert.deepEqual(
     [CONSTANTS.CHARS_PER_TOKEN, CONSTANTS.RESULT_OVERHEAD, CONSTANTS.EPISODE_SLACK, CONSTANTS.EPISODE_GAP_MS],
-    [2.2, 70, 3, 600_000],
+    [2.2, 70, 0, 600_000],
   );
   assert.deepEqual([CONSTANTS.REF_CTX, CONSTANTS.REWRITE_THRESHOLD, CONSTANTS.CARRY_HORIZON], [50_000, 0.5, 50]);
 });

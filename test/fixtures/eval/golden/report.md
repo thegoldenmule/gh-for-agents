@@ -117,7 +117,7 @@ main:
 
 ## Definitions
 
-Constants: `CHARS_PER_TOKEN` = 2.2, `RESULT_OVERHEAD` = 70, `RECOVERY_MIN_SHARE` = 0.5, `EPISODE_SLACK` = 3, `EPISODE_GAP_MS` = 600000, `REF_CTX` = 50000, `REWRITE_THRESHOLD` = 0.5, `REWRITE_MIN_CTX` = 5000, `CARRY_HORIZON` = 50, `PRICE_TABLE_VERSION` = "2026-10-29.1".
+Constants: `CHARS_PER_TOKEN` = 2.2, `RESULT_OVERHEAD` = 70, `RECOVERY_MIN_SHARE` = 0.5, `EPISODE_SLACK` = 0, `EPISODE_GAP_MS` = 600000, `REF_CTX` = 50000, `REWRITE_THRESHOLD` = 0.5, `REWRITE_MIN_CTX` = 5000, `CARRY_HORIZON` = 50, `PRICE_TABLE_VERSION` = "2026-10-29.1".
 
 Prices 2026-10-29.1 (USD per MTok, input / output / cache read; cache writes 1.25× input for 5m, 2× for 1h): claude-fable-5 $10 / $50 / $1; claude-fable-5-1 $10 / $50 / $0.25; claude-haiku-4-5 $1 / $5 / $0.1; claude-opus-5 $5 / $25 / $0.5; claude-opus-5-5 $4 / $20 / $0.2; claude-sonnet-5 $2 / $10 / $0.2.
 

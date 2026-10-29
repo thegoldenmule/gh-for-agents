@@ -14,7 +14,7 @@ import { derivedWait, waitDraft } from './wait.ts';
 export type { Context, MetricDef, Unit, UnitKind } from './types.ts';
 
 export interface BuildUnitsOptions {
-  /** Override CONSTANTS.EPISODE_SLACK (0 reproduces the prototype's segmentation). */
+  /** Override CONSTANTS.EPISODE_SLACK (0, the prototype's segmentation). */
   slack?: number;
   /** Override CONSTANTS.EPISODE_GAP_MS. */
   gapMs?: number;
