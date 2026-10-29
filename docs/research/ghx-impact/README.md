@@ -2,6 +2,8 @@
 
 Python reference code behind [../ghx-impact-findings.md](../ghx-impact-findings.md). It is frozen and unmaintained, and serves as the validation target for the TypeScript port in [plan 07](../../plans/07-ghx-eval.md) (M2, M3).
 
+The TypeScript port now lives in [`scripts/eval`](../../../scripts/eval) (`pnpm eval`) and is the maintained path.
+
 - `schema/`: probes of the transcript format (record types, linkage, turns, timing, background tasks).
 - `episodes/episodes.py`: intent episodes. Run `extract`, then `analyze --gap 10`. `report-gap10.md` is its output on the 2026-10-29 corpus.
 - `metrics/`: token attribution, units and the metric catalog. `tx.py` is the shared parser; `report2.py`, `waits2.py` and `pr_cycles2.py` produce the matching `.txt` reports. `metric_catalog.json` is v0.1 of the catalog.
