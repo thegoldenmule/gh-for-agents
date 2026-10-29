@@ -9,6 +9,13 @@
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { type Invocation, isCiWait, isGh, isGhx, scanShell } from '../../src/hook/shell.ts';
+import {
+  BACKGROUND_RESULT,
+  backgroundTaskIdFromText,
+  backgroundTaskIdOf,
+  parseNotification as parseTaskNotification,
+  textOf,
+} from '../eval/model/notifications.ts';
 
 export interface ToolUse {
   id: string;
@@ -76,21 +83,9 @@ export interface Report {
 
 const isObject = (v: unknown): v is Record<string, any> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-function textOf(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content.map((c) => (isObject(c) && typeof c.text === 'string' ? c.text : '')).join('\n');
-  }
-  return '';
-}
-
 function parseNotification(text: string, line: number): Notification | undefined {
-  if (!text.includes('<task-notification>')) return undefined;
-  const taskId = /<task-id>([^<]+)<\/task-id>/.exec(text)?.[1];
-  if (!taskId) return undefined;
-  const status = /<status>([^<]+)<\/status>/.exec(text)?.[1] ?? 'unknown';
-  const code = /exit code (\d+)/.exec(/<summary>([\s\S]*?)<\/summary>/.exec(text)?.[1] ?? '')?.[1];
-  return { taskId, status, exitCode: code !== undefined ? Number(code) : status === 'completed' ? 0 : null, line };
+  const n = parseTaskNotification(text);
+  return n && { taskId: n.taskId, status: n.status, exitCode: n.exitCode, line };
 }
 
 interface Parsed {
@@ -150,7 +145,7 @@ export function parseSession(jsonl: string): Parsed {
         seen.add(block.id);
         uses.push({ id: block.id, name: String(block.name), input: isObject(block.input) ? block.input : {}, line });
       } else if (block.type === 'tool_result' && typeof block.tool_use_id === 'string') {
-        const bg = isObject(rec.toolUseResult) ? rec.toolUseResult.backgroundTaskId : undefined;
+        const bg = backgroundTaskIdOf(rec.toolUseResult);
         results.set(block.tool_use_id, {
           text: textOf(block.content),
           isError: block.is_error === true,
@@ -278,8 +273,8 @@ function scoreWaits(p: Parsed): WaitReport[] {
     if (!inv) continue;
     const argv = inv.argv.join(' ');
     const result = results.get(u.id);
-    const background = u.name === 'Bash' && (result?.text.includes('Command running in background') ?? false);
-    const taskId = result?.backgroundTaskId ?? /running in background with ID: (\w+)/.exec(result?.text ?? '')?.[1];
+    const background = u.name === 'Bash' && (result?.text.includes(BACKGROUND_RESULT) ?? false);
+    const taskId = result?.backgroundTaskId ?? backgroundTaskIdFromText(result?.text ?? '');
     const mine = taskId ? notifications.filter((n) => n.taskId === taskId) : [];
     // A foreground call blocks, so only a background wait has a window to watch.
     const end = background ? (mine[0]?.line ?? Number.POSITIVE_INFINITY) : u.line;
