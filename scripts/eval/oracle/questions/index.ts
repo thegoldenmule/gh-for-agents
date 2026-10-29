@@ -17,4 +17,5 @@ export const QUESTIONS: readonly Question[] = [
   mainHealth,
   prFeedback,
   prMerge,
+  ciRerun,
 ];
