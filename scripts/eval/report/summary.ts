@@ -395,7 +395,7 @@ export function renderSummary(report: Report): string {
   const w0 = Math.max(...[head, ...body].map((r) => (r[0] as string).length)) + 3;
   const w1 = Math.max(...[head, ...body].map((r) => (r[1] as string).length)) + 4;
   for (const r of [head, ...body]) lines.push(`${(r[0] as string).padEnd(w0)}${(r[1] as string).padEnd(w1)}${r[2]}`);
-  if (s.too_few.length) lines.push(...wrap('Too few tasks to compare: ', `${s.too_few.join(', ')}.`, 2));
+  if (s.too_few.length) lines.push(...wrap('Too few tasks to compare: ', `${s.too_few.join('; ')}.`, 2));
   lines.push(
     `cost = API spend for one task, as if it started from a ${Math.round(s.ref_ctx / 1000)}k-token context.`,
     `better/worse = a clear difference; same = no clear change; too few = under ${s.min_n} tasks on a side.`,

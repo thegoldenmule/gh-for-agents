@@ -1,5 +1,6 @@
-// Golden test: the fixture projects directory produces the checked-in report.json and report.md byte for
-// byte. UPDATE_GOLDEN=1 regenerates the projects, the era config and both reports; review the diff.
+// Golden test: the fixture projects directory produces the checked-in report.json, report.md and summary
+// (summary.txt, summary.json) byte for byte. UPDATE_GOLDEN=1 regenerates the projects, the era config, the
+// reports and the summary; review the diff.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -7,8 +8,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { evaluate } from '../../scripts/eval/pipeline.ts';
-import { serializeReport } from '../../scripts/eval/report/json.ts';
+import { parseReport, serializeReport } from '../../scripts/eval/report/json.ts';
 import { render } from '../../scripts/eval/report/markdown.ts';
+import { renderSummary, serializeSummary } from '../../scripts/eval/report/summary.ts';
 import { GOLDEN_ERA, goldenFiles } from '../fixtures/eval/golden/golden-corpus.ts';
 
 const ROOT = join(import.meta.dirname, '..', '..');
@@ -17,6 +19,8 @@ const PROJECTS = join(GOLDEN, 'projects');
 const ERA = join(GOLDEN, 'era.json');
 const REPORT_JSON = join(GOLDEN, 'report.json');
 const REPORT_MD = join(GOLDEN, 'report.md');
+const SUMMARY_TXT = join(GOLDEN, 'summary.txt');
+const SUMMARY_JSON = join(GOLDEN, 'summary.json');
 const META = `${JSON.stringify({ meta: { source: 'synthetic', note: 'Golden ghx-eval corpus: synthetic transcripts, no real data.' } })}\n`;
 
 /** Every file, listed so a change to the generator shows up here too. */
@@ -52,6 +56,8 @@ function writeGolden(): void {
   const report = evaluate(PROJECTS, { era: GOLDEN_ERA });
   writeFileSync(REPORT_JSON, serializeReport(report));
   writeFileSync(REPORT_MD, render(report));
+  writeFileSync(SUMMARY_TXT, renderSummary(report));
+  writeFileSync(SUMMARY_JSON, serializeSummary(report));
 }
 
 if (process.env.UPDATE_GOLDEN === '1') writeGolden();
@@ -94,6 +100,31 @@ test('golden: the command prints the same bytes, and --out writes them', () => {
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
+});
+
+test('golden: the summary renders from report.json alone, to the checked-in bytes, every run', () => {
+  const a = evaluate(PROJECTS, { era: GOLDEN_ERA });
+  assert.equal(renderSummary(a), readFileSync(SUMMARY_TXT, 'utf8'));
+  assert.equal(serializeSummary(a), readFileSync(SUMMARY_JSON, 'utf8'));
+  const fromJson = parseReport(readFileSync(REPORT_JSON, 'utf8'));
+  assert.equal(renderSummary(fromJson), readFileSync(SUMMARY_TXT, 'utf8'));
+  assert.equal(renderSummary(evaluate(PROJECTS, { era: GOLDEN_ERA })), renderSummary(a));
+});
+
+test('golden: --summary prints the summary, --summary --json its data; --summary takes no --out', () => {
+  const txt = cli(['--summary', '--projects', PROJECTS, '--era', ERA]);
+  assert.equal(txt.status, 0, txt.stderr);
+  assert.equal(txt.stdout, readFileSync(SUMMARY_TXT, 'utf8'));
+  const json = cli(['--summary', '--json', '--projects', PROJECTS, '--era', ERA]);
+  assert.equal(json.status, 0, json.stderr);
+  assert.equal(json.stdout, readFileSync(SUMMARY_JSON, 'utf8'));
+  const out = cli(['--summary', '--projects', PROJECTS, '--out', join(tmpdir(), 'never-written')]);
+  assert.equal(out.status, 2);
+  assert.match(out.stderr, /--summary prints to stdout/);
+  const help = cli(['--help']);
+  assert.equal(help.status, 0);
+  assert.match(help.stdout, /^Usage: pnpm eval \[--summary\]/);
+  assert.ok(help.stdout.indexOf('--summary  ') < help.stdout.indexOf('--projects DIR  '), '--summary is listed first');
 });
 
 test('golden: report.json says what was read and excluded, and nothing machine-specific', () => {

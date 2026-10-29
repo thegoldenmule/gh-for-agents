@@ -1,0 +1,15 @@
+ghx vs raw gh on this machine
+Before ghx: 3 sessions · After ghx: 3 sessions (acme, Opus 5.5)
+
+Median cost per task   Main thread, before → after    Subagents, before → after
+Check PR/CI status     $0.027 → $0.027  same          too few
+Too few tasks to compare: Diagnose a CI failure; Create a PR; Merge a PR; Wait for CI; Whole PR,
+  create to merge.
+cost = API spend for one task, as if it started from a 50k-token context.
+better/worse = a clear difference; same = no clear change; too few = under 5 tasks on a side.
+
+Biggest problems with ghx: none stand out clearly in this data.
+Caveats: ghx data here is 3 sessions; across every repo, two sessions hold 82% of all ghx tasks, and
+         two sessions hold 57% of all raw gh tasks.
+         It compares the whole ghx setup (ghx, its hook, the CLAUDE.md block), not ghx alone.
+Full report: pnpm eval   (pnpm eval --out DIR writes report.md and report.json)

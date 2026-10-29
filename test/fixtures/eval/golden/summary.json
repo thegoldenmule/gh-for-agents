@@ -1,0 +1,50 @@
+{
+  "compared": {
+    "project": "-tmp-golden-acme",
+    "repo": "acme",
+    "model": "claude-opus-5-5",
+    "model_name": "Opus 5.5",
+    "sessions_before": 3,
+    "sessions_after": 3
+  },
+  "ref_ctx": 50000,
+  "min_n": 5,
+  "rows": [
+    {
+      "task": "status",
+      "label": "Check PR/CI status",
+      "main": {
+        "n_before": 6,
+        "n_after": 8,
+        "before": 0.026926,
+        "after": 0.027472,
+        "p": 0.846284,
+        "verdict": "same"
+      },
+      "subagent": {
+        "n_before": 1,
+        "n_after": 0,
+        "before": 0.028348,
+        "after": null,
+        "p": null,
+        "verdict": "too few"
+      }
+    }
+  ],
+  "too_few": [
+    "Diagnose a CI failure",
+    "Create a PR",
+    "Merge a PR",
+    "Wait for CI",
+    "Whole PR, create to merge"
+  ],
+  "problems": {
+    "total": 0,
+    "shown": []
+  },
+  "caveats": [
+    "ghx data here is 3 sessions; across every repo, two sessions hold 82% of all ghx tasks, and two sessions hold 57% of all raw gh tasks.",
+    "It compares the whole ghx setup (ghx, its hook, the CLAUDE.md block), not ghx alone."
+  ],
+  "others": []
+}
