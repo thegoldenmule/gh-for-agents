@@ -182,6 +182,107 @@ test('waits: keyed by task id; launching one leaves the episode open; triple not
   }
 });
 
+/**
+ * Status read, background `ghx ci wait 12` (b1), a status read while waiting, the wake, the output read, a
+ * status read on `after`, a merge of #12, an Edit. Everything is inside the 10-minute gap.
+ */
+function wakeScenario(after = 'ghx pr status 12 --brief'): InputFile {
+  const sha = 'a'.repeat(40);
+  return main([
+    human('land #12', 'p1', at(0)),
+    bash('msg_1', at(1), 'tu_st', 'ghx pr status 12', ghxStatus(12, sha)),
+    call({ msg: 'msg_2', at: at(2), tools: [{ id: 'tu_wait', command: 'ghx ci wait 12', result: '', bgTask: 'b1' }] }),
+    bash('msg_3', at(3), 'tu_st2', 'ghx pr status 12 --brief', ghxStatus(12, sha)),
+    notify({ taskId: 'b1', toolUseId: 'tu_wait', status: 'completed', summary: 'exit 0', at: at(5), promptId: 'p2' }),
+    call({
+      msg: 'msg_4',
+      at: at(6),
+      tools: [
+        { id: 'tu_out', name: 'Read', input: { file_path: `${TASKS}/b1.output` }, result: '{"outcome":"green"}' },
+      ],
+    }),
+    bash('msg_5', at(6, 30), 'tu_st3', after, ghxStatus(12, sha)),
+    bash('msg_6', at(7), 'tu_merge', `ghx pr merge 12 --expect-head ${sha.slice(0, 7)}`, '{"merged":true}'),
+    call({
+      msg: 'msg_7',
+      at: at(8),
+      tools: [{ id: 'tu_e', name: 'Edit', input: { file_path: '/src/a.ts' }, result: 'ok' }],
+    }),
+  ]);
+}
+
+test('after a wake: a merge opens an after-wake episode linked to the wait; the earlier episode stops', () => {
+  const us = units([wakeScenario()]);
+  const eps = ofKind(us, 'episode');
+  assert.deepEqual(
+    eps.map((e) => e.tool_use_ids),
+    [['tu_st', 'tu_st2'], ['tu_merge']],
+    'without the wake rule the merge would join the open status episode (all inside the gap)',
+  );
+  const [before, merge] = eps as [Unit, Unit];
+  assert.ok(before.flags.includes('closed:wake'));
+  assert.ok(!before.flags.includes('after-wake'));
+  assert.equal(before.parent_unit_id, null);
+  assert.equal(merge.intent, 'merge');
+  assert.equal(merge.category, 'merge');
+  assert.ok(merge.flags.includes('after-wake'));
+  assert.equal(merge.parent_unit_id, 'wait:tu_wait');
+  assert.equal(merge.pr, '#12');
+  assert.equal(merge.metrics.span_calls, 2, 'the call that emitted the merge and the one that read its result');
+});
+
+test('after a wake: the output-file read and a status read on the same target stay in the wait', () => {
+  const us = units([wakeScenario()]);
+  const w = ofKind(us, 'wait')[0] as Unit;
+  assert.deepEqual(w.tool_use_ids, ['tu_wait', 'tu_out', 'tu_st3']);
+  assert.equal(w.intent, 'wait');
+  assert.equal(w.category, 'bg-ghx-ci-wait');
+  assert.equal(w.metrics.gh_tool_calls, 2);
+  assert.equal(w.end_ts, at(6, 32), "the attached status read's result");
+  assert.ok(!us.some((u) => u.kind === 'episode' && u.tool_use_ids.includes('tu_st3')));
+});
+
+test('after a wake: the wait is charged up to the read of its last attached call, not the merge', () => {
+  const us = units([wakeScenario()]);
+  const w = ofKind(us, 'wait')[0] as Unit;
+  // msg_2 launch, msg_3 reads its placeholder, msg_4 the wake (emits the output read), msg_5 reads it and emits
+  // the status read, msg_6 reads that (and emits the merge). msg_7, which reads the merge, is not the wait's.
+  assert.equal(w.metrics.span_calls, 5);
+  assert.equal(w.metrics.round_trips, 3, 'msg_2, msg_4, msg_5 emitted its calls');
+  const merge = ofKind(us, 'episode').find((e) => e.intent === 'merge') as Unit;
+  const one = (merge.metrics.cost as number) / 2;
+  assert.ok(Math.abs((w.metrics.cost as number) - 5 * one) < 1e-9, 'every call has the same usage');
+});
+
+test('after a wake: a status read on another PR is not about the wait and opens an after-wake episode', () => {
+  const us = units([wakeScenario('ghx pr status 13 --brief')]);
+  const w = ofKind(us, 'wait')[0] as Unit;
+  assert.deepEqual(w.tool_use_ids, ['tu_wait', 'tu_out']);
+  const eps = ofKind(us, 'episode');
+  assert.deepEqual(
+    eps.map((e) => [e.tool_use_ids, e.intent, e.parent_unit_id]),
+    [
+      [['tu_st', 'tu_st2'], 'status', null],
+      [['tu_st3', 'tu_merge'], 'merge', 'wait:tu_wait'],
+    ],
+    'the episode the status read opened takes the merge by the normal rules',
+  );
+  assert.ok(eps[1]?.flags.includes('after-wake'));
+});
+
+test('after a wake: any other tool call in between ends the wake', () => {
+  const eps = ofKind(units([wakeScenario('git push')]), 'episode');
+  assert.deepEqual(
+    eps.map((e) => [e.tool_use_ids, e.parent_unit_id]),
+    [
+      [['tu_st', 'tu_st2'], null],
+      [['tu_merge'], null],
+    ],
+  );
+  assert.ok(eps[0]?.flags.includes('closed:tool'));
+  assert.ok(!eps[1]?.flags.includes('after-wake'));
+});
+
 test('waits: TaskStop closes an open wait; Monitor waits are their own mechanism', () => {
   const us = units([
     main([

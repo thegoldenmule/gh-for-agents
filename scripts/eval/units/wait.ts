@@ -1,5 +1,6 @@
 // Wait units (findings §3, §4.3). A background wait is keyed by its task id: the launch, its glue (output-file
-// reads, TaskOutput, TaskStop) and the API calls its notifications woke. A foreground wait (a contiguous
+// reads, TaskOutput, TaskStop), the status reads and foreground waits on its target right after a wake
+// (episode.ts aboutWait) and the API calls its notifications woke. A foreground wait (a contiguous
 // episode whose GitHub calls poll with sleep, a loop or --watch) becomes a wait unit too, flagged 'derived'
 // with the episode as its child, so waits can be compared by mechanism without double-counting episodes.
 import { isGitHubCall } from '../metrics/catalog.ts';
@@ -32,7 +33,11 @@ export function waitDraft(idx: TableIndex, f: FileIndex, ep: RawEpisode): Draft 
   if (ep.closed_by === 'censored') flags.add('open');
   if (ep.compact_inside) flags.add('compact-inside');
   const { start } = tsRange([launch.call_ts]);
-  const { end } = tsRange([ep.end_ts, launch.notif_ts, ...ep.glue.map((t) => t.result_ts ?? t.call_ts)]);
+  const { end } = tsRange([
+    ep.end_ts,
+    launch.notif_ts,
+    ...[...ep.gh.slice(1), ...ep.glue].map((t) => t.result_ts ?? t.call_ts),
+  ]);
   return {
     kind: 'wait',
     unit_id: `wait:${launch.tool_use_id}`,

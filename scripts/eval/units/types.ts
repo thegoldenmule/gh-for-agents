@@ -38,12 +38,17 @@ export interface Unit {
   end_ts: string;
   /** In file order (files in path order). */
   tool_use_ids: string[];
-  /** e.g. 'multi-pr', 'sha-fallback', 'charged-to-last-pr', 'continuation', 'open' (no close seen). */
+  /**
+   * e.g. 'multi-pr', 'sha-fallback', 'charged-to-last-pr', 'continuation', 'open' (no close seen), 'after-wake'
+   * (an episode opened by the first call after a wait's wake that was not about the wait).
+   */
   flags: string[];
   /** Keyed by MetricDef.id; null when the metric does not apply or cannot be measured for this unit. */
   metrics: Record<string, number | null>;
   /** Unit ids this unit is built from (cycles and lifecycles → episodes and waits). Empty for atoms. */
   children: string[];
+  /** The unit this one follows from: for an 'after-wake' episode (and its derived wait), the wait that woke it. */
+  parent_unit_id: string | null;
   /** Ordinal of the unit's first tool call: files in path order, then file order. Used for stable sorting. */
   start_pos: number;
 }

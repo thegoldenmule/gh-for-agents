@@ -38,6 +38,8 @@ export interface Draft {
   start_ts: string | null;
   end_ts: string | null;
   children: string[];
+  /** The unit this one follows from: an after-wake episode's wait. */
+  parent?: string;
   rounds?: number;
 }
 
@@ -191,6 +193,7 @@ export function finalize(idx: TableIndex, d: Draft, opts: FinalizeOptions = {}):
     flags: [...d.flags].sort(),
     metrics: {},
     children: d.children,
+    parent_unit_id: d.parent ?? null,
     start_pos: d.calls.length > 0 ? Math.min(...d.calls.map((t) => idx.pos.get(t.tool_use_id) ?? 0)) : 0,
   };
   unit.metrics = computeMetrics(unit, {

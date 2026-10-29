@@ -9,7 +9,7 @@ import type { ApiCallRow, ToolCallRow } from '../model/session.ts';
 import { CHARS_PER_TOKEN, RECOVERY_MIN_SHARE, RESULT_OVERHEAD, resultTokenEstimate } from '../model/usage.ts';
 import type { MetricDef, Unit, UnitKind } from '../units/types.ts';
 
-export const METRIC_VERSION = '1.0.0';
+export const METRIC_VERSION = '1.1.0';
 
 /** Every constant a metric or a unit boundary depends on (plan 07 Determinism item 4). Emitted in report.json. */
 export const CONSTANTS = {
@@ -42,6 +42,11 @@ export const CONSTANTS = {
 const ALL: UnitKind[] = ['episode', 'wait', 'pr_cycle', 'pr_lifecycle', 'session'];
 const PRS: UnitKind[] = ['pr_cycle', 'pr_lifecycle'];
 
+/** Appended to the metrics whose values the 1.1.0 wake rule moves between waits and episodes. */
+const AFTER_WAKE =
+  ' Since 1.1.0, a wait keeps the status reads and foreground waits on its target right after its wake, and ' +
+  'the first other GitHub call after a wake opens an episode flagged after-wake and ends the one open before the wait.';
+
 const def = (
   id: string,
   unit: string,
@@ -57,6 +62,9 @@ const def = (
  * --input/--body-file, TaskStop/TaskOutput of the unit's task). Span: the API calls charged to the unit — every
  * call that emitted one of its tool calls, the call that read its last result, the wake call after each of its
  * notifications, and (for an episode) every call in between in the same file. Each message.id counts once.
+ * After a wake (1.1.0): a wait keeps only the calls about it — its glue, and the status reads and foreground
+ * waits on its target right after the wake; the first other GitHub call opens an 'after-wake' episode linked
+ * to the wait (parent_unit_id) and ends the episode that was open before the wait.
  */
 export const CATALOG: MetricDef[] = [
   // --- the three "turns" numbers (plan "What turns means")
@@ -74,7 +82,8 @@ export const CATALOG: MetricDef[] = [
     'robust',
     ALL,
     "API calls that emitted one of the unit's tool calls (GitHub calls and glue). Findings §4.2's 'Round trips' " +
-      'column is gh_round_trips, which counts only calls emitting a GitHub call.',
+      'column is gh_round_trips, which counts only calls emitting a GitHub call.' +
+      AFTER_WAKE,
     "unique message.id over the unit's tool calls (session: all API calls)",
   ),
   def(
@@ -99,7 +108,7 @@ export const CATALOG: MetricDef[] = [
     'calls',
     'robust',
     ALL,
-    'API calls charged to the unit (see Span). For a session, the sum over its GitHub units.',
+    `API calls charged to the unit (see Span). For a session, the sum over its GitHub units.${AFTER_WAKE}`,
     'len(span)',
   ),
   def(
@@ -111,7 +120,14 @@ export const CATALOG: MetricDef[] = [
       'calls (span_calls − linked − 1); units here carry glue explicitly, so this counts glue tool calls.',
     'tool_calls − gh_tool_calls',
   ),
-  def('gh_tool_calls', 'calls', 'robust', ALL, 'GitHub tool calls.', 'count of Bash/Monitor calls running gh or ghx'),
+  def(
+    'gh_tool_calls',
+    'calls',
+    'robust',
+    ALL,
+    `GitHub tool calls.${AFTER_WAKE}`,
+    'count of Bash/Monitor calls running gh or ghx',
+  ),
   def(
     'gh_invocations',
     'invocations',
@@ -226,7 +242,8 @@ export const CATALOG: MetricDef[] = [
     ALL,
     'Priced usage over the span, including 5m/1h cache writes and advisor iterations. Confounded by context ' +
       'size. Caveats (M1): subagent advisor cost is invisible in transcripts; opus is 6–20% under cost-state ' +
-      'in subagent-heavy sessions (unrecorded side calls).',
+      'in subagent-heavy sessions (unrecorded side calls).' +
+      AFTER_WAKE,
     'sum cost_usd over span',
   ),
   def(
@@ -235,7 +252,8 @@ export const CATALOG: MetricDef[] = [
     'robust',
     ALL,
     'Headline dollar figure (findings §2): keeps the unit’s own context growth and cache rewrites but replaces ' +
-      'the session’s base context with 50k. Same caveats as cost.',
+      'the session’s base context with 50k. Same caveats as cost.' +
+      AFTER_WAKE,
     `sum over span of [output + advisor cost + input cost × max(0, ctx − C0 + ${CONSTANTS.REF_CTX}) / ctx], ` +
       'C0 = context of the first span call, input cost = cost − output − advisor',
   ),

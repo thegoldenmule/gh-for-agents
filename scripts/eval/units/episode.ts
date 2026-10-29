@@ -2,11 +2,16 @@
 // docs/research/ghx-impact/episodes/episodes.py over M1's rows. Slack 0 reproduces the prototype, which
 // closes an episode at the first non-glue tool call; ToolSearch is neutral. Launching a background wait
 // leaves the current episode alone; a closed wait keeps its output-file reads until the next prompt.
+// After a wait's notification wakes the agent, only calls about the wait stay with it (its output-file reads,
+// status reads and foreground waits on its target); the first other GitHub call opens a new episode flagged
+// 'after-wake' that links back to the wait, and the episode open before the wait does not continue past it.
 // Structure comes from file order (call_index, then tool order); timestamps only measure the gap.
+import { classifyCommand } from '../classify/command.ts';
 import { type Intent, intentRank } from '../classify/intent.ts';
 import { isGitHubCall } from '../metrics/catalog.ts';
 import type { ToolCallRow } from '../model/session.ts';
 import { byPos, type Draft, spanOf, tsRange } from './draft.ts';
+import { prsOfCall } from './pr.ts';
 import { anyBetween, type FileIndex, type TableIndex } from './tables.ts';
 
 export type RawKind = 'contiguous' | 'wait_bg';
@@ -24,6 +29,8 @@ export interface RawEpisode {
   end_ts: string | null;
   /** A compaction happened while the wait was open. */
   compact_inside: boolean;
+  /** Contiguous episodes: tool_use_id of the wait whose wake this episode's first call followed. */
+  after_wake: string | null;
 }
 
 export interface SegmentOptions {
@@ -55,6 +62,28 @@ export function startsWait(t: ToolCallRow): boolean {
   return isGitHubCall(t) && t.background && t.intent === 'wait' && t.background_task_id !== null;
 }
 
+/**
+ * What a wait or status call is about: the PRs it names (#n) and its run:/branch: targets (an @sha suffix
+ * dropped). Empty when the call names none (e.g. `gh pr checks` on the current branch).
+ */
+export function callTargets(t: ToolCallRow): Set<string> {
+  const s = new Set(prsOfCall(t).map((r) => `#${r.number}`));
+  for (const inv of classifyCommand(t.command ?? '').invocations)
+    for (const w of inv.positional) if (/^(?:run|branch):/.test(w)) s.add(w.replace(/@.*$/, ''));
+  return s;
+}
+
+/**
+ * A GitHub call after a wake that is about the woken wait: a foreground wait or a status read on the same
+ * target (or with no target either side can name).
+ */
+export function aboutWait(t: ToolCallRow, launch: ToolCallRow): boolean {
+  if (t.intent !== 'wait' && t.intent !== 'status') return false;
+  const a = callTargets(t);
+  const b = callTargets(launch);
+  return a.size === 0 || b.size === 0 || [...a].some((x) => b.has(x));
+}
+
 /** Index of the call the wait's terminal notification woke, or +∞ when it never ended (or nothing followed). */
 function terminalAt(w: ToolCallRow): number {
   if (w.notif_ts === null) return Number.POSITIVE_INFINITY;
@@ -71,6 +100,14 @@ export function segmentFile(f: FileIndex, opts: SegmentOptions): RawEpisode[] {
   let closed = new Map<string, RawEpisode>();
   let prevTool: ToolCallRow | null = null;
   let prevIndex = -1;
+  /** The wait launched at each call index a notification woke (the latest launch in file order wins). */
+  const wakeAt = new Map<number, ToolCallRow>();
+  for (const t of f.tools) if (startsWait(t)) for (const k of t.notif_wake_call_indexes) wakeAt.set(k, t);
+  const wakes = [...wakeAt.keys()].sort((a, b) => a - b);
+  /** Every wait of this file by task id, open or closed. */
+  const allWaits = new Map<string, RawEpisode>();
+  /** The wait whose notification woke the agent, until a call that is not about it. */
+  let woke: { tid: string; launch: ToolCallRow } | null = null;
 
   const newEp = (kind: RawKind, t: ToolCallRow): RawEpisode => ({
     kind,
@@ -81,6 +118,7 @@ export function segmentFile(f: FileIndex, opts: SegmentOptions): RawEpisode[] {
     start_ts: t.call_ts,
     end_ts: t.result_ts ?? t.call_ts,
     compact_inside: false,
+    after_wake: null,
   });
   const close = (reason: string): void => {
     if (cur) {
@@ -114,6 +152,13 @@ export function segmentFile(f: FileIndex, opts: SegmentOptions): RawEpisode[] {
     if (anyBetween(f.humanTurns, prevIndex, at)) {
       close('prompt');
       closed = new Map();
+      woke = null;
+    } else {
+      for (const k of wakes) {
+        if (k > at) break;
+        const launch = wakeAt.get(k) as ToolCallRow;
+        if (k > prevIndex) woke = { tid: launch.background_task_id as string, launch };
+      }
     }
     const before = prevTool;
     prevTool = t;
@@ -124,8 +169,20 @@ export function segmentFile(f: FileIndex, opts: SegmentOptions): RawEpisode[] {
         const w = newEp('wait_bg', t);
         w.gh.push(t);
         waits.set(t.background_task_id as string, { ep: w, launch: t });
+        allWaits.set(t.background_task_id as string, w);
         continue;
       }
+      if (woke) {
+        const w = allWaits.get(woke.tid);
+        if (w && aboutWait(t, woke.launch)) {
+          w.gh.push(t);
+          if (!waits.has(woke.tid)) w.end_ts = t.result_ts ?? t.call_ts;
+          continue;
+        }
+      }
+      const afterWake = woke?.launch.tool_use_id ?? null;
+      woke = null;
+      if (afterWake !== null) close('wake');
       const curEnd = cur ? ms((cur as RawEpisode).end_ts) : null;
       const start = ms(t.call_ts);
       if (cur && curEnd !== null && start !== null && start - curEnd > opts.gapMs) close('gap');
@@ -136,6 +193,7 @@ export function segmentFile(f: FileIndex, opts: SegmentOptions): RawEpisode[] {
         (t.command ?? '').includes(basename(before.file_path));
       if (!cur) {
         cur = newEp('contiguous', t);
+        cur.after_wake = afterWake;
         if (sendsFile && before) {
           cur.glue.push(before);
           cur.start_ts = before.call_ts;
@@ -182,6 +240,8 @@ export function segmentFile(f: FileIndex, opts: SegmentOptions): RawEpisode[] {
     } else if (!target && t.name === 'ToolSearch') {
       continue;
     }
+    // Glue of a wait keeps the wake; any other call (glue of the open episode, slack, a boundary) ends it.
+    if (targetTask === null) woke = null;
     if (target) {
       target.glue.push(t);
       const openWait = targetTask !== null && waits.get(targetTask)?.ep === target;
@@ -222,6 +282,7 @@ export function episodeDraft(idx: TableIndex, f: FileIndex, ep: RawEpisode): Dra
   const intent = episodeIntent(ep.gh);
   const flags = new Set<string>([`closed:${ep.closed_by.split(':')[0] ?? ''}`]);
   if (ep.gh.length === 0) flags.add('continuation');
+  if (ep.after_wake !== null) flags.add('after-wake');
   const first = calls[0] as ToolCallRow;
   const range = tsRange(calls.flatMap((t) => [t.call_ts, t.result_ts]));
   return {
@@ -242,5 +303,6 @@ export function episodeDraft(idx: TableIndex, f: FileIndex, ep: RawEpisode): Dra
     start_ts: range.start,
     end_ts: range.end,
     children: [],
+    ...(ep.after_wake !== null ? { parent: `wait:${ep.after_wake}` } : {}),
   };
 }

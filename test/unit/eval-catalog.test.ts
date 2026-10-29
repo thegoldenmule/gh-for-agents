@@ -85,6 +85,7 @@ const unit = (kind: UnitKind): Unit => ({
   flags: [],
   metrics: {},
   children: [],
+  parent_unit_id: null,
   start_pos: 0,
 });
 

@@ -73,6 +73,7 @@ function unit(o: Partial<Unit> & { m?: Record<string, number | null> }): Unit {
     flags: [],
     metrics: { round_trips: 1, tool_calls: 1, cost_norm: 0.1, errors: 0, ...m },
     children: [],
+    parent_unit_id: null,
     start_pos: seq,
     intent: null,
     ...rest,
