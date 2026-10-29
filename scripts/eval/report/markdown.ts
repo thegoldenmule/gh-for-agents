@@ -26,6 +26,12 @@ export function fmt(x: number | null | undefined, unit = ''): string {
   return trim(x.toFixed(2));
 }
 
+/** Dollars with thousands separators and cents. */
+function usd(x: number): string {
+  const [whole, cents] = x.toFixed(2).split('.');
+  return `$${group(Number(whole))}.${cents}`;
+}
+
 const pct = (x: number | undefined): string => (x === undefined ? '–' : `${Math.round(x * 100)}%`);
 const short = (s: string, n = 12): string => (s.length > n ? s.slice(0, n) : s);
 const esc = (s: string): string => s.replace(/\|/g, '\\|');
@@ -149,7 +155,7 @@ function header(r: Report): string[] {
       `${group(c.agents)} subagents, ${group(c.api_calls)} API calls, ${group(c.tool_calls)} tool calls ` +
       `(${Object.entries(c.github_tool_calls)
         .map(([k, n]) => `${group(n)} ${k}`)
-        .join(', ')}), $${c.cost_usd.toFixed(2)} estimated cost.`,
+        .join(', ')}), ${usd(c.cost_usd)} estimated cost.`,
     '',
     `METRIC_VERSION ${r.versions.metric}, prices ${r.versions.price_table}, ${r.versions.report}. ` +
       `Medians with ${Math.round(r.stats.ci_level * 100)}% CIs from a ${r.stats.bootstrap} ` +
@@ -194,16 +200,16 @@ function excluded(r: Report): string[] {
   return [
     'Excluded and deduplicated:',
     '',
-    `- \`<synthetic>\` records (API errors): ${e.synthetic_records}`,
-    `- Dev projects (bucket dogfood-dev, never compared): ${dev.sessions} sessions, ${dev.units} units` +
+    `- \`<synthetic>\` records (API errors): ${group(e.synthetic_records)}`,
+    `- Dev projects (bucket dogfood-dev, never compared): ${group(dev.sessions)} sessions, ${group(dev.units)} units` +
       (dev.projects.length ? ` in ${dev.projects.map((p) => `\`${esc(p)}\``).join(', ')}` : ''),
-    `- Files not read (not a transcript, subagent meta or skill-fork file): ${e.unmatched_files}`,
+    `- Files not read (not a transcript, subagent meta or skill-fork file): ${group(e.unmatched_files)}`,
     `- Parse errors: ${pe.lines} lines in ${pe.files} files, ${pe.json_files} unreadable .json files, ` +
-      `${pe.partial_last_line.files} partial last lines (${pe.partial_last_line.bytes} bytes)`,
+      `${pe.partial_last_line.files} partial last lines (${group(pe.partial_last_line.bytes)} bytes)`,
     `- Invalid records: ${kv(e.invalid_records)}; unknown record types: ${kv(e.unknown_record_types)}`,
     `- Files outside any session: ${e.files_outside_sessions}; unlinked agents: ${e.unlinked_agents}`,
-    `- Deduplicated: ${dd.assistant_records} assistant records, ${dd.fork_copied_calls} fork-copied API calls, ` +
-      `${dd.notification_sightings} repeated notification sightings`,
+    `- Deduplicated: ${group(dd.assistant_records)} assistant records, ${group(dd.fork_copied_calls)} fork-copied API calls, ` +
+      `${group(dd.notification_sightings)} repeated notification sightings`,
     '',
   ];
 }
