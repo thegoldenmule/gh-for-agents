@@ -7,6 +7,7 @@ import { realClock } from './core/clock.ts';
 import { createWritableSink } from './core/output.ts';
 import { realRandom } from './core/random.ts';
 import { createShutdown, forceExit, installSignalHandlers } from './core/signals.ts';
+import { withInvocationLog } from './proc/invocation-log.ts';
 import { type FixtureSource, withRecording } from './proc/recording.ts';
 import { createSpawnRunner, type ProcessRunner } from './proc/runner.ts';
 import { VERSION } from './version.ts';
@@ -69,22 +70,30 @@ async function main(): Promise<void> {
   // Keep the process alive until runCli settles, so the deadline or a signal ends it with a document.
   const keepAlive = new AbortController();
   realClock.sleep(2_147_483_647, keepAlive.signal).catch(() => {});
-  const outcome = await runCli(process.argv.slice(2), {
+  const argv = process.argv.slice(2);
+  const cwd = process.cwd();
+  let io = { proc, stdout, stderrLine: (line: string): void => void process.stderr.write(`${line}\n`) };
+  let finishLog = (_exitCode: number): void => {};
+  if (env.GHX_LOG) {
+    const log = withInvocationLog(io, { path: env.GHX_LOG, argv, cwd, env, clock: realClock, version: VERSION });
+    io = log.deps;
+    finishLog = log.finish;
+  }
+  const outcome = await runCli(argv, {
     registry: fsRegistry(commandRoots(env, import.meta.dirname)),
     version: VERSION,
-    cwd: process.cwd(),
+    cwd,
     env,
     clock: realClock,
     random: realRandom,
-    proc,
-    stdout,
-    stderrLine: (line) => process.stderr.write(`${line}\n`),
+    ...io,
     shutdown,
     stdoutIsTTY: process.stdout.isTTY === true,
     readFile: (p) => readFile(p, 'utf8'),
     readStdin,
   });
   keepAlive.abort();
+  finishLog(outcome.exitCode);
   process.exitCode = outcome.exitCode;
   if (outcome.forced) forceExit(outcome.exitCode);
   uninstall();
