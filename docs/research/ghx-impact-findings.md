@@ -2,6 +2,82 @@
 
 Research input for [07-ghx-eval.md](../plans/07-ghx-eval.md). Four research agents went over every Claude Code transcript on this machine on 2026-10-29. One mapped the transcript schema, one designed the episode taxonomy, one designed the token and cost metrics, and one checked how a tool would fit this repo and whether a controlled A/B run is feasible. Their prototype scripts and generated reports are in [ghx-impact/](ghx-impact/). They are Python reference code for the TypeScript port in plan 07, and are not maintained.
 
+## Corrections (2026-10-29, ghx-eval M1–M3)
+
+The TypeScript port in `scripts/eval` (plan 07) re-measured this corpus. The sections below stand as written, except §1.4, whose swap is fixed in place. Where ghx-eval disagrees, this section says why.
+
+### Errors and definitions
+
+- **§1.4 swapped two counts.** task_notification is 924 and peer is 927 (M1, on the 2026-10-29 archive). The prefix snapshot below counts 942 and 941; the two are within 1% of each other either way.
+- **§1.5 hook blocks.** M1 counts 7 blocking hook errors plus 3 `ask` nudges, not 16.
+- **§3 slack.** `episodes/episodes.py`, which produced §4.1, has no slack: an episode closes at the first tool call that is neither GitHub nor glue. "A slack of 3" was the metrics prototype's `GAP_CALLS`, which counts non-GitHub API calls in a separate segmentation (`metrics/episodes.py`). §4.2–§4.4 come from that segmentation. ghx-eval uses slack 0; slack 3 gives 17% fewer episodes.
+- **§4.2–§4.4 units differ from ghx-eval's.** `metrics/units.py` joined every episode that continued a wait (through its notification or output-file read) into one unit, transitively. A "merge" unit there holds the wait, the wake, the merge and any earlier waits in the chain: a main-thread background `ghx ci wait` unit carried 3.1 notifications on median. ghx-eval keeps a wait to the calls about it and opens an `after-wake` episode, linked through `parent_unit_id`, for the next other GitHub call (METRIC_VERSION 1.1.0). §4.4's rounds were counted by pushes; ghx-eval counts them by head SHA.
+- **§4 ran without the dominant sessions' main threads, in ghx-eval's first report.** The frozen manifest `5aef2a686ca7` (2026-10-29 15:56Z, 6-hour window) excluded the main transcripts of `3c2fb48f` and `f4543194`, which were still being written, while keeping their subagents. The two sessions hold 88–90% of ghx-era units. The provisional prefix snapshot `13aa09e4bdb8` (17:12Z, `--window-hours 0`, 3,031 files) includes them, read up to the size its manifest records. gh-pre is identical in both (684 units).
+
+### Fresh comparison
+
+Powerhouse, gh-pre → ghx-post. "Baseline" is report `5aef2a686ca7`; "prefix" is report `13aa09e4bdb8`. ° marks n < 5.
+
+**§4.1, by intent.** Episodes and background waits, main and subagent pooled, all models, as §4.1 pooled them. Median tool calls, median result characters, share with an error.
+
+| Intent | Findings n | Findings calls | Findings chars | Prefix n | Prefix calls | Prefix chars | Prefix with error | Baseline n (ghx) |
+|---|---|---|---|---|---|---|---|---|
+| Diagnose | 131 / 42 | 3 → 2 | 4,115 → 1,842 | 144 / 42 | 3 → 1.5 | 3,940 → 1,597 | 10% → 19% | 39 |
+| Status | 186 / 110 | 1 → 1 | 528 → 1,759 | 173 / 107 | 1 → 1 | 613 → 2,078 | 2% → 11% | 84 |
+| Wait | 118 / 183 | 1 → 2 | 1,102 → 1,894 | 126 / 188 | 2 → 2 | 486 → 1,070 | 8% → 11% | 169 |
+| Create | 44 / 37 | 1 → 3 | 134 → 5,634 | 49 / 38 | 1 → 3 | 130 → 5,635 | 2% → 50% | 33 |
+| Edit | 29 / 17 | 1 → 3 | | 32 / 17 | 1 → 3 | 238 → 6,158 | 6% → 47% | 17 |
+| Merge | 35 / 29 | 2 → 2 | 171 → 913 | 38 / 31 | 1 → 2 | 78 → 913 | 3% → 10% | 12 |
+| Rerun | 15 / 21 | 1 → 2 | | 24 / 23 | 1 → 1 | 114 → 624 | 4% → 30% | 23 |
+
+The direction holds for every intent except wait calls, where ghx-eval counts 2 for a gh wait against §4.1's 1. Classification moves the gh-side counts by −7% to +11%, and reruns by +60%. The ghx-side counts match §4.1 within 10% once the dominant sessions' main threads are in.
+
+**§4.2, by unit and context.** claude-opus-5-5 only, as the report fixes the model. GitHub round trips and cost_norm, medians.
+
+| Category | Context | Findings | Baseline | Prefix |
+|---|---|---|---|---|
+| merge | main | 8 / 15: 6 → 2, $0.267 → $0.110 | 20 / 1°: 2 → 2°, $0.053 → $0.050° | 20 / 20: 2 → 1, $0.053 → $0.054 (p 0.60) |
+| merge + its wait | main | (as above) | 18 / 1°: 3 → 3°, $0.086 → $0.110° | 18 / 20: 3 → 2, $0.086 → $0.069 |
+| ci-diagnose | main | 41 / 5: 5 → 4, $0.26 → $0.35 | 59 / 7: 3 → 2, $0.097 → $0.102 | 59 / 9: 3 → 3, $0.097 → $0.096 |
+| ci-diagnose | subagent | 53 / 20: 4 → 5, $0.18 → $0.16 | 76 / 32: 2 → 1, $0.113 → $0.063 | 76 / 33: 2 → 1, $0.113 → $0.060 (p < 0.001) |
+| pr-write (create) | subagent | 1 → 6, $0.062 → $0.528, errors 0.14 → 0.81 | 21 / 33: 1 → 3, $0.053 → $0.092, errors 0.05 → 0.76 | 21 / 38: 1 → 2, $0.053 → $0.085, errors 0.05 → 0.66 |
+| pr-write (edit) | subagent | (pooled with create) | 16 / 13: 1 → 2, $0.062 → $0.125 | 16 / 13: 1 → 2, $0.062 → $0.125 |
+| ci-status | subagent | result tokens 708 → 1,582 | 363 → 1,180 | 363 → 1,233 |
+| PR cycle | main | 4 → 2, $0.275 → $0.121 | 61 / 5: 2 → 2, $0.131 → $0.399 | 61 / 22: 2 → 2, $0.131 → $0.113 (p 0.51) |
+| PR cycle | subagent | 2 → 3, $0.115 → $0.312 | 77 / 113: 2 → 1, $0.128 → $0.334 | 77 / 124: 2 → 1, $0.128 → $0.335 (p < 0.001) |
+
+"Merge + its wait" joins a merge episode to the wait whose wake it followed, as one span with each API call counted once. It is an ad hoc view, not in the report. Summing the two units' metrics instead gives the same round trips and cost_norm within $0.01.
+
+**The main-thread merge headline does not reproduce under ghx-eval's definitions.** A merge episode alone goes 2 → 1 GitHub round trips at the same cost. A merge plus its wait goes 3 → 2 and $0.086 → $0.069. The headline's shape comes back only under the prototype's segmentation. With slack 3 and waits chained through their wakes, gh-era merges grow to 6 round trips (5 GitHub round trips), 12 gh invocations and $0.228 (n 13, all models), against 2 round trips and $0.071 for ghx (n 20). So the gap came from the gh side: the prototype folded the surrounding work into gh-era merge units (non-GitHub calls, chained waits, sleep loops, 6.4 pipes per unit). The ghx side is 2 round trips under every definition. Its 20 merges come from 2 sessions, and 19 of them are in the main transcripts the 6-hour window dropped.
+
+**§4.3, waits by mechanism.** Findings pooled all non-dogfood repos and models; ghx-eval rows are powerhouse and claude-opus-5-5. n, cost_norm per wait (median), cache rewrites per wait (mean).
+
+| Mechanism | Context | Findings | Prefix |
+|---|---|---|---|
+| background `ghx ci wait` | main | 9, $0.211, 0 | 29, $0.075, 0 (baseline 20, $0.078) |
+| background gh loop | main | 16, $0.259, 0 | 20, $0.086, 0.10 |
+| Monitor | main | 15, $0.267, 0.07 | 13, $0.088, 0 |
+| background `ghx ci wait` | subagent | 71, $0.468, 1.83 | 155, $0.296, 0.70 (baseline 145, $0.293) |
+| background gh loop | subagent | 22, $0.387, 1.77 | 46, $0.294, 0.65 |
+| Monitor | subagent | 21, $0.517, 1.24 | 12, $0.173, 0.50 |
+| foreground sleep loop | subagent | 37, $0.095, 0.51 | 23, $0.062, 0.17 |
+
+ghx-eval's waits are smaller and cheaper because a prototype wait unit was a chain of waits with their continuations (median 11 API calls against 4). Adding each wait's after-wake episodes back changes little: a main-thread `ghx ci wait` moves from $0.074 to $0.077. The ordering survives in subagents: any background wait there costs 3–4× a main-thread one and pays a cache rewrite on most wakes, with ghx and a gh loop alike.
+
+**§4.4, created and merged in one session.** Pooled contexts and models, as in §4.4, then the report's split for claude-opus-5-5. Medians.
+
+| | Findings gh (28) | Findings ghx (24) | Prefix gh (28) | Prefix ghx (27) | Baseline ghx (10) |
+|---|---|---|---|---|---|
+| GitHub calls | 13 | 17.5 | 13.5 | 16 | 19.5 |
+| Result chars | 16k | 19.8k | 16.4k | 22.9k | 35.4k |
+| Wakeups | 1.5 | 3.5 | 2 | 4 | 5.5 |
+| CI rounds (head SHA) | | | 3.5 | 3 | 3 |
+| Elapsed | 4.2 h | 1.6 h | 4.2 h | 1.6 h | 4.3 h |
+| Round trips | | | 16.5 | 20 | 26.5 |
+| cost_norm | | | $0.85 | $1.14 | $6.21 |
+
+Split by context in the prefix report: main threads (17 / 21) go 6 → 2 CI rounds, 17 → 19 round trips and $0.881 → $0.686 (p 0.77); subagents (10 / 6) stay at 3 rounds and go 14 → 26.5 round trips and $1.06 → $6.21 (p 0.008). The baseline has no ghx lifecycle in a main thread at all. The gh side matches §4.4; the ghx side matches it only once the dominant sessions' main threads are in.
+
 ## 0. TL;DR
 
 - **The data is perishable.** The corpus runs from 2026-09-22 to 2026-10-29 because Claude Code deletes transcripts after 30 days. The raw-gh baseline in powerhouse (before 2026-10-23) is already losing a day of history every day, and is gone from `~/.claude/projects` by about 2026-11-22. A compressed snapshot is at `~/.ghx-eval/corpus/claude-projects-2026-10-29.tar.gz` (470 MB, 2,965 files, sha256 `2ab9b3f08d8b7d0f…`). The JSONL manifest hash for the same corpus is `8f5cd43a…` (1,394 transcripts, 1.88 GB).
@@ -48,7 +124,7 @@ Research input for [07-ghx-eval.md](../plans/07-ghx-eval.md). Four research agen
 ### 1.4 Turns
 
 - **Human prompt:** in a main file, `type == "user"`, not `isMeta`, not `isCompactSummary`, content not all `tool_result`, and `origin.kind == "human"` or `promptSource` in {typed, suggestion_accepted, queued}. Exclude content starting with `<command-name>`, `<local-command-` or `[Request interrupted`.
-- **Main-thread turn:** all records sharing a `promptId`. Classify it by its starter: human 543, task_notification 927, peer (subagent hand-backs) 924, sdk 21, auto_continuation 15, scheduled 5.
+- **Main-thread turn:** all records sharing a `promptId`. Classify it by its starter: human 543, task_notification 924, peer (subagent hand-backs) 927, sdk 21, auto_continuation 15, scheduled 5.
 - **Subagent turn:** `promptId` changes at each tool result there, so split on non-tool-result user records instead.
 - `turn_duration.durationMs` is missing for about half of turns. Compute duration from timestamps.
 
