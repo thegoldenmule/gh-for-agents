@@ -1,0 +1,3 @@
+gh n=42 med human=5 api_calls=322 cost=$19.0 gh_eps=5 gh_share_of_calls=0.062 gh_share_of_cost=0.092
+ghx n=2 med human=1 api_calls=20 cost=$0.7 gh_eps=1 gh_share_of_calls=0.080 gh_share_of_cost=0.282
+mixed n=6 med human=12 api_calls=480 cost=$35.6 gh_eps=11 gh_share_of_calls=0.143 gh_share_of_cost=0.258

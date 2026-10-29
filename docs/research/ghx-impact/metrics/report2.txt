@@ -1,0 +1,184 @@
+== confounders (powerhouse units)
+gh-pre 378 sidechain=0.57 {'claude-opus-5-5': 349, 'claude-fable-5-1': 26, 'claude-sonnet-5': 3} {'high': 378} {'2.1.280': 378} 2026-09-23 2026-10-23
+ghx-post 217 sidechain=0.82 {'claude-opus-5-5': 217} {'high': 217} {'2.1.280': 217} 2026-10-23 2026-10-29
+gh-post 4 sidechain=1.00 {'claude-opus-5-5': 4} {'high': 4} {'2.1.280': 4} 2026-10-27 2026-10-27
+
+== ci-diagnose main  n gh-pre=43 ghx-post=5   median [95% CI] p90
+  gh_round_trips  gh 6 [4,6] p90 10 | ghx 4 [1,18] p90 18
+  span_calls      gh 7 [7,10] p90 21 | ghx 6 [5,54] p90 54
+  gh_invocations  gh 9 [7,12] p90 21 | ghx 3 [1,18] p90 18
+  out_tok         gh 3418 [2810,4079] p90 8463 | ghx 1733 [1189,16322] p90 16322
+  res_tok_est     gh 4142 [2535,6086] p90 13112 | ghx 4441 [1495,17343] p90 17343
+  cmd_chars       gh 1801 [1723,2355] p90 4489 | ghx 580 [33,2656] p90 2656
+  cost_norm       gh 0.259 [0.179,0.424] p90 0.912 | ghx 0.346 [0.167,1.142] p90 1.142
+  cost            gh 0.549 [0.494,0.918] p90 2.868 | ghx 0.364 [0.301,2.379] p90 2.379
+  carry_cost_h50  gh 0.041 [0.030,0.049] p90 0.108 | ghx 0.046 [0.022,0.227] p90 0.227
+  wall_s          gh 94 [61,354] p90 3120 | ghx 31 [27,3664] p90 3664
+  errors          gh mean 0.07 any 0.05 | ghx mean 0.20 any 0.20
+  refusals        gh mean 0.02 any 0.02 | ghx mean 0.00 any 0.00
+  pipes           gh mean 4.88 any 0.98 | ghx mean 1.40 any 0.80
+  jq              gh mean 4.40 any 0.98 | ghx mean 1.00 any 0.60
+  cache_rewrites  gh mean 0.12 any 0.12 | ghx mean 0.20 any 0.20
+  sleep_loops     gh mean 0.84 any 0.37 | ghx mean 0.00 any 0.00
+
+== ci-diagnose subagent  n gh-pre=53 ghx-post=20   median [95% CI] p90
+  gh_round_trips  gh 4 [3,5] p90 9 | ghx 5 [2,6] p90 7
+  span_calls      gh 5 [4,7] p90 17 | ghx 8 [5,14] p90 16
+  gh_invocations  gh 6 [4,7] p90 13 | ghx 5 [2,7] p90 9
+  out_tok         gh 2905 [2226,3852] p90 7424 | ghx 2912 [1903,5698] p90 9436
+  res_tok_est     gh 2779 [1804,3226] p90 9209 | ghx 4548 [1647,6857] p90 9619
+  cmd_chars       gh 1495 [970,1736] p90 3217 | ghx 1295 [709,1651] p90 2928
+  cost_norm       gh 0.181 [0.129,0.314] p90 0.605 | ghx 0.159 [0.104,0.389] p90 0.627
+  cost            gh 0.322 [0.249,0.397] p90 1.869 | ghx 0.263 [0.148,0.535] p90 1.293
+  carry_cost_h50  gh 0.025 [0.018,0.035] p90 0.096 | ghx 0.032 [0.016,0.070] p90 0.098
+  wall_s          gh 55 [35,102] p90 736 | ghx 79 [27,113] p90 989
+  errors          gh mean 0.38 any 0.17 | ghx mean 0.10 any 0.10
+  refusals        gh mean 0.19 any 0.11 | ghx mean 0.00 any 0.00
+  pipes           gh mean 3.34 any 1.00 | ghx mean 2.05 any 0.85
+  jq              gh mean 2.08 any 0.66 | ghx mean 0.10 any 0.10
+  cache_rewrites  gh mean 0.40 any 0.32 | ghx mean 0.40 any 0.15
+  sleep_loops     gh mean 0.55 any 0.26 | ghx mean 0.40 any 0.20
+
+== ci-wait main  n gh-pre=25 ghx-post=7   median [95% CI] p90
+  gh_round_trips  gh 1 [1,2] p90 3 | ghx 1 [1,1] p90 1
+  span_calls      gh 2 [2,3] p90 5 | ghx 2 [2,4] p90 4
+  gh_invocations  gh 2 [2,3] p90 4 | ghx 1 [1,2] p90 2
+  out_tok         gh 1371 [931,1969] p90 3309 | ghx 1813 [1170,3785] p90 3785
+  res_tok_est     gh 207 [175,299] p90 1043 | ghx 185 [71,622] p90 622
+  cmd_chars       gh 760 [493,1024] p90 2930 | ghx 1117 [16,1676] p90 1676
+  cost_norm       gh 0.074 [0.053,0.105] p90 0.215 | ghx 0.071 [0.067,0.226] p90 0.226
+  cost            gh 0.284 [0.170,0.471] p90 0.714 | ghx 0.226 [0.134,0.772] p90 0.772
+  carry_cost_h50  gh 0.006 [0.004,0.008] p90 0.021 | ghx 0.007 [0.004,0.015] p90 0.015
+  wall_s          gh 24 [16,37] p90 338 | ghx 1045 [15,1646] p90 1646
+  errors          gh mean 0.08 any 0.08 | ghx mean 0.00 any 0.00
+  refusals        gh mean 0.00 any 0.00 | ghx mean 0.00 any 0.00
+  pipes           gh mean 0.96 any 0.76 | ghx mean 0.14 any 0.14
+  jq              gh mean 0.96 any 0.64 | ghx mean 0.00 any 0.00
+  cache_rewrites  gh mean 0.12 any 0.08 | ghx mean 0.14 any 0.14
+  sleep_loops     gh mean 1.16 any 1.00 | ghx mean 0.57 any 0.43
+
+== ci-wait subagent  n gh-pre=26 ghx-post=37   median [95% CI] p90
+  gh_round_trips  gh 2 [1,3] p90 6 | ghx 2 [1,2] p90 3
+  span_calls      gh 3 [2,5] p90 11 | ghx 5 [3,6] p90 7
+  gh_invocations  gh 2 [1,4] p90 10 | ghx 2 [2,3] p90 4
+  out_tok         gh 1838 [1260,2849] p90 3912 | ghx 2455 [2089,3667] p90 4723
+  res_tok_est     gh 360 [207,764] p90 2045 | ghx 622 [450,817] p90 1530
+  cmd_chars       gh 889 [553,1139] p90 3870 | ghx 1172 [580,2952] p90 5272
+  cost_norm       gh 0.080 [0.053,0.159] p90 0.425 | ghx 0.257 [0.086,0.386] p90 0.453
+  cost            gh 0.166 [0.097,0.335] p90 0.975 | ghx 0.493 [0.260,1.713] p90 2.479
+  carry_cost_h50  gh 0.003 [0.001,0.007] p90 0.028 | ghx 0.005 [0.003,0.007] p90 0.024
+  wall_s          gh 23 [14,230] p90 721 | ghx 142 [22,1284] p90 1807
+  errors          gh mean 0.19 any 0.15 | ghx mean 0.00 any 0.00
+  refusals        gh mean 0.12 any 0.12 | ghx mean 0.00 any 0.00
+  pipes           gh mean 1.92 any 0.85 | ghx mean 0.30 any 0.24
+  jq              gh mean 1.69 any 0.58 | ghx mean 0.03 any 0.03
+  cache_rewrites  gh mean 0.35 any 0.23 | ghx mean 0.57 any 0.49
+  sleep_loops     gh mean 1.19 any 0.92 | ghx mean 0.43 any 0.30
+
+== ci-status main  n gh-pre=24 ghx-post=10   median [95% CI] p90
+  gh_round_trips  gh 1 [1,2] p90 2 | ghx 1 [1,1] p90 1
+  span_calls      gh 2 [2,3] p90 5 | ghx 2 [2,2] p90 2
+  gh_invocations  gh 2 [2,3] p90 3 | ghx 1 [1,1] p90 2
+  out_tok         gh 1048 [967,1248] p90 1850 | ghx 1392 [223,1910] p90 3044
+  res_tok_est     gh 433 [234,744] p90 1620 | ghx 637 [268,2223] p90 2974
+  cmd_chars       gh 368 [241,492] p90 637 | ghx 189 [26,324] p90 851
+  cost_norm       gh 0.063 [0.047,0.129] p90 0.421 | ghx 0.059 [0.026,0.145] p90 0.393
+  cost            gh 0.185 [0.143,0.455] p90 0.998 | ghx 0.261 [0.171,0.428] p90 1.234
+  carry_cost_h50  gh 0.006 [0.004,0.009] p90 0.017 | ghx 0.005 [0.004,0.023] p90 0.043
+  wall_s          gh 16 [13,22] p90 258 | ghx 19 [8,45] p90 100
+  errors          gh mean 0.00 any 0.00 | ghx mean 0.00 any 0.00
+  refusals        gh mean 0.00 any 0.00 | ghx mean 0.10 any 0.10
+  pipes           gh mean 1.00 any 0.88 | ghx mean 0.70 any 0.50
+  jq              gh mean 1.12 any 0.71 | ghx mean 0.10 any 0.10
+  cache_rewrites  gh mean 0.12 any 0.12 | ghx mean 0.10 any 0.10
+  sleep_loops     gh mean 0.00 any 0.00 | ghx mean 0.00 any 0.00
+
+== ci-status subagent  n gh-pre=14 ghx-post=49   median [95% CI] p90
+  gh_round_trips  gh 1 [1,2] p90 3 | ghx 1 [1,1] p90 2
+  span_calls      gh 2 [2,3] p90 7 | ghx 2 [2,2] p90 5
+  gh_invocations  gh 2 [1,2] p90 5 | ghx 1 [1,1] p90 3
+  out_tok         gh 1095 [734,3403] p90 5621 | ghx 1213 [1107,1465] p90 4141
+  res_tok_est     gh 708 [280,1218] p90 1972 | ghx 1582 [1001,2005] p90 3498
+  cmd_chars       gh 412 [262,589] p90 5144 | ghx 135 [51,207] p90 460
+  cost_norm       gh 0.057 [0.044,0.113] p90 0.224 | ghx 0.096 [0.065,0.112] p90 0.309
+  cost            gh 0.100 [0.079,0.140] p90 0.280 | ghx 0.133 [0.111,0.162] p90 0.252
+  carry_cost_h50  gh 0.004 [0.001,0.014] p90 0.025 | ghx 0.010 [0.007,0.015] p90 0.026
+  wall_s          gh 11 [8,28] p90 99 | ghx 12 [9,16] p90 45
+  errors          gh mean 0.21 any 0.21 | ghx mean 0.04 any 0.04
+  refusals        gh mean 0.07 any 0.07 | ghx mean 0.00 any 0.00
+  pipes           gh mean 1.29 any 0.86 | ghx mean 0.43 any 0.35
+  jq              gh mean 1.29 any 0.64 | ghx mean 0.06 any 0.06
+  cache_rewrites  gh mean 0.00 any 0.00 | ghx mean 0.22 any 0.22
+  sleep_loops     gh mean 0.00 any 0.00 | ghx mean 0.00 any 0.00
+
+== pr-read subagent  n gh-pre=80 ghx-post=10   median [95% CI] p90
+  gh_round_trips  gh 1 [1,2] p90 2 | ghx 1 [1,1] p90 1
+  span_calls      gh 2 [2,3] p90 5 | ghx 2 [2,3] p90 3
+  gh_invocations  gh 2 [2,2] p90 3 | ghx 1 [1,1] p90 1
+  out_tok         gh 1411 [1079,1809] p90 3819 | ghx 2829 [457,3121] p90 3141
+  res_tok_est     gh 2303 [1180,3408] p90 9976 | ghx 427 [208,3413] p90 4881
+  cmd_chars       gh 362 [307,415] p90 666 | ghx 16 [16,49] p90 85
+  cost_norm       gh 0.112 [0.073,0.250] p90 0.411 | ghx 0.148 [0.076,0.340] p90 0.341
+  cost            gh 0.160 [0.093,0.214] p90 0.323 | ghx 0.152 [0.076,0.278] p90 0.298
+  carry_cost_h50  gh 0.019 [0.014,0.026] p90 0.077 | ghx 0.011 [0.005,0.033] p90 0.052
+  wall_s          gh 12 [11,13] p90 34 | ghx 7 [4,25] p90 29
+  errors          gh mean 0.00 any 0.00 | ghx mean 0.10 any 0.10
+  refusals        gh mean 0.00 any 0.00 | ghx mean 0.00 any 0.00
+  pipes           gh mean 1.04 any 0.79 | ghx mean 0.20 any 0.20
+  jq              gh mean 0.99 any 0.76 | ghx mean 0.10 any 0.10
+  cache_rewrites  gh mean 0.42 any 0.42 | ghx mean 0.40 any 0.40
+  sleep_loops     gh mean 0.00 any 0.00 | ghx mean 0.00 any 0.00
+
+== pr-write subagent  n gh-pre=29 ghx-post=36   median [95% CI] p90
+  gh_round_trips  gh 1 [1,2] p90 5 | ghx 6 [5,7] p90 16
+  span_calls      gh 2 [2,3] p90 10 | ghx 12 [11,13] p90 34
+  gh_invocations  gh 1 [1,2] p90 10 | ghx 7 [5,8] p90 16
+  out_tok         gh 1911 [1367,2478] p90 6294 | ghx 6613 [5725,8835] p90 17622
+  res_tok_est     gh 214 [95,382] p90 1437 | ghx 9135 [7456,10480] p90 14189
+  cmd_chars       gh 1011 [727,1375] p90 2170 | ghx 1593 [993,4383] p90 10951
+  cost_norm       gh 0.062 [0.053,0.072] p90 0.468 | ghx 0.528 [0.432,0.635] p90 1.399
+  cost            gh 0.130 [0.090,0.159] p90 2.543 | ghx 1.979 [1.096,3.250] p90 5.646
+  carry_cost_h50  gh 0.005 [0.003,0.007] p90 0.023 | ghx 0.107 [0.060,0.113] p90 0.180
+  wall_s          gh 23 [16,31] p90 485 | ghx 1424 [253,1676] p90 3029
+  errors          gh mean 0.14 any 0.10 | ghx mean 0.81 any 0.58
+  refusals        gh mean 0.10 any 0.10 | ghx mean 0.00 any 0.00
+  pipes           gh mean 2.38 any 0.66 | ghx mean 2.56 any 0.72
+  jq              gh mean 2.14 any 0.38 | ghx mean 0.53 any 0.28
+  cache_rewrites  gh mean 0.69 any 0.17 | ghx mean 2.06 any 0.69
+  sleep_loops     gh mean 0.97 any 0.21 | ghx mean 0.75 any 0.25
+
+== merge main  n gh-pre=8 ghx-post=15   median [95% CI] p90
+  gh_round_trips  gh 6 [2,8] p90 8 | ghx 2 [2,3] p90 7
+  span_calls      gh 11 [3,13] p90 13 | ghx 5 [3,6] p90 11
+  gh_invocations  gh 10 [5,15] p90 15 | ghx 2 [2,3] p90 7
+  out_tok         gh 4441 [1875,7269] p90 7269 | ghx 1953 [919,2274] p90 4107
+  res_tok_est     gh 1261 [243,3305] p90 3305 | ghx 893 [293,1495] p90 2197
+  cmd_chars       gh 2303 [1089,2655] p90 2655 | ghx 77 [51,221] p90 580
+  cost_norm       gh 0.267 [0.081,0.282] p90 0.282 | ghx 0.110 [0.065,0.175] p90 0.436
+  cost            gh 0.823 [0.515,1.206] p90 1.206 | ghx 0.628 [0.326,1.207] p90 3.023
+  carry_cost_h50  gh 0.026 [0.010,0.060] p90 0.060 | ghx 0.009 [0.008,0.017] p90 0.030
+  wall_s          gh 684 [29,4261] p90 4261 | ghx 695 [29,1362] p90 3644
+  errors          gh mean 0.38 any 0.25 | ghx mean 0.20 any 0.20
+  refusals        gh mean 0.12 any 0.12 | ghx mean 0.00 any 0.00
+  pipes           gh mean 6.38 any 1.00 | ghx mean 0.27 any 0.20
+  jq              gh mean 8.00 any 1.00 | ghx mean 0.00 any 0.00
+  cache_rewrites  gh mean 0.00 any 0.00 | ghx mean 0.07 any 0.07
+  sleep_loops     gh mean 1.75 any 0.62 | ghx mean 0.40 any 0.27
+
+== merge subagent  n gh-pre=6 ghx-post=8   median [95% CI] p90
+  gh_round_trips  gh 6 [1,19] p90 19 | ghx 7 [6,7] p90 7
+  span_calls      gh 17 [2,45] p90 45 | ghx 15 [10,19] p90 19
+  gh_invocations  gh 10 [1,32] p90 32 | ghx 7 [7,8] p90 8
+  out_tok         gh 8112 [483,16083] p90 16083 | ghx 3467 [2687,9311] p90 9311
+  res_tok_est     gh 1365 [84,9387] p90 9387 | ghx 7221 [3790,9114] p90 9114
+  cmd_chars       gh 3149 [712,6163] p90 6163 | ghx 1143 [566,3821] p90 3821
+  cost_norm       gh 0.503 [0.035,2.019] p90 2.019 | ghx 0.658 [0.520,1.224] p90 1.224
+  cost            gh 0.992 [0.038,5.326] p90 5.326 | ghx 0.649 [0.511,10] p90 10
+  carry_cost_h50  gh 0.044 [0.004,0.088] p90 0.088 | ghx 0.016 [0.012,0.100] p90 0.100
+  wall_s          gh 722 [3,3024] p90 3024 | ghx 1862 [396,2970] p90 2970
+  errors          gh mean 0.17 any 0.17 | ghx mean 0.38 any 0.38
+  refusals        gh mean 0.00 any 0.00 | ghx mean 0.12 any 0.12
+  pipes           gh mean 7.50 any 0.83 | ghx mean 3.25 any 0.88
+  jq              gh mean 7.17 any 0.83 | ghx mean 0.50 any 0.38
+  cache_rewrites  gh mean 3.00 any 0.67 | ghx mean 2.75 any 0.62
+  sleep_loops     gh mean 2.50 any 0.67 | ghx mean 3.00 any 0.75

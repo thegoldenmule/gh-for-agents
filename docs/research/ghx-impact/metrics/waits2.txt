@@ -1,0 +1,9 @@
+mechanism      ctx   n | med span_calls  rewrites/wait  cost  cost_norm  res_tok  wall_s  notif
+bg-gh          main  16 |  11  0.00 $0.823 $0.259   1619   1178 1.19
+bg-gh          sub   22 |   8  1.77 $0.975 $0.387   1365    736 1.14
+bg-ghx         main   9 |  11  0.00 $0.772 $0.211   1874   1451 3.11
+bg-ghx         sub   71 |  10  1.83 $1.801 $0.468   3049   1518 1.59
+fg-sleep-loop  main  30 |   3  0.20 $0.234 $0.075    260     33 0.03
+fg-sleep-loop  sub   37 |   3  0.51 $0.181 $0.095    509     39 0.00
+monitor        main  15 |   7  0.07 $0.495 $0.267   1740    964 0.73
+monitor        sub   21 |  13  1.24 $0.679 $0.517   1724    485 0.90
