@@ -4,7 +4,7 @@ Research input for [07-ghx-eval.md](../plans/07-ghx-eval.md). Four research agen
 
 ## Corrections (2026-10-29, ghx-eval M1–M3)
 
-The TypeScript port in `scripts/eval` (plan 07) re-measured this corpus. The sections below stand as written, except §1.4, whose swap is fixed in place. Where ghx-eval disagrees, this section says why.
+The TypeScript port in `scripts/eval` (plan 07) re-measured this corpus. The sections below stand as written, except §1.4, whose swap is fixed in place. Where ghx-eval disagrees, this section says why. The reports named here (`5aef2a686ca7`, `13aa09e4bdb8`) came from an earlier version of the tool that copied sessions into a local store and froze them into manifests; the store, its manifests and its reports were deleted later on 2026-10-29. `pnpm eval` now reads the sessions on disk.
 
 ### Errors and definitions
 
@@ -80,7 +80,7 @@ Split by context in the prefix report: main threads (17 / 21) go 6 → 2 CI roun
 
 ## 0. TL;DR
 
-- **The data is perishable.** The corpus runs from 2026-09-22 to 2026-10-29 because Claude Code deletes transcripts after 30 days. The raw-gh baseline in powerhouse (before 2026-10-23) is already losing a day of history every day, and is gone from `~/.claude/projects` by about 2026-11-22. A compressed snapshot is at `~/.ghx-eval/corpus/claude-projects-2026-10-29.tar.gz` (470 MB, 2,965 files, sha256 `2ab9b3f08d8b7d0f…`). The JSONL manifest hash for the same corpus is `8f5cd43a…` (1,394 transcripts, 1.88 GB).
+- **The data is perishable.** The corpus runs from 2026-09-22 to 2026-10-29 because Claude Code deletes transcripts after 30 days. The raw-gh baseline in powerhouse (before 2026-10-23) is already losing a day of history every day, and is gone from `~/.claude/projects` by about 2026-11-22. A compressed snapshot of that day's corpus was kept for a while (470 MB, 2,965 files, sha256 `2ab9b3f08d8b7d0f…`; JSONL manifest hash `8f5cd43a…`, 1,394 transcripts, 1.88 GB) and has since been deleted.
 - **Naive token sums are wrong by up to 1.9×.** One API response is split over several transcript records, one per content block, and each record repeats the usage. Subagent `output_tokens` are stream-start placeholders in 91% of calls.
 - **Only one repo has a before and after.** powerhouse got `.github/ghx.json` on 2026-10-23. The ghx era is 7 sessions, and two of them hold 89% of its episodes. Every number below is preliminary.
 - **Where ghx wins so far:** merges (main thread: 6 → 2 round trips, $0.27 → $0.11 normalized), CI diagnosis (pipes per episode 4.9 → 1.4, result size halved), refusals (≈0 after adoption), and main-thread CI waits (4 → 2 round trips per PR, $0.28 → $0.12).

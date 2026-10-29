@@ -1,4 +1,4 @@
-// Statistics for ghx-eval reports (plan 07, determinism 5): quantiles, a seeded cluster bootstrap and the
+// Statistics for ghx-eval reports (plan 07, "Determinism"): quantiles, a seeded cluster bootstrap and the
 // Mann-Whitney U test. No Math.random: the bootstrap draws from a local mulberry32, re-seeded for every
 // statistic, so a value never depends on what was computed before it.
 
@@ -79,7 +79,7 @@ export interface BootstrapOptions {
 }
 
 /**
- * Cluster bootstrap (determinism 5): resample clusters (sessions) with replacement, pool their values, and
+ * Cluster bootstrap (plan 07, "Determinism"): resample clusters (sessions) with replacement, pool their values, and
  * take the median, p90 and mean of each resample; the interval is the percentile interval of those B
  * statistics. Clusters are ordered by id before drawing, so input order never matters. Null when empty.
  */
