@@ -7,7 +7,9 @@
 // permissions.deny prefix rules cannot match `gh -R o/r pr merge 1`. GHX_HOOK_MODE governs the rest.
 // All of that enforcement applies only in a repo with .github/ghx.json (04 "enforcement scope"); elsewhere
 // the hook only moves `ghx ci wait` to the background.
+import type { Clock } from '../core/clock.ts';
 import { decide, firstPositional, normalizeGhArgv, takeRepoFlag, WRAPPED_WRITES } from '../passthrough/policy.ts';
+import { logHookEvent } from './log.ts';
 import REPLACES from './replaces.generated.json' with { type: 'json' };
 import { ghxConfigured } from './repo.ts';
 import { type Invocation, isCiWait, isGh, isGhx, scanShell, startsWithCiWait } from './shell.ts';
@@ -204,22 +206,47 @@ function nudge(mode: 'ask' | 'deny', reason: string): HookOutput {
   };
 }
 
+/** Which branch of decideHook produced the reply; null when there is none. Recorded in GHX_HOOK_LOG. */
+export type HookRule =
+  | 'wrapped-write'
+  | 'ci-wait-background'
+  | 'monitor-ci-wait'
+  | 'poll-loop'
+  | 'compound-replaces'
+  | 'replaces';
+
+export interface HookDecision {
+  out: HookOutput | null;
+  rule: HookRule | null;
+}
+
+const none: HookDecision = { out: null, rule: null };
+const background = (input: Record<string, unknown>): HookDecision => ({
+  out: { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...input, run_in_background: true } } },
+  rule: 'ci-wait-background',
+});
+
 /**
  * The hook's reply to one PreToolUse event, or null for no output. `enforce` is whether the event's
  * repo opted into ghx (.github/ghx.json): without it, only the `ghx ci wait` rewrite applies.
  */
 export function decideHook(event: unknown, mode: HookMode, enforce = true): HookOutput | null {
-  if (!isObject(event)) return null;
+  return decideHookRule(event, mode, enforce).out;
+}
+
+/** decideHook plus the rule that fired. */
+export function decideHookRule(event: unknown, mode: HookMode, enforce = true): HookDecision {
+  if (!isObject(event)) return none;
   const tool = event.tool_name;
   const input = event.tool_input;
-  if ((tool !== 'Bash' && tool !== 'Monitor') || !isObject(input)) return null;
+  if ((tool !== 'Bash' && tool !== 'Monitor') || !isObject(input)) return none;
   const command = input.command;
-  if (typeof command !== 'string') return null;
+  if (typeof command !== 'string') return none;
 
   if (!enforce) {
     if (mode === 'off' || tool !== 'Bash' || !startsWithCiWait(command) || input.run_in_background === true)
-      return null;
-    return { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...input, run_in_background: true } } };
+      return none;
+    return background(input);
   }
 
   const scan = scanShell(command);
@@ -228,40 +255,52 @@ export function decideHook(event: unknown, mode: HookMode, enforce = true): Hook
   const compound = compoundReason(gh);
   // Wrapped writes first and in every mode, so neither the rewrite nor GHX_HOOK_MODE=off lets one through.
   const write = gh.find(isWrappedWrite);
-  if (write) return nudge('deny', `${compound ?? replacementReason(write) ?? ''}${WRITE_DENIED}`.trim());
-  if (mode === 'off') return null;
-
-  if (tool === 'Bash' && startsWithCiWait(command) && input.run_in_background !== true) {
+  if (write)
     return {
-      hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...input, run_in_background: true } },
+      out: nudge('deny', `${compound ?? replacementReason(write) ?? ''}${WRITE_DENIED}`.trim()),
+      rule: 'wrapped-write',
     };
-  }
+  if (mode === 'off') return none;
+
+  if (tool === 'Bash' && startsWithCiWait(command) && input.run_in_background !== true) return background(input);
 
   const waits = invocations.filter(isCiWait);
   if (tool === 'Monitor' && waits.length > 0) {
-    return nudge(
-      mode,
-      `Don't run ghx ci wait under Monitor. Run \`${ciWaitCommand(waits)}\` with the Bash tool and run_in_background: true; you are re-invoked once when it exits, with one JSON summary.`,
-    );
+    return {
+      out: nudge(
+        mode,
+        `Don't run ghx ci wait under Monitor. Run \`${ciWaitCommand(waits)}\` with the Bash tool and run_in_background: true; you are re-invoked once when it exits, with one JSON summary.`,
+      ),
+      rule: 'monitor-ci-wait',
+    };
   }
 
   const polls = invocations.filter(pollsCi);
-  if (polls.length > 0 && (scan.loop || scan.sleep)) return nudge(mode, loopReason(ciWaitCommand(polls)));
+  if (polls.length > 0 && (scan.loop || scan.sleep))
+    return { out: nudge(mode, loopReason(ciWaitCommand(polls))), rule: 'poll-loop' };
 
-  if (compound) return nudge(mode, compound);
+  if (compound) return { out: nudge(mode, compound), rule: 'compound-replaces' };
   for (const inv of gh) {
     const reason = replacementReason(inv);
-    if (reason) return nudge(mode, reason);
+    if (reason) return { out: nudge(mode, reason), rule: 'replaces' };
   }
-  return null;
+  return none;
 }
 
-/** The protocol entry point: raw stdin in, raw stdout out (or null). Never throws. */
-export function runHook(stdin: string, env: Readonly<Record<string, string | undefined>>): string | null {
+/**
+ * The protocol entry point: raw stdin in, raw stdout out (or null). Never throws. With GHX_HOOK_LOG set,
+ * each Bash or Monitor command is also appended to that file (src/hook/log.ts); a failed write is
+ * swallowed there and never changes the reply.
+ */
+export function runHook(stdin: string, env: Readonly<Record<string, string | undefined>>, clock: Clock): string | null {
   try {
     const event: unknown = JSON.parse(stdin);
-    const out = decideHook(event, hookMode(env), isObject(event) && ghxConfigured(event.cwd));
-    return out === null ? null : JSON.stringify(out);
+    const mode = hookMode(env);
+    const enforce = isObject(event) && ghxConfigured(event.cwd);
+    const decision = decideHookRule(event, mode, enforce);
+    const logPath = env.GHX_HOOK_LOG;
+    if (logPath) logHookEvent(logPath, event, decision, { mode, enforce, clock });
+    return decision.out === null ? null : JSON.stringify(decision.out);
   } catch {
     return null;
   }

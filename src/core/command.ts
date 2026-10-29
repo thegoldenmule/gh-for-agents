@@ -68,8 +68,9 @@ interface BaseSpec<I extends z.ZodObject> {
    * A harness protocol that owns stdin and stdout (`ghx hook claude-pretooluse`). When set, a call
    * without --help/--schema skips the runner: stdin is read whole, a non-null reply is written
    * verbatim, and the exit code is always 0. The one exception to "stdin only via --input -".
+   * `clock` timestamps its opt-in log (GHX_HOOK_LOG).
    */
-  protocol?: (stdin: string, env: Readonly<Record<string, string | undefined>>) => string | null;
+  protocol?: (stdin: string, env: Readonly<Record<string, string | undefined>>, clock: Clock) => string | null;
 }
 
 export interface SingleCommandSpec<I extends z.ZodObject, O extends z.ZodObject> extends BaseSpec<I> {

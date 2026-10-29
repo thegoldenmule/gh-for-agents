@@ -164,7 +164,7 @@ async function runProtocol(protocol: NonNullable<AnyCommandSpec['protocol']>, de
     );
     const stdin = await deps.readStdin(PROTOCOL_MAX_STDIN, giveUp.signal);
     giveUp.abort();
-    const reply = protocol(stdin, deps.env);
+    const reply = protocol(stdin, deps.env, deps.clock);
     if (reply !== null) await deps.stdout.writeLine(reply);
   } catch {
     // Fail open: no output.
