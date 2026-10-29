@@ -21,8 +21,10 @@ import {
   writeSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { z } from 'zod';
 import { type Manifest, manifestFilePath, readManifest } from './corpus/manifest.ts';
 import { parseJsonl } from './corpus/read.ts';
+import { CATALOG, CONSTANTS, METRIC_VERSION } from './metrics/catalog.ts';
 import { PRICE_TABLE_VERSION } from './model/pricing.ts';
 import {
   buildSessionTables,
@@ -34,6 +36,8 @@ import {
   mergeCounts,
   type Tables,
 } from './model/session.ts';
+import { type BaselineDiff, buildReport, type Report, summarizeTables } from './report/json.ts';
+import { buildUnits } from './units/index.ts';
 
 export const TABLES_CACHE_SCHEMA = 'ghx-eval/tables@1';
 const TABLE_NAMES = ['sessions', 'agents', 'turns', 'api_calls', 'tool_calls'] as const;
@@ -254,4 +258,48 @@ export function loadCorpus(manifestPath: string, opts: LoadOptions): Corpus {
   const built = buildFromManifest(manifest, rootDir, era);
   writeTablesCache(dir, key, built.tables, built.parse);
   return { manifest, ...built, cache: { dir, hit: false } };
+}
+
+const EraConfigSchema = z.object({
+  adoptions: z.record(z.string(), z.string()),
+  devProjectMarkers: z.array(z.string()),
+});
+
+/** An era config file: `{ "adoptions": { "<project slug>": "<ISO time>" }, "devProjectMarkers": [...] }`. */
+export function readEraConfig(path: string): EraConfig {
+  const cfg = EraConfigSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+  for (const [k, t] of Object.entries(cfg.adoptions)) {
+    if (Number.isNaN(Date.parse(t))) throw new Error(`era config: adoption time for ${k} is not ISO-8601: ${t}`);
+  }
+  return cfg;
+}
+
+export interface ObserveOptions {
+  era?: EraConfig;
+  cache?: boolean;
+  cacheRoot?: string;
+  baseline?: (report: Report) => BaselineDiff;
+}
+
+/** Tier 1 end to end: manifest → tables → units → report.json (plan 07 "observe"). */
+export function observe(manifestPath: string, opts: ObserveOptions = {}): { report: Report; corpus: Corpus } {
+  const era = opts.era ?? DEFAULT_ERA_CONFIG;
+  const corpus = loadCorpus(manifestPath, {
+    era,
+    metricVersion: METRIC_VERSION,
+    ...(opts.cache !== undefined ? { cache: opts.cache } : {}),
+    ...(opts.cacheRoot !== undefined ? { cacheRoot: opts.cacheRoot } : {}),
+  });
+  const units = buildUnits(corpus.tables);
+  const report = buildReport({
+    manifest: corpus.manifest,
+    corpus: summarizeTables(corpus.tables),
+    counts: corpus.tables.counts,
+    parse: corpus.parse,
+    units,
+    definitions: { metricVersion: METRIC_VERSION, constants: CONSTANTS, catalog: CATALOG },
+    era,
+  });
+  if (opts.baseline) report.baseline = opts.baseline(report);
+  return { report, corpus };
 }
