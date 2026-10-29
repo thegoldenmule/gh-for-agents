@@ -1,0 +1,147 @@
+{
+  "note": "pr-merge world (smoke/pr-merge, #3301 at 9f2c4e1, every check green): the merge PUT (pinned to the head), the merged read-back, and the gh replies before and after the merge.",
+  "fixtures": [
+    {
+      "name": "put-merge",
+      "argv": [
+        "api",
+        "--include",
+        "-X",
+        "PUT",
+        "--hostname",
+        "github.com",
+        "repos/powerhouse-inc/powerhouse/pulls/3301/merge",
+        "--input",
+        "-"
+      ],
+      "stdin": {
+        "json": {
+          "sha": "9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d",
+          "merge_method": "merge"
+        }
+      },
+      "exitCode": 0,
+      "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"sha\":\"d8b62c474b1e7d20c9a35f8e61d24b07c3a9e5f1\",\"merged\":true,\"message\":\"Pull Request successfully merged\"}",
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    },
+    {
+      "name": "get-pull-merged",
+      "argv": [
+        "api",
+        "--include",
+        "-X",
+        "GET",
+        "--hostname",
+        "github.com",
+        "repos/powerhouse-inc/powerhouse/pulls/3301"
+      ],
+      "exitCode": 0,
+      "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{\"number\":3301,\"state\":\"closed\",\"merged\":true,\"merged_at\":\"2026-10-21T16:45:10Z\",\"merge_commit_sha\":\"d8b62c474b1e7d20c9a35f8e61d24b07c3a9e5f1\",\"mergeable_state\":\"unknown\",\"head\":{\"ref\":\"fix/reactor-bind-document-id\",\"sha\":\"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d\"},\"base\":{\"ref\":\"main\"}}",
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    },
+    {
+      "name": "pr-view-ready-jq",
+      "argv": [
+        "pr",
+        "view",
+        "3301",
+        "--json",
+        "state,mergeable,mergeStateStatus,reviewDecision,headRefOid,statusCheckRollup",
+        "--jq",
+        "{state, mergeable, mergeStateStatus, reviewDecision, headRefOid, failing: [.statusCheckRollup[] | select(.conclusion == \"FAILURE\") | .name], pending: [.statusCheckRollup[] | select(.status != \"COMPLETED\") | .name]}"
+      ],
+      "exitCode": 0,
+      "stdout": "{\"failing\":[],\"headRefOid\":\"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d\",\"mergeStateStatus\":\"UNSTABLE\",\"mergeable\":\"MERGEABLE\",\"pending\":[],\"reviewDecision\":\"\",\"state\":\"OPEN\"}\n",
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    },
+    {
+      "name": "pr-view-ready",
+      "argv": [
+        "pr",
+        "view",
+        "3301",
+        "--json",
+        "state,mergeable,mergeStateStatus,headRefOid,reviewDecision"
+      ],
+      "exitCode": 0,
+      "stdout": "{\n  \"headRefOid\": \"9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d\",\n  \"mergeStateStatus\": \"UNSTABLE\",\n  \"mergeable\": \"MERGEABLE\",\n  \"reviewDecision\": \"\",\n  \"state\": \"OPEN\"\n}\n",
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    },
+    {
+      "name": "pr-checks",
+      "argv": [
+        "pr",
+        "checks",
+        "3301"
+      ],
+      "stdout": "CI duration watch\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835102\t\nCheck 1\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835000\t\nCheck 10\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835009\t\nCheck 11\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835010\t\nCheck 12\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835011\t\nCheck 13\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835012\t\nCheck 14\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835013\t\nCheck 15\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835014\t\nCheck 16\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835015\t\nCheck 17\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835016\t\nCheck 18\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835017\t\nCheck 19\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835018\t\nCheck 2\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835001\t\nCheck 20\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835019\t\nCheck 21\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835020\t\nCheck 3\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835002\t\nCheck 4\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835003\t\nCheck 5\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835004\t\nCheck 6\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835005\t\nCheck 7\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835006\t\nCheck 8\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835007\t\nCheck 9\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835008\t\nTest Reactor (shard 1/3)\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835495\t\nnotify-discord\tpass\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835101\t\nDocs preview\tskipping\t17m32s\thttps://github.com/powerhouse-inc/powerhouse/actions/runs/37948190914/job/111978835100\t\n",
+      "exitCode": 0,
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    },
+    {
+      "name": "pr-merge-pinned",
+      "argv": [
+        "pr",
+        "merge",
+        "3301",
+        "--merge",
+        "--match-head-commit",
+        "9f2c4e1a7b3d5f60812c9e4b7a1d3f5e6c8b0a2d"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    },
+    {
+      "name": "pr-merge",
+      "argv": [
+        "pr",
+        "merge",
+        "3301",
+        "--merge"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    },
+    {
+      "name": "pr-view-merged-jq",
+      "argv": [
+        "pr",
+        "view",
+        "3301",
+        "--json",
+        "state,mergeCommit",
+        "--jq",
+        ".state + \" \" + .mergeCommit.oid[0:10]"
+      ],
+      "exitCode": 0,
+      "stdout": "MERGED d8b62c474b\n",
+      "stderr": "",
+      "meta": {
+        "source": "synthetic"
+      }
+    }
+  ]
+}

@@ -5,6 +5,15 @@ import { question as ciWhyPending } from './ci-why-pending.ts';
 import { question as ciWhyRed } from './ci-why-red.ts';
 import { question as mainHealth } from './main-health.ts';
 import { question as prFeedback } from './pr-feedback.ts';
+import { question as prMerge } from './pr-merge.ts';
 import { question as prStatus } from './pr-status.ts';
 
-export const QUESTIONS: readonly Question[] = [prStatus, ciWhyGreen, ciWhyRed, ciWhyPending, mainHealth, prFeedback];
+export const QUESTIONS: readonly Question[] = [
+  prStatus,
+  ciWhyGreen,
+  ciWhyRed,
+  ciWhyPending,
+  mainHealth,
+  prFeedback,
+  prMerge,
+];
