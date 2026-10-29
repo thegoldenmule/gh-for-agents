@@ -60,6 +60,11 @@ function main(): void {
     error_kinds: {} as Record<string, number>,
     ghx_error_codes: {} as Record<string, number>,
     refusals: {} as Record<string, number>,
+    hook_decisions: {} as Record<string, number>,
+    /** Findings §1.5: 1,650 of 1,743 background Bash calls got a notification. */
+    background_bash: { calls: 0, notified: 0 },
+    /** Findings §5: 166 reads of `ci wait` output files. */
+    ci_wait_background: { calls: 0, notified: 0, output_file_read: 0 },
     agents: { total: 0, linked_tool_use_id: 0, linked_skill_result: 0, unlinked: 0, parent_mismatch: 0 },
     cost_usd: 0,
   };
@@ -91,6 +96,16 @@ function main(): void {
       if (c.error_kind) bump(agg.error_kinds, c.error_kind);
       if (c.ghx_error_code) bump(agg.ghx_error_codes, c.ghx_error_code);
       if (c.refusal) bump(agg.refusals, c.refusal);
+      if (c.hook_decision) bump(agg.hook_decisions, c.hook_decision);
+      if (c.name === 'Bash' && c.background) {
+        agg.background_bash.calls++;
+        if (c.notif_count > 0) agg.background_bash.notified++;
+        if (c.cli === 'ghx' && c.subcommand === 'ghx ci wait') {
+          agg.ci_wait_background.calls++;
+          if (c.notif_count > 0) agg.ci_wait_background.notified++;
+          if (c.output_file_read_bytes > 0) agg.ci_wait_background.output_file_read++;
+        }
+      }
     }
     for (const tr of t.turns) {
       if (tr.agent_id === null) bump(agg.turns_by_starter_main, tr.starter_kind);
