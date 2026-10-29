@@ -94,6 +94,7 @@ test('decision and rule for each branch; lines append in order', async () => {
   await hook({ ...at('bash-gh-pr-view.json', CONFIGURED), tool_input: { command: 'gh pr merge 12' } }, env);
   await hook(at('bash-gh-pr-view.json', PLAIN), env);
   await hook(at('bash-gh-pr-view.json', CONFIGURED), { ...env, GHX_HOOK_MODE: 'ask' });
+  await hook(at('bash-gh-pr-view.json', CONFIGURED), { ...env, GHX_HOOK_MODE: 'off' });
   const got = readLog(p).map((l) => [l.tool, l.decision, l.rule, l.enforce, l.mode, l.run_in_background]);
   assert.deepEqual(got, [
     ['Bash', 'rewrite', 'ci-wait-background', true, 'deny', false],
@@ -104,6 +105,7 @@ test('decision and rule for each branch; lines append in order', async () => {
     ['Bash', 'deny', 'wrapped-write', true, 'deny', false],
     ['Bash', 'allow', null, false, 'deny', false],
     ['Bash', 'ask', 'replaces', true, 'ask', false],
+    ['Bash', 'allow', null, true, 'off', false],
   ]);
   assert.equal(readLog(p)[0]?.reason, undefined, 'a rewrite has no reason');
 });
