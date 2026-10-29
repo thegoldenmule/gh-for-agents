@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "source": "synthetic",
+    "note": "Tier 2 oracle worlds (scripts/eval/oracle): gh replies the recorded scenarios lack, one file per world, rendered from the same PRs, runs and logs as the scenarios they extend."
+  }
+}
