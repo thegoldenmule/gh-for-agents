@@ -1,5 +1,5 @@
 // The five tables of plan 07 (sessions, agents, turns, api_calls, tool_calls), built from already-decoded
-// corpus files. Pure: the caller reads the files (scripts/eval/corpus/read.ts) and passes their records;
+// corpus files. Pure: the caller reads the files (scripts/eval/model/read.ts) and passes their records;
 // the path says what each file is (records.ts fileKind). Files are processed in path order and records in
 // file order; timestamps are values only, never structure.
 import { type CommandCli, classifyCommand, type Glue } from '../classify/command.ts';

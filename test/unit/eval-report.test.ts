@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { emptyCounts } from '../../scripts/eval/model/session.ts';
 import { emptyParseStats } from '../../scripts/eval/pipeline.ts';
-import { diffDefinitions, formatDiff } from '../../scripts/eval/report/compare.ts';
 import {
   ADOPTION_STATEMENT,
   bucketHeaders,
@@ -94,14 +93,6 @@ function many(n: number, o: Partial<Unit>, values: number[], sessions = n): Unit
 
 function input(units: Unit[], over: Partial<ReportInput> = {}): ReportInput {
   return {
-    manifest: {
-      hash: 'f'.repeat(64),
-      createdAt: '2100-01-01T00:00:00.000Z',
-      cutoff: '2099-12-31T18:00:00.000Z',
-      windowHours: 6,
-      counts: { files: 3, bytes: 300 },
-      excluded: { recent: { files: 0, bytes: 0 }, unmatched: { files: 1, bytes: 10 } },
-    },
     corpus: {
       sessions: 2,
       agents: 0,
@@ -115,7 +106,7 @@ function input(units: Unit[], over: Partial<ReportInput> = {}): ReportInput {
       dev: { projects: [], sessions: 0 },
     },
     counts: { ...emptyCounts(), synthetic_records: 2 },
-    parse: { ...emptyParseStats(), error_lines: 1, error_files: 1 },
+    parse: { ...emptyParseStats(), files: 3, bytes: 300, unmatched_files: 1, error_lines: 1, error_files: 1 },
     units,
     definitions: { metricVersion: '9.9.9', constants: { REF_CTX: 50000, EPISODE_SLACK: 3 }, catalog: CATALOG },
     era: { adoptions: { '-tmp-repo': '2026-10-21T00:00:00.000Z' }, devProjectMarkers: ['gh-for-agents'] },
@@ -265,14 +256,13 @@ test('the header states the adoption bundle and names dominant sessions', () => 
   assert.deepEqual(bucketHeaders([unit({ ...POST, kind: 'session' })]), []);
 });
 
-test('report.json is byte-identical across runs and carries what reproduces it', () => {
+test('report.json is byte-identical across runs and carries what it read and how it counted', () => {
   const units = [...many(7, PRE, [1, 4, 2]), ...many(7, POST, [3, 1]), ...many(2, { bucket: 'dogfood-dev' }, [1])];
   const a = serializeReport(buildReport(input(units)));
   const b = serializeReport(buildReport(input([...units].reverse())));
   assert.equal(a, b);
   const r = parseReport(a);
-  assert.equal(r.manifest.hash, 'f'.repeat(64));
-  assert.equal(r.manifest.createdAt, '2100-01-01T00:00:00.000Z');
+  assert.deepEqual(r.input, { files: 3, bytes: 300 });
   assert.equal(r.versions.metric, '9.9.9');
   assert.deepEqual(r.constants, { REF_CTX: 50000, EPISODE_SLACK: 3 });
   assert.equal(r.stats.seed, 42);
@@ -282,7 +272,7 @@ test('report.json is byte-identical across runs and carries what reproduces it',
   assert.deepEqual(r.era_config.adoptions, { '-tmp-repo': '2026-10-21T00:00:00.000Z' });
   assert.equal(r.excluded.synthetic_records, 2);
   assert.equal(r.excluded.parse_errors.lines, 1);
-  assert.equal(r.excluded.outside_manifest.unmatched.files, 1);
+  assert.equal(r.excluded.unmatched_files, 1);
   assert.equal(r.excluded.dev_projects.units, 2);
   assert.deepEqual(
     r.metrics.map((m) => m.id),
@@ -297,55 +287,19 @@ test('render is a pure function of report.json', () => {
   const md = render(r);
   assert.equal(render(parseReport(serializeReport(r))), md);
   assert.equal(render(JSON.parse(JSON.stringify(r))), md);
-  for (const h of ['## Summary', '## Turns', '§4.1', '§4.2', '§4.3', '§4.4', '## Excluded', '## Definitions']) {
+  for (const h of [
+    'Read 3 session files',
+    'Excluded and deduplicated:',
+    '## Summary',
+    '## Turns',
+    '## By intent',
+    '## By unit',
+    '## Waiting for CI',
+    '## Whole PR lifecycle',
+    '## Definitions',
+  ]) {
     assert.ok(md.includes(h), h);
   }
-});
-
-test('diffDefinitions reports changed constants and prices, and an unbumped METRIC_VERSION', () => {
-  const units = many(5, PRE, [1]);
-  const base = buildReport(input(units));
-  const same = diffDefinitions(base, base);
-  assert.deepEqual(same.changes, []);
-  assert.equal(same.unversioned, false);
-
-  const changedConst = buildReport(
-    input(units, {
-      definitions: { metricVersion: '9.9.9', constants: { REF_CTX: 60000, EPISODE_SLACK: 3 }, catalog: CATALOG },
-    }),
-  );
-  const d = diffDefinitions(base, changedConst);
-  assert.deepEqual(d.changes, [{ what: 'constants.REF_CTX', from: 50000, to: 60000 }]);
-  assert.equal(d.unversioned, true);
-  assert.match(formatDiff(d), /WARNING: definitions changed but METRIC_VERSION did not/);
-
-  const bumped = buildReport(
-    input(units, {
-      definitions: {
-        metricVersion: '10.0.0',
-        constants: { REF_CTX: 50000, EPISODE_SLACK: 3 },
-        catalog: CATALOG.map((m) => (m.id === 'errors' ? { ...m, formula: 'count of failed calls' } : m)),
-      },
-    }),
-  );
-  const e = diffDefinitions(base, bumped);
-  assert.equal(e.unversioned, false);
-  assert.deepEqual(
-    e.changes.map((c) => c.what),
-    ['versions.metric', 'metrics.errors.formula'],
-  );
-  const repriced = structuredClone(base);
-  (repriced.price_table.usdPerMTok as Record<string, { input: number }>)['claude-opus-5-5'] = {
-    ...repriced.price_table.usdPerMTok['claude-opus-5-5'],
-    input: 5,
-  } as never;
-  assert.deepEqual(
-    diffDefinitions(base, repriced).changes.map((c) => c.what),
-    ['price_table.usdPerMTok.claude-opus-5-5.input'],
-  );
-  // The markdown shows the baseline block.
-  const withBase = { ...bumped, baseline: e };
-  assert.match(render(withBase), /## Definition changes since the baseline[\s\S]*metrics\.errors\.formula/);
 });
 
 test('views: intent takes episodes and non-derived waits by intent; created_merged takes finished lifecycles', () => {

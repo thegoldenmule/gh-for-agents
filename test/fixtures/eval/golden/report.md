@@ -2,7 +2,19 @@
 
 > Pre/post compares the adoption bundle, not ghx alone: ghx, its PreToolUse hook, the CLAUDE.md block and the no-sleep memory arrived together. The data are observational: sessions differ in their work, model mix and share of subagents, so a difference here is an association, not an effect of ghx.
 
-Manifest `0ae92701a009` (snapshot 2100-01-01T00:00:00.000Z, 13 files, 528,375 bytes). METRIC_VERSION 1.1.0, prices 2026-10-29.1, ghx-eval/report@1. Medians with 95% CIs from a cluster bootstrap: resample sessions with replacement, percentile interval (seed 42, B = 1000); quantiles by linear interpolation between order statistics (Hyndman-Fan type 7); tests: Mann-Whitney U, two-sided, normal approximation with tie and continuity correction. Cells with n < 5 are marked °, have no CI and stay out of the summary.
+Read 13 session files (528,326 bytes): 9 sessions, 2 subagents, 196 API calls, 133 tool calls (41 gh, 32 ghx), $1.64 estimated cost.
+
+METRIC_VERSION 1.1.0, prices 2026-10-29.1, ghx-eval/report@2. Medians with 95% CIs from a cluster bootstrap: resample sessions with replacement, percentile interval (seed 42, B = 1000); quantiles by linear interpolation between order statistics (Hyndman-Fan type 7); tests: Mann-Whitney U, two-sided, normal approximation with tie and continuity correction. Cells with n < 5 are marked °, have no CI and stay out of the summary.
+
+Excluded and deduplicated:
+
+- `<synthetic>` records (API errors): 1
+- Dev projects (bucket dogfood-dev, never compared): 1 sessions, 2 units in `-tmp-golden-gh-for-agents`
+- Files not read (not a transcript, subagent meta or skill-fork file): 7
+- Parse errors: 1 lines in 1 files, 0 unreadable .json files, 1 partial last lines (49 bytes)
+- Invalid records: none; unknown record types: none
+- Files outside any session: 0; unlinked agents: 0
+- Deduplicated: 131 assistant records, 0 fork-copied API calls, 15 repeated notification sightings
 
 ## Buckets
 
@@ -44,9 +56,9 @@ Three numbers, because they measure different costs: human turns (prompts a pers
 | session | main | -tmp-golden-gh-for-agents | claude-opus-5-5 | dogfood-dev | 1° | _1_° | _3_° | _2_° | _0_° |
 | session | main | -tmp-golden-widgets | claude-opus-5-5 | never-adopted | 1° | _3_° | _6_° | _3_° | _0_° |
 
-## By intent (findings §4.1)
+## By intent
 
-Episodes and background waits by intent (derived waits excluded), gh-pre → ghx-post, one table per repo and model; findings §4.1 pooled main and subagent, this splits them. Tool calls and result characters: median [95% CI] p90.
+Episodes and background waits by intent (derived waits excluded), gh-pre → ghx-post, one table per repo and model. Tool calls and result characters: median [95% CI] p90.
 
 ### `-tmp-golden-acme`, claude-opus-5-5
 
@@ -59,9 +71,9 @@ Episodes and background waits by intent (derived waits excluded), gh-pre → ghx
 | status | main | 6 / 8 | 1 [1–1] p90 1 → 1 [1–1] p90 1 | 1.000 | 142 [142–142] p90 252 → 262 [261–263] p90 263 | 0% → 0% | 3 [3–3] p90 3 → 3 [3–3] p90 3 |
 | wait | main | 3° / 3° | _2 p90 2_° → _2 p90 2_° | – | _207 p90 207_° → _285 p90 285_° | _0%_° → _0%_° | _859 p90 859_° → _1,099 p90 1,099_° |
 
-## By unit, split by context (findings §4.2)
+## By unit, split by context
 
-gh-pre → ghx-post. Round trips here are GitHub round trips (API calls emitting a gh/ghx call), the column findings §4.2 reports; cost_norm is the headline dollar figure. Medians [95% CI]; the rest are means per unit.
+gh-pre → ghx-post. Round trips here are GitHub round trips (API calls emitting a gh/ghx call); cost_norm is the headline dollar figure. Medians [95% CI]; the rest are means per unit.
 
 ### `-tmp-golden-acme`, claude-opus-5-5
 
@@ -76,9 +88,9 @@ gh-pre → ghx-post. Round trips here are GitHub round trips (API calls emitting
 | pr cycle | subagent | 1° / 1° | _1_° → _1_° | _$0.028_° → _$0.298_° | – | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _1.00_° | _185_° → _270_° |
 | pr lifecycle | main | 3° / 8 | _9_° → 1 [1–10] | _$0.247_° → $0.027 [$0.027–$0.318] | – | _3.67_° → 0.00 | _0.00_° → 0.13 | _0.00_° → 0.00 | _0.00_° → 0.00 | _1,575_° → 190 [190–1,247] |
 
-## Waiting for CI, by mechanism (findings §4.3)
+## Waiting for CI, by mechanism
 
-Wait units per repo, model and bucket (findings §4.3 pooled all repos and models). cost_norm per wait: median [95% CI]; cache rewrites: mean per wait.
+Wait units per repo, model and bucket. cost_norm per wait: median [95% CI]; cache rewrites: mean per wait.
 
 | mechanism | context | repo | model | bucket | n | cost_norm | cache rewrites | round trips | wakeups | span calls |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -87,7 +99,7 @@ Wait units per repo, model and bucket (findings §4.3 pooled all repos and model
 | bg-ghx-ci-wait | main | -tmp-golden-acme | claude-opus-5-5 | ghx-post | 3° | _$0.053_° | _0.00_° | _2_° | _1_° | _4_° |
 | bg-ghx-ci-wait | subagent | -tmp-golden-acme | claude-opus-5-5 | ghx-post | 1° | _$0.298_° | _1.00_° | _2_° | _1_° | _4_° |
 
-## Whole PR lifecycle (findings §4.4)
+## Whole PR lifecycle
 
 One session (with its subagents) and one PR, created and merged in that session; gh-pre vs ghx-post. A lifecycle is filed under main when any of its work ran in the main thread. Medians [95% CI].
 
@@ -104,16 +116,6 @@ main:
 | Elapsed (h) | _0.36_° | _0.41_° | – |
 | Round trips | _10_° | _9_° | – |
 | cost_norm | _$0.247_° | _$0.212_° | – |
-
-## Excluded and deduplicated
-
-- `<synthetic>` records (API errors): 1
-- Dev projects (bucket dogfood-dev, never compared): 1 sessions, 2 units in `-tmp-golden-gh-for-agents`
-- Outside the manifest: 0 files modified after the cutoff 2099-12-31T18:00:00.000Z, 7 files matching no include pattern
-- Parse errors: 1 lines in 1 files, 0 unreadable .json files, 1 partial last lines (49 bytes)
-- Invalid records: none; unknown record types: none
-- Files outside any session: 0; unlinked agents: 0
-- Deduplicated: 131 assistant records, 0 fork-copied API calls, 15 repeated notification sightings
 
 ## Definitions
 

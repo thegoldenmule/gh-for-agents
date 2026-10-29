@@ -1,61 +1,72 @@
 #!/usr/bin/env node
-// ghx-eval (plan 07): `pnpm eval <subcommand> [args]`. Subcommands are discovered by file convention, so a
-// new one never touches this file: `<name>` loads scripts/eval/commands/<name>.ts, which must export
-// `run(argv: string[]): Promise<number>` (the exit code) and may export `summary: string` for --help.
-// Importing a command module must have no side effects. Unknown subcommand: usage on stderr, exit 2.
-import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+// ghx-eval (plan 07): `pnpm eval [--projects DIR] [--out DIR] [--json] [--era FILE]`. Reads the Claude Code
+// sessions on disk and prints report.md, or report.json with --json, or writes both to --out.
+import { mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
+import type { EraConfig } from './model/session.ts';
+import { defaultProjectsDir, evaluate, readEraConfig } from './pipeline.ts';
+import { serializeReport } from './report/json.ts';
+import { render } from './report/markdown.ts';
 
-const COMMANDS = join(import.meta.dirname, 'commands');
+export const HELP = `Usage: pnpm eval [--projects DIR] [--out DIR] [--json] [--era FILE]
 
-interface CommandModule {
-  run?: (argv: string[]) => Promise<number>;
-  summary?: string;
-}
+Reads every Claude Code session under the projects directory, as it is on disk now, and reports how
+GitHub work went with ghx and with raw gh. Prints report.md to stdout.
 
-export function listCommands(dir: string = COMMANDS): string[] {
-  return readdirSync(dir)
-    .filter((f) => /^[a-z][a-z0-9-]*\.ts$/.test(f))
-    .map((f) => f.slice(0, -3))
-    .sort();
-}
+  --projects DIR   the projects directory (default $CLAUDE_CONFIG_DIR/projects, else ~/.claude/projects)
+  --out DIR        write report.json and report.md to DIR instead of printing
+  --json           print report.json instead of report.md
+  --era FILE       era config JSON: {"adoptions": {"<project slug>": "<ISO time>"}, "devProjectMarkers": [...]}
+                   (default: the one in scripts/eval/model/session.ts)
+`;
 
-async function load(name: string, dir: string): Promise<CommandModule> {
-  return (await import(pathToFileURL(join(dir, `${name}.ts`)).href)) as CommandModule;
-}
-
-async function usage(dir: string): Promise<string> {
-  const lines = ['Usage: pnpm eval <subcommand> [args]   (<subcommand> --help for its flags)', '', 'Subcommands:'];
-  for (const name of listCommands(dir)) {
-    const { summary } = await load(name, dir);
-    lines.push(`  ${name.padEnd(10)} ${summary ?? ''}`.trimEnd());
-  }
-  return `${lines.join('\n')}\n`;
-}
-
-export async function main(argv: string[], dir: string = COMMANDS): Promise<number> {
-  const [name, ...rest] = argv;
-  if (name === '--help' || name === '-h' || name === 'help') {
-    process.stdout.write(await usage(dir));
-    return 0;
-  }
-  if (name === undefined || !listCommands(dir).includes(name)) {
-    if (name !== undefined) process.stderr.write(`ghx-eval: unknown subcommand ${JSON.stringify(name)}\n`);
-    process.stderr.write(await usage(dir));
+export function main(argv: string[]): number {
+  let values: { projects?: string; out?: string; json?: boolean; era?: string; help?: boolean };
+  try {
+    ({ values } = parseArgs({
+      args: argv,
+      options: {
+        projects: { type: 'string' },
+        out: { type: 'string' },
+        json: { type: 'boolean' },
+        era: { type: 'string' },
+        help: { type: 'boolean', short: 'h' },
+      },
+      strict: true,
+    }));
+  } catch (e) {
+    process.stderr.write(`ghx-eval: ${(e as Error).message}\n${HELP}`);
     return 2;
   }
-  const mod = await load(name, dir);
-  if (typeof mod.run !== 'function') {
-    process.stderr.write(`ghx-eval: commands/${name}.ts does not export run(argv)\n`);
-    return 1;
+  if (values.help) {
+    process.stdout.write(HELP);
+    return 0;
   }
+  const projects = resolve(values.projects ?? defaultProjectsDir());
+  if (!statSync(projects, { throwIfNoEntry: false })?.isDirectory()) {
+    process.stderr.write(`ghx-eval: ${projects} is not a directory\n`);
+    return 2;
+  }
+  let era: EraConfig | undefined;
   try {
-    return await mod.run(rest);
+    if (values.era !== undefined) era = readEraConfig(values.era);
   } catch (e) {
-    process.stderr.write(`ghx-eval ${name}: ${(e as Error).message}\n`);
-    return 1;
+    process.stderr.write(`ghx-eval: --era ${values.era}: ${(e as Error).message}\n`);
+    return 2;
   }
+  const report = evaluate(projects, era ? { era } : {});
+  if (values.out !== undefined) {
+    mkdirSync(values.out, { recursive: true });
+    writeFileSync(join(values.out, 'report.json'), serializeReport(report));
+    writeFileSync(join(values.out, 'report.md'), render(report));
+    process.stderr.write(
+      `ghx-eval: ${report.input.files} files, ${report.corpus.sessions} sessions from ${projects} → ${values.out}\n`,
+    );
+  } else {
+    process.stdout.write(values.json ? serializeReport(report) : render(report));
+  }
+  return 0;
 }
 
-if (import.meta.main) process.exitCode = await main(process.argv.slice(2));
+if (import.meta.main) process.exitCode = main(process.argv.slice(2));

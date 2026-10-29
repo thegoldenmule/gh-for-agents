@@ -1,13 +1,12 @@
-// report.json (plan 07 M3): cells of units with medians, p90 and seeded cluster-bootstrap CIs, comparisons
-// between buckets, and everything needed to reproduce them (Determinism contract). Pure: no clock, paths or
-// environment; floats rounded to six decimals; keys in construction order or sorted.
+// report.json (plan 07): cells of units with medians, p90 and seeded cluster-bootstrap CIs, comparisons
+// between buckets, what was read and excluded, and the definitions behind the numbers. Pure: no clock, paths
+// or environment; floats rounded to six decimals; keys in construction order or sorted.
 //
 // The comparison rules are enforced here and tested: a cell never pools contexts, repos, models or buckets
 // (buildCell throws); a comparison differs only in bucket (compareCells throws); a cell with n < MIN_N is
 // greyed, has no CI or test and stays out of summary lines; the header names the adoption bundle and the
 // dominant sessions of each bucket.
 
-import type { Manifest } from '../corpus/manifest.ts';
 import {
   BOOTSTRAP_B,
   BOOTSTRAP_METHOD,
@@ -27,7 +26,7 @@ import type { Counts, EraConfig, Tables } from '../model/session.ts';
 import type { ParseStats } from '../pipeline.ts';
 import type { Context, MetricDef, Unit, UnitBucket, UnitKind } from '../units/types.ts';
 
-export const REPORT_SCHEMA = 'ghx-eval/report@1';
+export const REPORT_SCHEMA = 'ghx-eval/report@2';
 /** Cells below this many units are greyed: no CI, no test, never in a summary line. */
 export const MIN_N = 5;
 /** Two or fewer sessions holding more than this share of a bucket's units are named in the header. */
@@ -43,8 +42,8 @@ export const COMPARISON_PAIRS: readonly (readonly [UnitBucket, UnitBucket])[] = 
 ];
 /**
  * How units are filed into cells. unit: by kind and category (intent for episodes, mechanism for waits).
- * intent: episodes plus non-derived waits by intent (findings §4.1). created_merged: PR lifecycles created and
- * merged in their session (findings §4.4).
+ * intent: episodes plus non-derived waits by intent. created_merged: PR lifecycles created and merged in their
+ * session.
  */
 export type View = 'unit' | 'intent' | 'created_merged';
 export const VIEWS: readonly View[] = ['unit', 'intent', 'created_merged'];
@@ -94,15 +93,12 @@ export interface CorpusSummary {
 }
 
 export interface ReportInput {
-  manifest: Pick<Manifest, 'hash' | 'createdAt' | 'cutoff' | 'windowHours' | 'counts' | 'excluded'>;
   corpus: CorpusSummary;
   counts: Counts;
   parse: ParseStats;
   units: readonly Unit[];
   definitions: Definitions;
   era: EraConfig;
-  /** Definition changes against a baseline report (report/compare.ts), when one was given. */
-  baseline?: BaselineDiff | null;
 }
 
 export type Pair = [number, number];
@@ -179,26 +175,13 @@ export interface BucketHeader {
   dominant: DominantSession[];
 }
 
-export interface DefinitionChange {
-  what: string;
-  from: unknown;
-  to: unknown;
-}
-
-export interface BaselineDiff {
-  manifest: string;
-  metric_version: { from: string; to: string };
-  changes: DefinitionChange[];
-  /** Definitions changed but METRIC_VERSION did not: the report cannot be told apart from the baseline's. */
-  unversioned: boolean;
-}
-
 type Count = { files: number; bytes: number };
 
 export interface Excluded {
   synthetic_records: number;
   dev_projects: { note: string; projects: string[]; sessions: number; units: number };
-  outside_manifest: { cutoff: string; recent: Count; unmatched: Count };
+  /** Files under the projects directory that are not session files, so not read. */
+  unmatched_files: number;
   parse_errors: { lines: number; files: number; json_files: number; partial_last_line: Count };
   invalid_records: Record<string, number>;
   unknown_record_types: Record<string, number>;
@@ -214,14 +197,8 @@ export interface Excluded {
 
 export interface Report {
   schema: string;
-  manifest: {
-    hash: string;
-    createdAt: string;
-    cutoff: string;
-    windowHours: number;
-    files: number;
-    bytes: number;
-  };
+  /** Session files read and the bytes parsed. */
+  input: { files: number; bytes: number };
   versions: { metric: string; price_table: string; report: string };
   constants: Readonly<Record<string, unknown>>;
   price_table: ReturnType<typeof priceTable>;
@@ -240,7 +217,6 @@ export interface Report {
   header: { statement: string; buckets: BucketHeader[] };
   excluded: Excluded;
   corpus: CorpusSummary & { units_by_kind: Record<string, number>; atomic_units_by_bucket: Record<string, number> };
-  baseline: BaselineDiff | null;
   metrics: MetricDef[];
   cells: Cell[];
   comparisons: Comparison[];
@@ -515,7 +491,7 @@ export function summarizeTables(t: Tables): CorpusSummary {
 }
 
 function excludedBlock(input: ReportInput, units: readonly Unit[]): Excluded {
-  const { counts, parse, manifest, corpus } = input;
+  const { counts, parse, corpus } = input;
   return {
     synthetic_records: counts.synthetic_records,
     dev_projects: {
@@ -524,11 +500,7 @@ function excludedBlock(input: ReportInput, units: readonly Unit[]): Excluded {
       sessions: corpus.dev.sessions,
       units: units.filter((u) => u.bucket === 'dogfood-dev').length,
     },
-    outside_manifest: {
-      cutoff: manifest.cutoff,
-      recent: { files: manifest.excluded.recent.files, bytes: manifest.excluded.recent.bytes },
-      unmatched: { files: manifest.excluded.unmatched.files, bytes: manifest.excluded.unmatched.bytes },
-    },
+    unmatched_files: parse.unmatched_files,
     parse_errors: {
       lines: parse.error_lines,
       files: parse.error_files,
@@ -568,14 +540,7 @@ export function buildReport(input: ReportInput): Report {
   for (const k of Object.keys(input.era.adoptions).sort(cmp)) adoptions[k] = input.era.adoptions[k] as string;
   return {
     schema: REPORT_SCHEMA,
-    manifest: {
-      hash: input.manifest.hash,
-      createdAt: input.manifest.createdAt,
-      cutoff: input.manifest.cutoff,
-      windowHours: input.manifest.windowHours,
-      files: input.manifest.counts.files,
-      bytes: input.manifest.counts.bytes,
-    },
+    input: { files: input.parse.files, bytes: input.parse.bytes },
     versions: { metric: defs.metricVersion, price_table: priceTable().version, report: REPORT_SCHEMA },
     constants: defs.constants,
     price_table: priceTable(),
@@ -594,7 +559,6 @@ export function buildReport(input: ReportInput): Report {
     header: { statement: ADOPTION_STATEMENT, buckets: bucketHeaders(units) },
     excluded: excludedBlock(input, units),
     corpus: { ...input.corpus, units_by_kind: byKind, atomic_units_by_bucket: byBucket },
-    baseline: input.baseline ?? null,
     metrics: defs.catalog.map((d) => ({
       id: d.id,
       unit: d.unit,

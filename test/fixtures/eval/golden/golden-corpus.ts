@@ -1,8 +1,8 @@
-// The golden ghx-eval corpus (plan 07, determinism 7): synthetic transcripts in real record shapes (the
-// builders in ../model/shapes.ts), small enough to read and rich enough to exercise every report path. One
-// adopted repo with sessions before and after adoption (main threads and subagents, opus and fable), a repo
-// that never adopted, a dev-marker repo, a <synthetic> record, a bad JSON line, a partial last line and a file
-// the manifest does not match. All ids, paths, slugs and text are made up.
+// The golden ghx-eval projects directory (plan 07, golden test): synthetic transcripts in real record shapes
+// (the builders in ../model/shapes.ts), small enough to read and rich enough to exercise every report path.
+// One adopted repo with sessions before and after adoption (main threads and subagents, opus and fable), a
+// repo that never adopted, a dev-marker repo, a <synthetic> record, a bad JSON line, a partial last line and a
+// file that is not a session file. All ids, paths, slugs and text are made up.
 //
 // goldenFiles() is deterministic; the golden test checks the files on disk equal it, and UPDATE_GOLDEN=1
 // rewrites them.
@@ -452,7 +452,7 @@ export function goldenFiles(): GoldenFile[] {
     ...neverSession().files({ mainInsert: { at: 2, line: '{"type":"user","message":' } }),
     // A partial last line, as in a live file (never parsed).
     ...devSession().files({ mainSuffix: '{"type":"assistant","message":{"id":"msg_partial"' }),
-    // A persisted tool result: not a transcript, so the manifest excludes it as unmatched.
+    // A persisted tool result: not a session file, so it is counted and not read.
     { path: `${ADOPTED}/${sid(1)}/tool-results/toolu_persisted.txt`, text: 'persisted output\n' },
   ];
   return files.sort((a, b) => Buffer.compare(Buffer.from(a.path), Buffer.from(b.path)));

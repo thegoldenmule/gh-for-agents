@@ -1,14 +1,7 @@
 {
-  "schema": "ghx-eval/report@1",
-  "manifest": {
-    "hash": "0ae92701a009ef8e3a92638ce32efc9cdf6ef267c4c4726545625e717cee44ab",
-    "createdAt": "2100-01-01T00:00:00.000Z",
-    "cutoff": "2099-12-31T18:00:00.000Z",
-    "windowHours": 6,
-    "files": 13,
-    "bytes": 528375
-  },
-  "versions": {"metric":"1.1.0","price_table":"2026-10-29.1","report":"ghx-eval/report@1"},
+  "schema": "ghx-eval/report@2",
+  "input": {"files":13,"bytes":528326},
+  "versions": {"metric":"1.1.0","price_table":"2026-10-29.1","report":"ghx-eval/report@2"},
   "constants": {
     "CHARS_PER_TOKEN": 2.2,
     "RESULT_OVERHEAD": 70,
@@ -101,7 +94,7 @@
       "sessions": 1,
       "units": 2
     },
-    "outside_manifest": {"cutoff":"2099-12-31T18:00:00.000Z","recent":{"files":0,"bytes":0},"unmatched":{"files":7,"bytes":629}},
+    "unmatched_files": 7,
     "parse_errors": {"lines":1,"files":1,"json_files":0,"partial_last_line":{"files":1,"bytes":49}},
     "invalid_records": {},
     "unknown_record_types": {},
@@ -123,7 +116,6 @@
     "units_by_kind": {"episode":48,"wait":8,"pr_cycle":17,"pr_lifecycle":16,"session":9},
     "atomic_units_by_bucket": {"gh-pre":23,"ghx-post":28,"gh-post":1,"dogfood-dev":1,"never-adopted":3}
   },
-  "baseline": null,
   "metrics": [
     {
       "id": "human_turns",

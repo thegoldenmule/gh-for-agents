@@ -1,31 +1,14 @@
-// Manifest → the five tables (plan 07, "Data model"), one session at a time so the raw records of only one
-// session are in memory at once. Determinism 1: a run reads a manifest, not a directory. Each file is read
-// up to the manifest's size (the ingest store is append-only, so a file may have grown since) and its
-// sha256 must match, else the run fails. Parse errors are counted here because Tables.counts has no field
-// for them; report.json shows them in its `excluded` block.
-//
-// The tables are cached as JSONL next to the manifest, in `<manifest>.tables/<key>/`, keyed by the manifest
-// hash, METRIC_VERSION, the price table version and the era config. A warm run returns exactly what a cold
-// run built (counts and parse stats included), so the report does not depend on the cache.
-import { createHash } from 'node:crypto';
-import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-  writeSync,
-} from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+// A projects directory → the five tables → units → report.json (plan 07). Files are read in place, one
+// session at a time, so the raw records of only one session are in memory at once. JSONL files are read up
+// to their last newline: a session still being written contributes what it has so far. Everything read is
+// counted; parse errors are counted here because Tables.counts has no field for them, and report.json shows
+// them in its `excluded` block.
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
-import { type Manifest, manifestFilePath, readManifest } from './corpus/manifest.ts';
-import { parseJsonl } from './corpus/read.ts';
 import { CATALOG, CONSTANTS, METRIC_VERSION } from './metrics/catalog.ts';
-import { PRICE_TABLE_VERSION } from './model/pricing.ts';
+import { parseJsonl, walkProjects } from './model/read.ts';
 import {
   buildSessionTables,
   DEFAULT_ERA_CONFIG,
@@ -36,35 +19,36 @@ import {
   mergeCounts,
   type Tables,
 } from './model/session.ts';
-import { type BaselineDiff, buildReport, type Report, summarizeTables } from './report/json.ts';
+import { buildReport, type Report, summarizeTables } from './report/json.ts';
 import { buildUnits } from './units/index.ts';
 
-/**
- * Bump when model/session.ts or the classifiers it calls (classify/, src/hook/shell.ts) change a row's shape
- * or meaning: the cache key does not cover that code. @2: heredoc bodies are data and "$(…)" is scanned.
- */
-export const TABLES_CACHE_SCHEMA = 'ghx-eval/tables@2';
 const TABLE_NAMES = ['sessions', 'agents', 'turns', 'api_calls', 'tool_calls'] as const;
 
-/** What reading the manifest's files turned up; counted, never dropped silently (determinism 6). */
+/** What reading the projects directory turned up; counted, never dropped silently. */
 export interface ParseStats {
-  /** Manifest files read. */
+  /** Session files read (`*.jsonl`, `*.meta.json`, skill-fork markers). */
   files: number;
+  /** Bytes parsed: JSONL up to each file's last newline, .json files whole. */
+  bytes: number;
+  /** Other files under the directory (persisted tool results and the like), not read. */
+  unmatched_files: number;
   /** JSONL lines that are not JSON. */
   error_lines: number;
   error_files: number;
-  /** Bytes after a file's last newline (a partial last line), never parsed. */
+  /** Bytes after a file's last newline (a partial last line), not parsed. */
   trailing_bytes: number;
   trailing_files: number;
   /** .json files (agent meta, skill-fork markers) that are not JSON. */
   json_errors: number;
-  /** Manifest files that belong to no session (not under <project>/<session>...). */
+  /** Session files that belong to no session (not under <project>/<session>...). */
   outside_sessions: number;
 }
 
 export function emptyParseStats(): ParseStats {
   return {
     files: 0,
+    bytes: 0,
+    unmatched_files: 0,
     error_lines: 0,
     error_files: 0,
     trailing_bytes: 0,
@@ -74,44 +58,9 @@ export function emptyParseStats(): ParseStats {
   };
 }
 
-export interface Corpus {
-  manifest: Manifest;
-  tables: Tables;
-  parse: ParseStats;
-  /** Where the tables were cached, and whether this run read them from there. */
-  cache: { dir: string; hit: boolean } | null;
-}
-
-export interface LoadOptions {
-  era?: EraConfig;
-  /** Part of the cache key; the caller passes the catalog's METRIC_VERSION. */
-  metricVersion: string;
-  /** false: neither read nor write the cache (tests, golden runs). Default true. */
-  cache?: boolean;
-  /** Override the cache directory (default `<manifest dir>/<manifest name>.tables`). */
-  cacheRoot?: string;
-}
-
-/** Reads the first `size` bytes of a manifest file and checks them against its sha256. */
-export function readFrozen(rootDir: string, file: Manifest['files'][number]): Buffer {
-  const path = manifestFilePath(rootDir, file);
-  const fd = openSync(path, 'r');
-  let buf: Buffer;
-  try {
-    buf = Buffer.allocUnsafe(file.size);
-    let pos = 0;
-    while (pos < file.size) {
-      const n = readSync(fd, buf, pos, file.size - pos, pos);
-      if (n === 0) break;
-      pos += n;
-    }
-    if (pos !== file.size) throw new Error(`${file.path}: ${pos} bytes on disk, manifest says ${file.size}`);
-  } finally {
-    closeSync(fd);
-  }
-  const sha = createHash('sha256').update(buf).digest('hex');
-  if (sha !== file.sha256) throw new Error(`${file.path}: sha256 ${sha} does not match the manifest`);
-  return buf;
+/** Claude Code's projects directory: `$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects`. */
+export function defaultProjectsDir(env: NodeJS.ProcessEnv = process.env): string {
+  return join(env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects');
 }
 
 /** Decodes one file: JSONL to the last newline (rule 10), .json as one record. Updates `parse`. */
@@ -119,6 +68,7 @@ export function decodeFile(path: string, buf: Buffer, parse: ParseStats): InputF
   parse.files++;
   if (path.endsWith('.jsonl')) {
     const { entries, stats } = parseJsonl(buf);
+    parse.bytes += stats.end;
     if (stats.errors > 0) {
       parse.error_lines += stats.errors;
       parse.error_files++;
@@ -131,6 +81,7 @@ export function decodeFile(path: string, buf: Buffer, parse: ParseStats): InputF
     for (const e of entries) if (e.ok) records.push(e.record);
     return { path, records };
   }
+  parse.bytes += buf.length;
   try {
     return { path, records: [JSON.parse(buf.toString('utf8'))] };
   } catch {
@@ -139,28 +90,22 @@ export function decodeFile(path: string, buf: Buffer, parse: ParseStats): InputF
   }
 }
 
-/** Builds the tables for a manifest, session by session, with no cache. */
-export function buildFromManifest(
-  manifest: Manifest,
-  rootDir: string,
-  era: EraConfig = DEFAULT_ERA_CONFIG,
-): { tables: Tables; parse: ParseStats } {
+/** Reads every session under `root` and builds the tables, session by session. */
+export function loadProjects(root: string, era: EraConfig = DEFAULT_ERA_CONFIG): { tables: Tables; parse: ParseStats } {
+  const walked = walkProjects(root);
   const parse = emptyParseStats();
+  parse.unmatched_files = walked.unmatched.length;
   const tables: Tables = { sessions: [], agents: [], turns: [], api_calls: [], tool_calls: [], counts: emptyCounts() };
-  const byPath = new Map(manifest.files.map((f) => [f.path, f]));
-  const groups = groupBySession(manifest.files.map((f) => f.path));
+  const absOf = new Map(walked.files.map((f) => [f.path, f.abs]));
+  const groups = groupBySession(walked.files.map((f) => f.path));
   const grouped = new Set(groups.flatMap((g) => g.paths));
-  for (const f of manifest.files) {
+  for (const f of walked.files) {
     if (grouped.has(f.path)) continue;
-    // Still verified, so a report never rests on a file that changed.
-    readFrozen(rootDir, f);
     parse.files++;
     parse.outside_sessions++;
   }
   for (const { paths } of groups) {
-    const input = paths.map((p) =>
-      decodeFile(p, readFrozen(rootDir, byPath.get(p) as Manifest['files'][number]), parse),
-    );
+    const input = paths.map((p) => decodeFile(p, readFileSync(absOf.get(p) as string), parse));
     const t = buildSessionTables(input, { era });
     for (const name of TABLE_NAMES) {
       const into = tables[name] as unknown[];
@@ -170,98 +115,6 @@ export function buildFromManifest(
   }
   tables.counts = mergeCounts(tables.counts, emptyCounts());
   return { tables, parse };
-}
-
-/** The cache key: everything the tables depend on besides the code itself. */
-export function cacheKey(manifestHash: string, metricVersion: string, era: EraConfig): string {
-  const eraCanon = {
-    adoptions: Object.fromEntries(Object.entries(era.adoptions).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
-    devProjectMarkers: [...era.devProjectMarkers],
-  };
-  const text = JSON.stringify({
-    schema: TABLES_CACHE_SCHEMA,
-    manifest: manifestHash,
-    metric: metricVersion,
-    prices: PRICE_TABLE_VERSION,
-    era: eraCanon,
-  });
-  return `${manifestHash.slice(0, 12)}-${createHash('sha256').update(text).digest('hex').slice(0, 12)}`;
-}
-
-function writeJsonl(path: string, rows: readonly unknown[]): void {
-  const fd = openSync(path, 'w');
-  try {
-    let chunk: string[] = [];
-    let size = 0;
-    for (const r of rows) {
-      const line = `${JSON.stringify(r)}\n`;
-      chunk.push(line);
-      size += line.length;
-      if (size > 1 << 22) {
-        writeSync(fd, chunk.join(''));
-        chunk = [];
-        size = 0;
-      }
-    }
-    if (chunk.length) writeSync(fd, chunk.join(''));
-  } finally {
-    closeSync(fd);
-  }
-}
-
-function readJsonlRows(path: string): unknown[] {
-  const buf = readFileSync(path);
-  const rows: unknown[] = [];
-  let start = 0;
-  for (;;) {
-    const nl = buf.indexOf(0x0a, start);
-    if (nl === -1) break;
-    if (nl > start) rows.push(JSON.parse(buf.toString('utf8', start, nl)));
-    start = nl + 1;
-  }
-  return rows;
-}
-
-/** Writes the tables to `dir` (atomically: a temp dir renamed into place, `key.json` written last). */
-export function writeTablesCache(dir: string, key: string, tables: Tables, parse: ParseStats): void {
-  const tmp = `${dir}.tmp-${process.pid}`;
-  rmSync(tmp, { recursive: true, force: true });
-  mkdirSync(tmp, { recursive: true });
-  for (const name of TABLE_NAMES) writeJsonl(join(tmp, `${name}.jsonl`), tables[name]);
-  writeFileSync(join(tmp, 'counts.json'), `${JSON.stringify(tables.counts)}\n`);
-  writeFileSync(join(tmp, 'parse.json'), `${JSON.stringify(parse)}\n`);
-  writeFileSync(join(tmp, 'key.json'), `${JSON.stringify({ schema: TABLES_CACHE_SCHEMA, key })}\n`);
-  rmSync(dir, { recursive: true, force: true });
-  mkdirSync(dirname(dir), { recursive: true });
-  renameSync(tmp, dir);
-}
-
-/** Reads cached tables, or null when `dir` holds no complete cache for `key`. */
-export function readTablesCache(dir: string, key: string): { tables: Tables; parse: ParseStats } | null {
-  const keyFile = join(dir, 'key.json');
-  if (!existsSync(keyFile)) return null;
-  const k = JSON.parse(readFileSync(keyFile, 'utf8')) as { schema?: string; key?: string };
-  if (k.schema !== TABLES_CACHE_SCHEMA || k.key !== key) return null;
-  const tables = { counts: JSON.parse(readFileSync(join(dir, 'counts.json'), 'utf8')) } as Tables;
-  for (const name of TABLE_NAMES)
-    (tables as unknown as Record<string, unknown[]>)[name] = readJsonlRows(join(dir, `${name}.jsonl`));
-  const parse = JSON.parse(readFileSync(join(dir, 'parse.json'), 'utf8')) as ParseStats;
-  return { tables, parse };
-}
-
-/** Manifest file → verified, decoded, modelled corpus; from the cache when it holds this key. */
-export function loadCorpus(manifestPath: string, opts: LoadOptions): Corpus {
-  const { manifest, rootDir } = readManifest(manifestPath);
-  const era = opts.era ?? DEFAULT_ERA_CONFIG;
-  if (opts.cache === false) return { manifest, ...buildFromManifest(manifest, rootDir, era), cache: null };
-  const key = cacheKey(manifest.hash, opts.metricVersion, era);
-  const root = opts.cacheRoot ?? join(dirname(manifestPath), `${basename(manifestPath, '.json')}.tables`);
-  const dir = join(root, key);
-  const cached = readTablesCache(dir, key);
-  if (cached) return { manifest, ...cached, cache: { dir, hit: true } };
-  const built = buildFromManifest(manifest, rootDir, era);
-  writeTablesCache(dir, key, built.tables, built.parse);
-  return { manifest, ...built, cache: { dir, hit: false } };
 }
 
 const EraConfigSchema = z.object({
@@ -278,32 +131,16 @@ export function readEraConfig(path: string): EraConfig {
   return cfg;
 }
 
-export interface ObserveOptions {
-  era?: EraConfig;
-  cache?: boolean;
-  cacheRoot?: string;
-  baseline?: (report: Report) => BaselineDiff;
-}
-
-/** Tier 1 end to end: manifest → tables → units → report.json (plan 07 "observe"). */
-export function observe(manifestPath: string, opts: ObserveOptions = {}): { report: Report; corpus: Corpus } {
+/** The whole tool: the sessions under `root` → report.json. */
+export function evaluate(root: string, opts: { era?: EraConfig } = {}): Report {
   const era = opts.era ?? DEFAULT_ERA_CONFIG;
-  const corpus = loadCorpus(manifestPath, {
-    era,
-    metricVersion: METRIC_VERSION,
-    ...(opts.cache !== undefined ? { cache: opts.cache } : {}),
-    ...(opts.cacheRoot !== undefined ? { cacheRoot: opts.cacheRoot } : {}),
-  });
-  const units = buildUnits(corpus.tables, { era });
-  const report = buildReport({
-    manifest: corpus.manifest,
-    corpus: summarizeTables(corpus.tables),
-    counts: corpus.tables.counts,
-    parse: corpus.parse,
-    units,
+  const { tables, parse } = loadProjects(root, era);
+  return buildReport({
+    corpus: summarizeTables(tables),
+    counts: tables.counts,
+    parse,
+    units: buildUnits(tables, { era }),
     definitions: { metricVersion: METRIC_VERSION, constants: CONSTANTS, catalog: CATALOG },
     era,
   });
-  if (opts.baseline) report.baseline = opts.baseline(report);
-  return { report, corpus };
 }

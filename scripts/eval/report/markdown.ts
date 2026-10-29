@@ -1,6 +1,6 @@
-// report.md from report.json only (plan 07 M3): render() reads nothing but its argument, so a report.json
-// re-renders to the same bytes anywhere. Tables mirror ghx-impact-findings §4.1–4.4 plus the plan's three
-// "turns" numbers. Greyed cells (n < MIN_N) are marked ° and italic, carry no CI and never reach the summary.
+// report.md from report.json only (plan 07): render() reads nothing but its argument, so a report.json
+// renders to the same bytes anywhere. Greyed cells (n < MIN_N) are marked ° and italic, carry no CI and never
+// reach the summary.
 import type { BucketHeader, Cell, Comparison, MetricSummary, Report, View } from './json.ts';
 
 const GREY = '°';
@@ -139,14 +139,19 @@ const label = (c: { view: View; kind: string; category: string }): string =>
 // ---------------------------------------------------------------------------------------------- sections
 
 function header(r: Report): string[] {
-  const m = r.manifest;
+  const c = r.corpus;
   return [
     '# ghx-eval: GitHub work with ghx and with raw gh',
     '',
     `> ${r.header.statement}`,
     '',
-    `Manifest \`${m.hash.slice(0, 12)}\` (snapshot ${m.createdAt}, ${group(m.files)} files, ${group(m.bytes)} bytes). ` +
-      `METRIC_VERSION ${r.versions.metric}, prices ${r.versions.price_table}, ${r.versions.report}. ` +
+    `Read ${group(r.input.files)} session files (${group(r.input.bytes)} bytes): ${group(c.sessions)} sessions, ` +
+      `${group(c.agents)} subagents, ${group(c.api_calls)} API calls, ${group(c.tool_calls)} tool calls ` +
+      `(${Object.entries(c.github_tool_calls)
+        .map(([k, n]) => `${group(n)} ${k}`)
+        .join(', ')}), $${c.cost_usd.toFixed(2)} estimated cost.`,
+    '',
+    `METRIC_VERSION ${r.versions.metric}, prices ${r.versions.price_table}, ${r.versions.report}. ` +
       `Medians with ${Math.round(r.stats.ci_level * 100)}% CIs from a ${r.stats.bootstrap} ` +
       `(seed ${r.stats.seed}, B = ${r.stats.B}); quantiles by ${r.stats.quantile}; tests: Mann-Whitney U, ${r.stats.test}. ` +
       `Cells with n < ${r.stats.min_n} are marked ${GREY}, have no CI and stay out of the summary.`,
@@ -175,25 +180,9 @@ function buckets(r: Report): string[] {
   ];
 }
 
-function baseline(r: Report): string[] {
-  const d = r.baseline;
-  if (!d) return [];
-  const lines = [
-    '## Definition changes since the baseline',
-    '',
-    `Baseline manifest \`${d.manifest.slice(0, 12)}\`, METRIC_VERSION ${d.metric_version.from} → ${d.metric_version.to}.`,
-    '',
-  ];
-  if (d.unversioned) lines.push('**Definitions changed but METRIC_VERSION did not.**', '');
-  if (d.changes.length === 0) lines.push('No definition changes.', '');
-  else lines.push(...d.changes.map((c) => `- \`${c.what}\`: ${JSON.stringify(c.from)} → ${JSON.stringify(c.to)}`), '');
-  return lines;
-}
-
 function excluded(r: Report): string[] {
   const e = r.excluded;
   const dev = e.dev_projects;
-  const om = e.outside_manifest;
   const pe = e.parse_errors;
   const dd = e.deduplicated;
   const kv = (o: Record<string, number>): string =>
@@ -203,13 +192,12 @@ function excluded(r: Report): string[] {
           .join(', ')
       : 'none';
   return [
-    '## Excluded and deduplicated',
+    'Excluded and deduplicated:',
     '',
     `- \`<synthetic>\` records (API errors): ${e.synthetic_records}`,
     `- Dev projects (bucket dogfood-dev, never compared): ${dev.sessions} sessions, ${dev.units} units` +
       (dev.projects.length ? ` in ${dev.projects.map((p) => `\`${esc(p)}\``).join(', ')}` : ''),
-    `- Outside the manifest: ${om.recent.files} files modified after the cutoff ${om.cutoff}, ` +
-      `${om.unmatched.files} files matching no include pattern`,
+    `- Files not read (not a transcript, subagent meta or skill-fork file): ${e.unmatched_files}`,
     `- Parse errors: ${pe.lines} lines in ${pe.files} files, ${pe.json_files} unreadable .json files, ` +
       `${pe.partial_last_line.files} partial last lines (${pe.partial_last_line.bytes} bytes)`,
     `- Invalid records: ${kv(e.invalid_records)}; unknown record types: ${kv(e.unknown_record_types)}`,
@@ -280,11 +268,10 @@ function turns(v: Ctx): string[] {
 
 function byIntent(v: Ctx): string[] {
   const out = [
-    '## By intent (findings §4.1)',
+    '## By intent',
     '',
     'Episodes and background waits by intent (derived waits excluded), gh-pre → ghx-post, one table per repo ' +
-      'and model; findings §4.1 pooled main and subagent, this ' +
-      'splits them. Tool calls and result characters: median [95% CI] p90.',
+      'and model. Tool calls and result characters: median [95% CI] p90.',
     '',
   ];
   const groups = comparisonGroups(v.report, 'intent', ['episode'], 'gh-pre', 'ghx-post');
@@ -317,10 +304,10 @@ function byIntent(v: Ctx): string[] {
 
 function byUnit(v: Ctx): string[] {
   const out = [
-    '## By unit, split by context (findings §4.2)',
+    '## By unit, split by context',
     '',
-    'gh-pre → ghx-post. Round trips here are GitHub round trips (API calls emitting a gh/ghx call), the column ' +
-      'findings §4.2 reports; cost_norm is the headline dollar figure. Medians [95% CI]; the rest are means per unit.',
+    'gh-pre → ghx-post. Round trips here are GitHub round trips (API calls emitting a gh/ghx call); cost_norm is ' +
+      'the headline dollar figure. Medians [95% CI]; the rest are means per unit.',
     '',
   ];
   const groups = comparisonGroups(v.report, 'unit', ['episode', 'pr_cycle', 'pr_lifecycle'], 'gh-pre', 'ghx-post');
@@ -385,10 +372,9 @@ function waits(v: Ctx): string[] {
     ]);
   }
   return [
-    '## Waiting for CI, by mechanism (findings §4.3)',
+    '## Waiting for CI, by mechanism',
     '',
-    'Wait units per repo, model and bucket (findings §4.3 pooled all repos and models). cost_norm per wait: ' +
-      'median [95% CI]; cache rewrites: mean per wait.',
+    'Wait units per repo, model and bucket. cost_norm per wait: median [95% CI]; cache rewrites: mean per wait.',
     '',
     ...table(
       [
@@ -421,7 +407,7 @@ const LIFECYCLE: { id: string; name: string; per?: number; unit?: string }[] = [
 
 function lifecycle(v: Ctx): string[] {
   const out = [
-    '## Whole PR lifecycle (findings §4.4)',
+    '## Whole PR lifecycle',
     '',
     'One session (with its subagents) and one PR, created and merged in that session; gh-pre vs ghx-post. ' +
       'A lifecycle is filed under main when any of its work ran in the main thread. Medians [95% CI].',
@@ -474,15 +460,14 @@ export function render(report: Report): string {
   const v = view(report);
   const lines = [
     ...header(report),
+    ...excluded(report),
     ...buckets(report),
-    ...baseline(report),
     ...summary(v),
     ...turns(v),
     ...byIntent(v),
     ...byUnit(v),
     ...waits(v),
     ...lifecycle(v),
-    ...excluded(report),
     ...definitions(report),
   ];
   while (lines.at(-1) === '') lines.pop();

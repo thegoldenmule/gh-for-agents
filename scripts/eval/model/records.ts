@@ -228,7 +228,7 @@ export function parseRecord(raw: unknown): ParsedRecord {
 /**
  * Rule 10: decode JSONL up to the last newline only. A live file's final line may be half-written, so
  * whatever follows the last `\n` is left for the next read. `bytes` is the UTF-8 length consumed.
- * (scripts/eval/corpus/read.ts streams files the same way; this is the in-memory form for fixtures.)
+ * (scripts/eval/model/read.ts reads files the same way; this is the string form for fixtures.)
  */
 export function parseJsonlText(text: string): { records: unknown[]; badLines: number; bytes: number } {
   const end = text.lastIndexOf('\n');
