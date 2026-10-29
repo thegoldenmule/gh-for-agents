@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// ghx-eval (plan 07): `pnpm eval [--projects DIR] [--out DIR] [--json] [--era FILE]`. Reads the Claude Code
-// sessions on disk and prints report.md, or report.json with --json, or writes both to --out.
+// ghx-eval (plan 07): `pnpm eval [--summary] [--projects DIR] [--out DIR] [--json] [--era FILE]`. Reads the
+// Claude Code sessions on disk and prints report.md, or report.json with --json, or writes both to --out.
+// --summary prints a one-screen summary of the same report instead (its data as JSON with --json).
 import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -8,12 +9,15 @@ import type { EraConfig } from './model/session.ts';
 import { defaultProjectsDir, evaluate, readEraConfig } from './pipeline.ts';
 import { serializeReport } from './report/json.ts';
 import { render } from './report/markdown.ts';
+import { renderSummary, serializeSummary } from './report/summary.ts';
 
-export const HELP = `Usage: pnpm eval [--projects DIR] [--out DIR] [--json] [--era FILE]
+export const HELP = `Usage: pnpm eval [--summary] [--projects DIR] [--out DIR] [--json] [--era FILE]
 
 Reads every Claude Code session under the projects directory, as it is on disk now, and reports how
 GitHub work went with ghx and with raw gh. Prints report.md to stdout.
 
+  --summary        start here: a one-screen, plain-language answer to "is ghx helping or hurting, and
+                   where", from the same numbers as the full report (with --json, its data as JSON)
   --projects DIR   the projects directory (default $CLAUDE_CONFIG_DIR/projects, else ~/.claude/projects)
   --out DIR        write report.json and report.md to DIR instead of printing
   --json           print report.json instead of report.md
@@ -22,11 +26,12 @@ GitHub work went with ghx and with raw gh. Prints report.md to stdout.
 `;
 
 export function main(argv: string[]): number {
-  let values: { projects?: string; out?: string; json?: boolean; era?: string; help?: boolean };
+  let values: { summary?: boolean; projects?: string; out?: string; json?: boolean; era?: string; help?: boolean };
   try {
     ({ values } = parseArgs({
       args: argv,
       options: {
+        summary: { type: 'boolean' },
         projects: { type: 'string' },
         out: { type: 'string' },
         json: { type: 'boolean' },
@@ -42,6 +47,10 @@ export function main(argv: string[]): number {
   if (values.help) {
     process.stdout.write(HELP);
     return 0;
+  }
+  if (values.summary && values.out !== undefined) {
+    process.stderr.write(`ghx-eval: --summary prints to stdout; it does not take --out\n${HELP}`);
+    return 2;
   }
   const projects = resolve(values.projects ?? defaultProjectsDir());
   if (!statSync(projects, { throwIfNoEntry: false })?.isDirectory()) {
@@ -63,6 +72,8 @@ export function main(argv: string[]): number {
     process.stderr.write(
       `ghx-eval: ${report.input.files} files, ${report.corpus.sessions} sessions from ${projects} → ${values.out}\n`,
     );
+  } else if (values.summary) {
+    process.stdout.write(values.json ? serializeSummary(report) : renderSummary(report));
   } else {
     process.stdout.write(values.json ? serializeReport(report) : render(report));
   }
