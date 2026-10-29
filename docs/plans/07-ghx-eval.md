@@ -9,8 +9,10 @@ An earlier version also had a fake-gh replay oracle and a snapshot store with ma
 One command:
 
 ```sh
-pnpm eval [--projects DIR] [--out DIR] [--json] [--era FILE]
+pnpm eval [--summary] [--projects DIR] [--out DIR] [--json] [--era FILE]
 ```
+
+- Start with `pnpm eval --summary`: one screen, in plain words, on whether ghx helps or hurts and where (median cost per task before and after ghx, the biggest problems, the caveats), rendered from the same report.json as the full report. `--summary --json` prints its data.
 
 - It walks the projects directory (default `$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects`) in UTF-8 path order and reads every `*.jsonl` transcript, `*.meta.json` subagent meta and `*.forked-skill*.json` marker in place. Nothing is copied or cached.
 - It prints report.md to stdout. `--json` prints report.json instead; `--out DIR` writes both files there.
