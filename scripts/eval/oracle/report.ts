@@ -125,7 +125,8 @@ export function renderMarkdown(r: OracleReport): string {
   const lines = [
     `# ghx oracle (tier 2), v${r.oracleVersion}`,
     '',
-    `Tokens per tool result: chars / ${r.constants.resultCharsPerToken} + ${r.constants.resultTokenOverhead}.`,
+    `Tokens per tool result: chars / ${r.constants.resultCharsPerToken} + ${r.constants.resultTokenOverhead}. ` +
+      'Tool calls count every Bash, Write and Read the agent makes; API calls count gh invocations only.',
     '',
     '| question | arm | correct | tool calls | API calls | bytes | tokens | missing |',
     '|---|---|---|---:|---:|---:|---:|---|',
