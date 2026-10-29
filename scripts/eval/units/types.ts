@@ -27,6 +27,11 @@ export interface Unit {
    * fg-sleep-loop). PR cycles and lifecycles: 'pr'. Session units: 'session'.
    */
   category: string;
+  /**
+   * Episodes and waits: the highest-priority non-meta intent of their GitHub calls ('meta' when only meta).
+   * A per-intent table takes kind 'episode' plus kind 'wait' without the 'derived' flag. Null otherwise.
+   */
+  intent: string | null;
   /** owner/repo#n when known, else #n when only the number is known. */
   pr: string | null;
   start_ts: string;
