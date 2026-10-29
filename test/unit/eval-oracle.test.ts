@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { fillPosted, isJsonWrite } from '../../scripts/eval/oracle/gh-shim.ts';
 import {
   buildReport,
   estimateResultTokens,
@@ -14,7 +15,6 @@ import {
   selectQuestions,
   serializeReport,
 } from '../../scripts/eval/oracle/index.ts';
-import { fillPosted, isJsonWrite } from '../../scripts/eval/oracle/gh-shim.ts';
 import { SCRUB_ROOT, scrub } from '../../scripts/eval/oracle/scrub.ts';
 import { charCount } from '../../scripts/eval/oracle/tokens.ts';
 import { ARMS } from '../../scripts/eval/oracle/types.ts';

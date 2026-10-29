@@ -13,6 +13,7 @@ export const CAVEATS: readonly string[] = [
   'Waits: ghx ci wait sees CI settled on its first poll (multi-poll waits need 10-30 s of real time per poll); gh arms poll through successive replies. ghx internal polls are under-counted.',
   'A background call is measured as the harness acknowledgement plus a later Read of the output file, which is how agents consumed ci wait in the transcripts (ghx-impact-findings §4.1, §5).',
   'Bytes and tokens count tool results only (what the agent reads), not the commands it writes.',
+  'Truth is the minimal answer to each question. ghx also returns what the question did not ask for (same-on-main verdicts, flake signals, merge policy, artifact paths), which the gh arms would need more calls to match.',
   'Typical-gh scripts reproduce the sequences in gh-usage-findings §5 and §8 with sleep loops reduced to their gh calls; an incorrect typical answer is a finding, not a bug.',
 ];
 
