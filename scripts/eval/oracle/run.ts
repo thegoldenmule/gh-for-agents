@@ -1,7 +1,7 @@
 // Run a question's answers against the fake gh and measure them (plan 07, tier 2).
 //
 // Every answer gets its own directory: a composed scenario, a `git init` checkout whose origin is the world's
-// repo (the cwd of every step), HOME, GHX_ARTIFACT_DIR and the fake gh's reply counters, so successive replies
+// repo (the cwd of every step, carrying the world's .github/ghx.json), HOME, GHX_ARTIFACT_DIR and the fake gh's reply counters, so successive replies
 // (pending, pending, done) advance across the answer's steps and never leak into another answer. Steps run
 // through `bash -c` with an environment built from scratch: PATH is the fake gh, a `ghx` shim for this
 // checkout's bin/ghx.js, node, /usr/bin and /bin. Pipes, `tail` and `grep` in a script are real.
@@ -24,7 +24,7 @@ import { dirname, join } from 'node:path';
 import { SCRUB_ROOT, scrub } from './scrub.ts';
 import { charCount, estimateResultTokens } from './tokens.ts';
 import { type Answer, ARMS, type Arm, type Fact, type GhCall, type Question, type Step } from './types.ts';
-import { composeWorld } from './world.ts';
+import { composeWorld, worldConfig } from './world.ts';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 const GHX_BIN = join(ROOT, 'bin', 'ghx.js');
@@ -165,6 +165,11 @@ export async function runAnswer(q: Question, a: Answer, dir: string, binDir: str
   const repo = join(dir, 'repo');
   composeWorld(q.world, scenario);
   initCheckout(repo, q.world.repo);
+  const config = worldConfig(scenario);
+  if (config !== null) {
+    mkdirSync(join(repo, '.github'), { recursive: true });
+    writeFileSync(join(repo, '.github', 'ghx.json'), config);
+  }
   for (const d of ['home', 'artifacts', 'state', 'logs', 'tasks']) mkdirSync(join(dir, d), { recursive: true });
 
   const outputs = new Map<string, string>();

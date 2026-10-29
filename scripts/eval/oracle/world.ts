@@ -65,3 +65,25 @@ export function composeWorld(world: World, out: string): number {
   }
   return n;
 }
+
+/**
+ * The `.github/ghx.json` a composed world serves through the contents API (base64, from the first
+ * `contents/.github/ghx.json` fixture that succeeds), or null when it serves none. ghx reads the checkout's
+ * copy when the cwd is the target repo, so the checkout must carry the same file.
+ */
+export function worldConfig(scenarioDir: string): string | null {
+  for (const file of readdirSync(scenarioDir)
+    .filter((f) => f.endsWith('.json'))
+    .sort()) {
+    const f = JSON.parse(readFileSync(join(scenarioDir, file), 'utf8')) as FixtureFile & {
+      exitCode?: number;
+      stdout?: string;
+    };
+    if (!f.argv.some((a) => a.endsWith('/contents/.github/ghx.json'))) continue;
+    if ((f.exitCode ?? 0) !== 0 || typeof f.stdout !== 'string') return null;
+    const sep = f.stdout.indexOf('\r\n\r\n');
+    const body = JSON.parse(sep >= 0 ? f.stdout.slice(sep + 4) : f.stdout) as { content?: string };
+    return body.content === undefined ? null : Buffer.from(body.content, 'base64').toString('utf8');
+  }
+  return null;
+}
