@@ -1,5 +1,6 @@
 // The oracle's report: JSON first, markdown rendered from the JSON object only. No wall clock, no machine
 // paths; questions sorted by id and answers in ARMS order, so the same fixtures give the same bytes.
+import { METRIC_VERSION } from '../metrics/catalog.ts';
 import type { QuestionResult, StepResult } from './run.ts';
 import { SCRUB_ROOT, SCRUB_RULES } from './scrub.ts';
 import { RESULT_CHARS_PER_TOKEN, RESULT_TOKEN_OVERHEAD } from './tokens.ts';
@@ -50,6 +51,8 @@ export interface ArmTotals {
 
 export interface OracleReport {
   oracleVersion: number;
+  /** The metric catalog's version, whose token constants the oracle uses. */
+  metricVersion: string;
   constants: {
     resultCharsPerToken: number;
     resultTokenOverhead: number;
@@ -100,6 +103,7 @@ export function buildReport(results: readonly QuestionResult[]): OracleReport {
   const done = questions.every((q) => q.answers.every((a) => a.arm === 'gh-typical' || a.correct));
   return {
     oracleVersion: ORACLE_VERSION,
+    metricVersion: METRIC_VERSION,
     constants: {
       resultCharsPerToken: RESULT_CHARS_PER_TOKEN,
       resultTokenOverhead: RESULT_TOKEN_OVERHEAD,
@@ -125,7 +129,8 @@ export function renderMarkdown(r: OracleReport): string {
   const lines = [
     `# ghx oracle (tier 2), v${r.oracleVersion}`,
     '',
-    `Tokens per tool result: chars / ${r.constants.resultCharsPerToken} + ${r.constants.resultTokenOverhead}. ` +
+    `Tokens per tool result (metric catalog ${r.metricVersion}): ` +
+      `chars / ${r.constants.resultCharsPerToken} + ${r.constants.resultTokenOverhead}. ` +
       'Tool calls count every Bash, Write and Read the agent makes; API calls count gh invocations only.',
     '',
     '| question | arm | correct | tool calls | API calls | bytes | tokens | missing |',

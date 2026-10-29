@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { CONSTANTS, METRIC_VERSION } from '../../scripts/eval/metrics/catalog.ts';
 import { fillPosted, isJsonWrite } from '../../scripts/eval/oracle/gh-shim.ts';
 import {
   buildReport,
@@ -27,6 +28,16 @@ test('result tokens: chars / 2.2 + 70 per tool call, rounded; chars are code poi
   assert.equal(estimateResultTokens(22), 80);
   assert.equal(estimateResultTokens(1000), 525);
   assert.equal(charCount('a🤖b'), 3);
+});
+
+test('result tokens use the metric catalog, and the report names its version', () => {
+  const r = buildReport([]);
+  assert.equal(r.metricVersion, METRIC_VERSION);
+  assert.deepEqual(
+    [r.constants.resultCharsPerToken, r.constants.resultTokenOverhead],
+    [CONSTANTS.CHARS_PER_TOKEN, CONSTANTS.RESULT_OVERHEAD],
+  );
+  assert.match(renderMarkdown(r), new RegExp(`metric catalog ${METRIC_VERSION.replace(/\./g, '\\.')}`));
 });
 
 test('scrub: the answer directory becomes SCRUB_ROOT; clock-derived names keep their length', () => {
