@@ -469,12 +469,12 @@ function wrapped(top: string, sub: string, args: readonly string[], repo: string
     case 'pr create':
       return {
         suggestion: ['ghx', 'pr', 'create', '--input', 'pr.json', ...R],
-        hint: 'write the structured PR JSON with your file tool first; ghx schema pr create lists the fields',
+        hint: 'ghx pr create --example prints a valid pr.json for this repo; edit it with your file tool first',
       };
     case 'pr edit':
       return {
         suggestion: prCmd('pr', 'edit', '--input', 'patch.json'),
-        hint: 'patch.json holds only the fields to change',
+        hint: 'patch.json holds only the fields to change; ghx pr edit --example prints one',
       };
     case 'pr ready':
       return {
@@ -528,12 +528,24 @@ function guessed(top: string, sub: string, args: readonly string[], repo: string
     case 'pr update':
       return {
         suggestion: ['ghx', 'pr', 'edit', pr, '--input', 'patch.json', ...R],
-        hint: 'patch.json holds only the fields to change; ghx schema pr edit lists them',
+        hint: 'patch.json holds only the fields to change; ghx pr edit --example prints one',
+      };
+    // With --input the plural is a write: one comment or review.
+    case 'pr comments':
+    case 'pr reviews':
+      if (has(args, '--input')) {
+        const verb = sub === 'comments' ? 'comment' : 'review';
+        return {
+          suggestion: ['ghx', 'pr', verb, pr, '--input', `${verb}.json`, ...R],
+          hint: `ghx schema pr ${verb} lists the fields`,
+        };
+      }
+      return {
+        suggestion: ['ghx', 'pr', 'feedback', pr, ...R],
+        hint: 'reviews, inline and issue comments merged, with bots separated and ids to reply to; --open keeps the unresolved ones',
       };
     case 'pr threads':
     case 'pr review-comments':
-    case 'pr comments':
-    case 'pr reviews':
       return {
         suggestion: ['ghx', 'pr', 'feedback', pr, ...R],
         hint: 'reviews, inline and issue comments merged, with bots separated and ids to reply to; --open keeps the unresolved ones',
@@ -706,7 +718,6 @@ const JSON_READS = new Set([
   'release view',
   'repo view',
   'workflow list',
-  'workflow view',
   'run list',
   'run view',
   'label list',

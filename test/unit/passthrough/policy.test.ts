@@ -543,6 +543,14 @@ describe('guessed ghx commands point at the command that exists', () => {
       ['ghx', 'pr', 'feedback', '7'],
     ],
     [
+      ['pr', 'comments', '7', '--input', 'c.json'],
+      ['ghx', 'pr', 'comment', '7', '--input', 'comment.json'],
+    ],
+    [
+      ['pr', 'reviews', '7', '--input', 'r.json'],
+      ['ghx', 'pr', 'review', '7', '--input', 'review.json'],
+    ],
+    [
       ['pr', 'resolve-thread', '7'],
       ['ghx', 'pr', 'resolve', '7', '<finding-id>'],
     ],
