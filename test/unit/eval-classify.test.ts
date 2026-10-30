@@ -114,6 +114,13 @@ test('intent: priority across invocations (merge > create > … > status > other
   assert.equal(commandIntent(cmd('ghx doctor'), 'ghx doctor')?.metaOnly, true);
 });
 
+test('intent: ghx pr land is a merge, pr ready an edit, and --example is meta', () => {
+  assert.equal(intent('ghx pr land 12'), 'merge');
+  assert.equal(intent('ghx pr ready 12'), 'edit');
+  assert.equal(intent('ghx pr create --example'), 'meta');
+  assert.equal(commandIntent(cmd('ghx pr create --example'), 'ghx pr create --example')?.metaOnly, true);
+});
+
 test('intent: a status read in a sleep loop, a background call or a Monitor is a wait', () => {
   assert.equal(intent('gh pr checks 12'), 'status');
   assert.equal(intent('sleep 60; gh pr checks 12'), 'wait');

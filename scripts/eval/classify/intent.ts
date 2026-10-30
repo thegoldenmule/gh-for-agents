@@ -43,6 +43,9 @@ const GHX_NATIVE: Readonly<Record<string, Intent>> = {
   'pr create': 'create',
   'pr edit': 'edit',
   'pr merge': 'merge',
+  // Waits until the PR can merge, then merges: a merge.
+  'pr land': 'merge',
+  'pr ready': 'edit',
   'pr comment': 'reply',
   'pr review': 'reply',
   'pr resolve': 'reply',
@@ -141,7 +144,8 @@ export function ghxIntent(
     GHX_META.has(first) ||
     GHX_META.has(a0) ||
     args.includes('--help') ||
-    args.includes('--schema')
+    args.includes('--schema') ||
+    args.includes('--example')
   ) {
     return { intent: 'meta', passthrough: false, meta: true };
   }
