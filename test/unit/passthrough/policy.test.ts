@@ -5,6 +5,7 @@ import { describe, test } from 'node:test';
 import { onUnknown } from '../../../src/cli/unknown.ts';
 import { isReadAllowed } from '../../../src/gh/guard.ts';
 import { ALLOWED_READS, type Decision, decide } from '../../../src/passthrough/policy.ts';
+import { readRedirect } from '../../../src/passthrough/redirect.ts';
 import { finalArgs } from '../../../src/passthrough/run.ts';
 import { EXIT } from '../../contract/exit-table.ts';
 import { FakeGh } from '../../helpers/fake-gh.ts';
@@ -192,7 +193,7 @@ const WRAPPED: WrapRow[] = [
   ],
   [
     ['pr', 'view', '--json', 'title,body', '12'],
-    ['ghx', 'pr', 'status', '12'],
+    ['ghx', 'pr', 'status', '12', '--fields', "'title,description.text'"],
   ],
   [
     ['pr', 'view', '12', '--comments'],
@@ -220,7 +221,11 @@ const WRAPPED: WrapRow[] = [
   ],
   [
     ['run', 'view', '--log-failed', '--job', '456'],
-    ['ghx', 'ci', 'why', '<pr|run:<run-id>>'],
+    ['ghx', 'ci', 'why', 'job:456'],
+  ],
+  [
+    ['run', 'view', '--job', '456', '--log'],
+    ['ghx', 'ci', 'why', 'job:456'],
   ],
   [
     ['run', 'watch', '123'],
@@ -313,12 +318,29 @@ describe('wrapped commands are refused with the replacement argv', () => {
     assert.deepEqual(refused(decide(['run', 'watch', '9'])).details?.suggestions, ['ci wait']);
   });
 
-  test('the 02 §6.2 example verbatim', () => {
+  test('the 02 §6.2 example, naming description.text as the body', () => {
     const e = refused(decide(['pr', 'view', '3198', '-R', 'powerhouse-inc/powerhouse']));
     assert.equal(e.message, "'ghx pr view' is not a ghx command.");
     assert.equal(
       e.hint,
-      'Use: ghx pr status 3198 -R powerhouse-inc/powerhouse (state, mergeable, CI for the head SHA and feedback in one object).',
+      'Use: ghx pr status 3198 -R powerhouse-inc/powerhouse (state, title, description.text (the body), mergeable, CI for the head SHA and feedback in one object).',
+    );
+  });
+
+  test('pr view --json names the pr status --fields; a field pr status lacks names the REST read', () => {
+    const e = refused(decide(['pr', 'view', '12', '--json', 'body,isDraft,labels']));
+    assert.deepEqual(e.details?.suggestion, ['ghx', 'pr', 'status', '12', '--fields', "'description.text,draft'"]);
+    assert.match(e.hint ?? '', /labels is not in pr status: ghx api repos\/\{owner\}\/\{repo\}\/pulls\/12 has it\)\.$/);
+  });
+
+  test('run view --log is not "not a ghx command": run view without --log is passed through', () => {
+    const e = refused(decide(['run', 'view', '--job', '456', '--log']));
+    assert.equal(e.message, "'ghx run view --log' is not passed through.");
+    assert.deepEqual(e.details?.alternatives, [['ghx', 'api', 'repos/{owner}/{repo}/actions/jobs/456/logs']]);
+    const run = refused(decide(['run', 'view', '123', '--log']));
+    assert.match(
+      run.hint ?? '',
+      /one job's raw log is ghx api repos\/\{owner\}\/\{repo\}\/actions\/jobs\/<job-id>\/logs \(job ids: ghx run view 123 --json jobs\)/,
     );
   });
 });
@@ -540,9 +562,9 @@ describe('guessed ghx commands point at the command that exists', () => {
     });
   }
 
-  test('ghx ci logs and ghx help ci logs refuse with the ci why hint, without calling gh', async () => {
+  test('ghx ci logs without a target and ghx help ci logs refuse with the ci why hint, without calling gh', async () => {
     for (const argv of [
-      ['ci', 'logs', '12'],
+      ['ci', 'logs'],
       ['help', 'ci', 'logs'],
     ]) {
       const fake = new FakeGh();
@@ -597,6 +619,11 @@ describe('refused argv never reaches gh (through runCli)', () => {
       const words = argv.filter((a, i) => i < 3 && !a.startsWith('-'));
       if (await registry.resolve(words)) {
         t.skip(`ghx ${words.join(' ')} is a ghx command now`);
+        return;
+      }
+      // A gh-shaped read with a faithful equivalent runs it (test/commands/gh-shaped.test.ts).
+      if (readRedirect(argv)) {
+        t.skip(`ghx ${words.join(' ')} runs its ghx equivalent`);
         return;
       }
       const fake = new FakeGh();

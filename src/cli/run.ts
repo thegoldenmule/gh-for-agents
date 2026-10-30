@@ -142,7 +142,10 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<Ru
     }
     if (!hit) {
       const handler = deps.onUnknown ?? defaultOnUnknown;
-      const r = await handler(argv, { names: await deps.registry.names() });
+      const r = await handler(argv, {
+        names: await deps.registry.names(),
+        resolve: (t) => deps.registry.resolve(t),
+      });
       if (r.kind === 'refuse') return done(await emitError(deps.stdout, r.error, out, deps.clock));
       return runCommandWith(r.spec, r.globals ?? {}, deps, async () => r.input);
     }

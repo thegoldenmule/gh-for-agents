@@ -10,6 +10,7 @@
 import type { GlobalOptions } from '../cli/args.ts';
 import { GhxError } from '../core/errors.ts';
 import { apiShape, isReadAllowed } from '../gh/guard.ts';
+import { mapGhFields } from './gh-fields.ts';
 
 /** 02 §10's allowlisted reads (besides `api`, which is checked by shape). */
 export const ALLOWED_READS: Readonly<Record<string, readonly string[]>> = {
@@ -380,6 +381,19 @@ interface Wrapped {
   suggestion: string[];
   hint: string;
   alternatives?: string[][];
+  /** The refusal's message, when "'ghx <top> <sub>' is not a ghx command." is untrue (run view is passed through without --log). */
+  message?: string;
+}
+
+/** A value flag's value (`--json a,b` or `--json=a,b`), before any `--`. */
+function flagArg(args: readonly string[], flag: string): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i] as string;
+    if (t === '--') return undefined;
+    if (t.startsWith(`${flag}=`)) return t.slice(flag.length + 1);
+    if (t === flag) return args[i + 1];
+  }
+  return undefined;
 }
 
 function wrapped(top: string, sub: string, args: readonly string[], repo: string | undefined): Wrapped | undefined {
@@ -391,17 +405,26 @@ function wrapped(top: string, sub: string, args: readonly string[], repo: string
   const runTarget = sel !== undefined && /^\d+$/.test(sel) ? `run:${sel}` : undefined;
   const key = `${top} ${sub}`;
   switch (key) {
-    case 'pr view':
+    case 'pr view': {
       if (has(args, '--comments', '-c')) {
         return {
           suggestion: prCmd('pr', 'feedback'),
           hint: 'reviews, inline and issue comments merged, with bots separated and ids to reply to',
         };
       }
+      // gh's --json names become pr status --fields paths (body is description.text).
+      const json = flagArg(args, '--json');
+      const m = json !== undefined ? mapGhFields(json, undefined) : undefined;
+      const fields = m !== undefined && m.paths.length > 0 ? ['--fields', `'${m.paths.join(',')}'`] : [];
+      const missing =
+        m !== undefined && m.unmapped.length > 0
+          ? `; ${m.unmapped.join(', ')} ${m.unmapped.length === 1 ? 'is' : 'are'} not in pr status: ghx api repos/{owner}/{repo}/pulls/${sel ?? '<n>'} has ${m.unmapped.length === 1 ? 'it' : 'them'}`
+          : '';
       return {
-        suggestion: prCmd('pr', 'status'),
-        hint: 'state, mergeable, CI for the head SHA and feedback in one object',
+        suggestion: [...prCmd('pr', 'status'), ...fields],
+        hint: `state, title, description.text (the body), mergeable, CI for the head SHA and feedback in one object${missing}`,
       };
+    }
     case 'pr checks':
       return {
         suggestion: prCmd('ci', 'wait'),
@@ -410,9 +433,20 @@ function wrapped(top: string, sub: string, args: readonly string[], repo: string
       };
     case 'run view': {
       if (!has(args, '--log', '--log-failed')) return undefined;
+      const job = flagArg(args, '--job') ?? flagArg(args, '-j');
+      const raw = `ghx api repos/{owner}/{repo}/actions/jobs/${job ?? '<job-id>'}/logs`;
+      if (job !== undefined) {
+        return {
+          message: `'ghx run view --log' is not passed through.`,
+          suggestion: ['ghx', 'ci', 'why', `job:${job}`, ...R],
+          hint: `the job's failing step, error lines and failed tests; its raw log is ${raw}`,
+          alternatives: [raw.split(' ')],
+        };
+      }
       return {
+        message: `'ghx run view --log' is not passed through.`,
         suggestion: ['ghx', 'ci', 'why', runTarget ?? '<pr|run:<run-id>>', ...R],
-        hint: 'the failing step, error lines and failed tests, read from the jobs-logs API (works while the run is in progress)',
+        hint: `the failing step, error lines and failed tests, read from the jobs-logs API (works while the run is in progress); one job's raw log is ${raw} (job ids: ghx run view ${sel ?? '<run-id>'} --json jobs)`,
       };
     }
     case 'run watch':
@@ -537,7 +571,7 @@ function guessed(top: string, sub: string, args: readonly string[], repo: string
 }
 
 function wrappedError(top: string, sub: string, w: Wrapped): GhxError {
-  return new GhxError('USAGE_UNKNOWN_COMMAND', `'ghx ${top} ${sub}' is not a ghx command.`, {
+  return new GhxError('USAGE_UNKNOWN_COMMAND', w.message ?? `'ghx ${top} ${sub}' is not a ghx command.`, {
     hint: `Use: ${w.suggestion.join(' ')} (${w.hint}).`,
     details: {
       suggestion: w.suggestion,
@@ -627,6 +661,33 @@ function guarded(plan: PassthroughPlan, g: Globals): Decision {
     },
     globals: g.globals,
   };
+}
+
+/** A gh-shaped argv split as decide() reads it: ghx output flags, the command words, -R, and the rest. */
+export interface GhCall {
+  top: string;
+  sub: string;
+  /** After the verb, without -R. */
+  args: string[];
+  repo?: string;
+  globals: Partial<GlobalOptions>;
+}
+
+/** Split a `<group> <verb> …` argv (gh and ghx aliases expanded); undefined for api, search or no verb. */
+export function ghCall(tokens: readonly string[]): GhCall | undefined {
+  const g = takeGhxGlobals(tokens);
+  let argv = normalizeGhArgv(g.rest);
+  const first = argv[0];
+  if (first === undefined || first.startsWith('-')) return undefined;
+  const expanded = TOP_ALIASES[first];
+  if (expanded) argv = [...expanded, ...argv.slice(1)];
+  const top = argv[0] as string;
+  if (top === 'api' || top === 'search') return undefined;
+  const taken = takeRepoFlag(argv.slice(1));
+  const [rawSub, ...args] = taken.rest;
+  if (rawSub === undefined || rawSub.startsWith('-')) return undefined;
+  const sub = VERB_ALIASES[top]?.[rawSub] ?? rawSub;
+  return { top, sub, args, ...(taken.repo !== undefined ? { repo: taken.repo } : {}), globals: g.globals };
 }
 
 /** Decide what to do with an argv that names no ghx command. */
