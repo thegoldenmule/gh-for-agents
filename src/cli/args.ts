@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import type { AnyCommandSpec } from '../core/command.ts';
 import { GhxError, mapZodIssues } from '../core/errors.ts';
-import { ghFlagAlias, suggest } from '../core/suggest.ts';
+import { ghFieldFlag, ghFlagAlias, suggest } from '../core/suggest.ts';
 import { parseJsonWithPosition } from '../util/json.ts';
 
 /** Global flags (01 §3.2): reserved, never derived from input. */
@@ -154,13 +154,81 @@ export interface ParsedArgv {
   positionals: string[];
 }
 
+/** The input file name a JSON-input hint uses, by command. */
+const INPUT_FILE: Readonly<Record<string, string>> = {
+  'pr create': 'pr.json',
+  'pr edit': 'patch.json',
+  'pr comment': 'comment.json',
+  'pr review': 'review.json',
+};
+
+/** The value typed after `flag` (`--head x` or `--head=x`), if any. */
+function flagValue(tokens: readonly string[], flag: string): string | undefined {
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i] as string;
+    if (t === '--') return undefined;
+    if (t.startsWith(`${flag}=`)) return t.slice(flag.length + 1);
+    if (t === flag) {
+      const v = tokens[i + 1];
+      return v !== undefined && !v.startsWith('-') ? v : undefined;
+    }
+  }
+  return undefined;
+}
+
+/** An unknown flag that is a JSON-only input field: gh's name for it (--body → description), or the field's own (--head). */
+interface FieldFlagHint {
+  field: string;
+  value: unknown;
+  hint: string;
+}
+
+function fieldFlagHint(
+  flag: string,
+  spec: AnyCommandSpec | undefined,
+  derived: DerivedInterface | undefined,
+  tokens: readonly string[],
+): FieldFlagHint | undefined {
+  if (spec === undefined || derived === undefined || derived.jsonOnly.length === 0) return undefined;
+  const name = spec.name.join(' ');
+  const alias = ghFieldFlag(name, flag);
+  const field = alias?.field ?? derived.jsonOnly.find((f) => `--${kebab(f)}` === flag);
+  if (field === undefined || !derived.jsonOnly.includes(field)) return undefined;
+  const type = inputJsonSchema(spec).properties?.[field]?.type;
+  let value: unknown;
+  if (alias?.value !== undefined) value = alias.value;
+  else if (type === 'boolean') value = true;
+  else {
+    const text = alias?.file ? '<the text of the file>' : (flagValue(tokens, flag) ?? '<value>');
+    value = type === 'array' ? [text] : text;
+  }
+  const fragment = `{"${field}": ${JSON.stringify(value)}}`;
+  const run = `ghx ${name}${derived.positionals.map((p) => ` <${p.field}>`).join('')} --input ${INPUT_FILE[name] ?? 'input.json'}`;
+  const what =
+    alias !== undefined && flag !== `--${kebab(field)}`
+      ? `gh's ${flag} is the '${field}' field of the JSON input in ghx`
+      : `'${field}' is a field of the JSON input, not a flag`;
+  return {
+    field,
+    value,
+    hint: `${what}: put ${fragment} in the file, then run ${run} (ghx schema ${name} lists the fields).`,
+  };
+}
+
 function unknownFlagError(
   flag: string,
   commandName: string | undefined,
   known: readonly string[],
   hasBrief = false,
+  fieldHint?: FieldFlagHint,
 ): GhxError {
   const where = commandName ? `'ghx ${commandName}'` : 'ghx';
+  if (fieldHint !== undefined) {
+    return new GhxError('USAGE_UNKNOWN_FLAG', `${where} has no flag '${flag}'.`, {
+      hint: fieldHint.hint,
+      details: { flag, suggestions: [], field: fieldHint.field, json: { [fieldHint.field]: fieldHint.value } },
+    });
+  }
   const alias = ghFlagAlias(commandName, flag);
   const suggestions = alias === undefined ? suggest(flag, known) : alias.use !== undefined ? [alias.use] : [];
   let hint: string;
@@ -204,7 +272,9 @@ export function parseCommandArgv(
     const err = e as NodeJS.ErrnoException;
     const m = /'(-{1,2}[^'\s]+)'/.exec(err.message);
     if (err.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') {
-      throw unknownFlagError(m?.[1] ?? '?', commandName, known, spec?.brief !== undefined);
+      const flag = m?.[1] ?? '?';
+      const field = fieldFlagHint(flag, spec, derived, tokens);
+      throw unknownFlagError(flag, commandName, known, spec?.brief !== undefined, field);
     }
     throw new GhxError('VALIDATION', err.message.split('\n')[0] ?? 'invalid arguments', {
       details: { issues: [{ path: m?.[1] ?? '(argv)', code: 'invalid_flag', message: err.message.split('\n')[0] }] },

@@ -483,6 +483,48 @@ describe('guessed ghx commands point at the command that exists', () => {
     ],
     [['ci', 'watch', '12'], ['ghx', 'ci', 'wait', '12'], [['ghx', 'pr', 'status', '12']]],
     [['ci', 'status'], ['ghx', 'ci', 'wait', '<pr>'], [['ghx', 'pr', 'status', '<pr>']]],
+    // The fixed alias table: edit distance read these as pr create, pr diff, or nothing.
+    [
+      ['pr', 'show', '7'],
+      ['ghx', 'pr', 'status', '7'],
+    ],
+    [
+      ['pr', 'get', '7', '-R', 'o/r'],
+      ['ghx', 'pr', 'status', '7', '-R', 'o/r'],
+    ],
+    [
+      ['pr', 'info', '7'],
+      ['ghx', 'pr', 'status', '7'],
+    ],
+    [
+      ['pr', 'update', '7'],
+      ['ghx', 'pr', 'edit', '7', '--input', 'patch.json'],
+    ],
+    [
+      ['pr', 'threads', '7'],
+      ['ghx', 'pr', 'feedback', '7'],
+    ],
+    [
+      ['pr', 'review-comments', '7'],
+      ['ghx', 'pr', 'feedback', '7'],
+    ],
+    [
+      ['pr', 'comments', '7'],
+      ['ghx', 'pr', 'feedback', '7'],
+    ],
+    [
+      ['pr', 'reviews', '7'],
+      ['ghx', 'pr', 'feedback', '7'],
+    ],
+    [
+      ['pr', 'resolve-thread', '7'],
+      ['ghx', 'pr', 'resolve', '7', '<finding-id>'],
+    ],
+    [['ci', 'failures', '7'], ['ghx', 'ci', 'why', '7'], [['ghx', 'ci', 'why', 'run:7']]],
+    [
+      ['ci', 'rerun-failed', 'run:9'],
+      ['ghx', 'ci', 'rerun', 'run:9'],
+    ],
   ];
   for (const [argv, suggestion, alternatives] of GUESSED) {
     test(argv.join(' '), () => {

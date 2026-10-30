@@ -473,13 +473,48 @@ function wrapped(top: string, sub: string, args: readonly string[], repo: string
 }
 
 /**
- * ghx commands agents guess that do not exist (`ci logs`), with the command that does the job. They are
- * not gh commands, so the refusal carries no `wrapped` name and the hook never sees them.
+ * ghx commands agents guess that do not exist (`ci logs`), with the command that does the job: a fixed
+ * table, checked before any edit-distance suggestion (which reads `pr update` as `pr create`). None is a
+ * gh command, so the refusal carries no `wrapped` name and the hook never denies one.
  */
 function guessed(top: string, sub: string, args: readonly string[], repo: string | undefined): Wrapped | undefined {
   const sel = firstPositional(args);
   const R = repo !== undefined ? ['-R', repo] : [];
+  const pr = sel ?? '<pr>';
   switch (`${top} ${sub}`) {
+    case 'pr show':
+    case 'pr get':
+    case 'pr info':
+      return {
+        suggestion: ['ghx', 'pr', 'status', pr, ...R],
+        hint: 'state, title, description.text (the body), mergeable, CI for the head SHA and feedback in one object',
+      };
+    case 'pr update':
+      return {
+        suggestion: ['ghx', 'pr', 'edit', pr, '--input', 'patch.json', ...R],
+        hint: 'patch.json holds only the fields to change; ghx schema pr edit lists them',
+      };
+    case 'pr threads':
+    case 'pr review-comments':
+    case 'pr comments':
+    case 'pr reviews':
+      return {
+        suggestion: ['ghx', 'pr', 'feedback', pr, ...R],
+        hint: 'reviews, inline and issue comments merged, with bots separated and ids to reply to; --open keeps the unresolved ones',
+      };
+    case 'pr resolve-thread':
+      return {
+        suggestion: ['ghx', 'pr', 'resolve', pr, '<finding-id>', ...R],
+        hint: 'finding ids (f_…) come from ghx pr feedback; --status addressed --commit <sha>, or wontfix --note "…"; it resolves the review thread',
+      };
+    case 'ci rerun-failed':
+      return {
+        suggestion: ['ghx', 'ci', 'rerun', sel ?? '<pr|run:<id>>', ...R],
+        hint: 'reruns the failed jobs of completed runs; --flaky limits it to likely flakes',
+      };
+    case 'ci failures':
+    case 'ci failed':
+    case 'ci errors':
     case 'ci log':
     case 'ci logs':
     case 'ci view':
