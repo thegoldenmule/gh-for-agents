@@ -262,10 +262,12 @@ export const CATALOG: MetricDef[] = [
     'robust',
     ALL,
     'Headline dollar figure (findings §2): keeps the unit’s own context growth and cache rewrites but replaces ' +
-      'the session’s base context with 50k. Same caveats as cost.' +
+      'each agent’s base context with 50k. Since 2.0.0 the base is taken per transcript file (agent): a ' +
+      'lifecycle led from a 500k-token main thread no longer charges its subagents’ calls zero input. Same ' +
+      'caveats as cost.' +
       AFTER_WAKE,
-    `sum over span of [output + advisor cost + input cost × max(0, ctx − C0 + ${CONSTANTS.REF_CTX}) / ctx], ` +
-      'C0 = context of the first span call, input cost = cost − output − advisor',
+    `sum over span of [output + advisor cost + input cost × max(0, ctx − C0(file) + ${CONSTANTS.REF_CTX}) / ctx], ` +
+      'C0(file) = context of the first span call in the same transcript file, input cost = cost − output − advisor',
   ),
   def(
     'carry_cost_h50',
@@ -537,11 +539,19 @@ export function isRewrite(c: ApiCallRow): boolean {
   );
 }
 
-/** cost_norm of a span: the base context replaced by REF_CTX, the unit's own growth kept (findings §2). */
+/**
+ * cost_norm of a span: each agent's base context replaced by REF_CTX, the unit's own growth kept (findings
+ * §2). The base is per transcript file: the context of the file's first call in the span.
+ */
 export function costNorm(span: readonly ApiCallRow[]): number {
-  const c0 = span[0]?.context_tokens ?? 0;
+  const first = new Map<string, ApiCallRow>();
+  for (const c of span) {
+    const f = first.get(c.file);
+    if (!f || c.call_index < f.call_index) first.set(c.file, c);
+  }
   let s = 0;
   for (const c of span) {
+    const c0 = first.get(c.file)?.context_tokens ?? 0;
     const ctx = c.context_tokens || 1;
     const inputCost = c.cost_usd - c.cost_output_usd - c.cost_advisor_usd;
     s += c.cost_output_usd + c.cost_advisor_usd + (inputCost * Math.max(0, ctx - c0 + CONSTANTS.REF_CTX)) / ctx;

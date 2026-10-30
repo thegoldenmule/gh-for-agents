@@ -157,6 +157,18 @@ test('cost_norm replaces the base context with 50k and keeps the unit’s own gr
   close(costNorm([api({ context_tokens: 10_000, cost_usd: 1, cost_output_usd: 0 })]), 5, 'a small base scales up');
 });
 
+test('cost_norm takes the base context per transcript file, so a subagent under a big main thread pays input', () => {
+  const span = [
+    api({ file: 'main', context_tokens: 500_000, cost_usd: 1, cost_output_usd: 0 }),
+    api({ file: 'agent-a', call_index: 0, context_tokens: 40_000, cost_usd: 0.4, cost_output_usd: 0 }),
+    api({ file: 'agent-a', call_index: 1, context_tokens: 60_000, cost_usd: 0.6, cost_output_usd: 0 }),
+  ];
+  // main: 1 × 50k/500k; agent-a from its own 40k: 0.4 × 50k/40k, then 0.6 × (60k − 40k + 50k)/60k.
+  close(costNorm(span), 0.1 + 0.5 + 0.7);
+  // One base for the whole span (before 2.0.0) charged the subagent's calls nothing: max(0, 40k − 500k + 50k) = 0.
+  close(costNorm([span[1] as ApiCallRow, span[2] as ApiCallRow]), 0.5 + 0.7, 'the file order does not matter');
+});
+
 test('failures: mistakes + outcomes + denials = errors; a dry-run mistake is also a mistake', () => {
   const calls = [
     tool({ tool_use_id: 'a', error_kind: 'command', failure: 'mistake', dry_run: true }),
