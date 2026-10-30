@@ -68,10 +68,14 @@ function normalized(inv: Invocation): Invocation {
   return isGh(inv) ? { ...inv, argv: [inv.argv[0] as string, ...normalizeGhArgv(inv.argv.slice(1))] } : inv;
 }
 
+/** `ghx ci wait`, or `ghx pr land`, which waits the same way before it merges. */
+const isWait = (inv: Invocation): boolean =>
+  isCiWait(inv) || (isGhx(inv) && inv.argv[1] === 'pr' && inv.argv[2] === 'land');
+
 /** gh invocations that read CI state, i.e. what a polling loop polls. */
 function pollsCi(inv: Invocation): boolean {
   const [, group, verb] = inv.argv;
-  if (isGhx(inv)) return (group === 'ci' && verb === 'wait') || (group === 'pr' && verb === 'status');
+  if (isGhx(inv)) return isWait(inv) || (group === 'pr' && verb === 'status');
   if (!isGh(inv)) return false;
   if (group === 'pr') return verb === 'checks' || verb === 'view';
   if (group === 'run') return verb === 'watch' || verb === 'list' || verb === 'view' || verb === 'ls';
@@ -296,7 +300,7 @@ export function decideHookRule(event: unknown, mode: HookMode, enforce = true, o
   if (rewrite) return rewrite;
 
   const subagent = isSubagent(event);
-  const waits = invocations.filter(isCiWait);
+  const waits = invocations.filter(isWait);
   if (tool === 'Monitor' && waits.length > 0) {
     return {
       out: nudge(mode, `Don't run ghx ci wait under Monitor. ${runWaitAdvice(ciWaitCommand(waits), subagent)}`),

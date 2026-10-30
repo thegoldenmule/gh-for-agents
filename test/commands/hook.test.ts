@@ -144,6 +144,11 @@ test('ghx pr land: main thread to the background, a subagent foreground with --f
     decideHook(bash('ghx pr land 12 && gh pr merge 12'), 'deny')?.hookSpecificOutput.permissionDecision,
     'deny',
   );
+  assert.equal(decideHook(monitor('ghx pr land 12'), 'deny')?.hookSpecificOutput.permissionDecision, 'deny');
+  assert.equal(
+    decideHook(bash('until ghx pr land 12; do sleep 60; done'), 'deny')?.hookSpecificOutput.permissionDecision,
+    'deny',
+  );
 });
 
 test('ghx ci wait --help or --schema is not moved anywhere', () => {
