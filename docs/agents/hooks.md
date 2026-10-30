@@ -3,7 +3,7 @@
 The steering kit is opt-in. It has two parts that work separately or together:
 
 1. **`ghx hook claude-pretooluse`, a PreToolUse hook.** It does three things:
-   - It moves a foreground `ghx ci wait` to the background, in any repo.
+   - It places `ghx ci wait` and `ghx pr land`, in any repo. The main thread's go to the background; a subagent's run in the foreground with `--foreground`, which returns within 9 minutes.
    - In a repo that has `.github/ghx.json`, it denies a raw gh write that ghx wraps, in every mode, including forms with `-R`/`--repo` that deny rules can't match.
    - In such a repo, it suggests the ghx replacement when an agent reaches for a raw gh read or polls CI in a loop.
 
@@ -69,11 +69,11 @@ This is what `ghx install --scope project` merges in, for reference or to instal
 }
 ```
 
-- **The deny rules** are the gh writes that ghx wraps, so each one has a validated replacement: `ghx pr merge`, `ghx pr create`, `ghx pr edit` (which also covers `ready` for a PR with a ghx block; one without needs `"adopt": true` and the full object), `ghx pr review`, `ghx pr comment` (which also covers `close`, with `--close`) and `ghx ci rerun`. They are prefix rules, so they match the command as typed.
+- **The deny rules** are the gh writes that ghx wraps, so each one has a validated replacement: `ghx pr merge` (or `ghx pr land`, which waits until mergeable first), `ghx pr create`, `ghx pr edit`, `ghx pr ready <pr>` (`--undo` for draft; any PR, no ghx block needed), `ghx pr review`, `ghx pr comment` (which also covers `close`, with `--close`) and `ghx ci rerun`. They are prefix rules, so they match the command as typed.
   - `gh pr reopen` is also wrapped (by `ghx ci retrigger`), but it is left out because reopening a PR is sometimes legitimate. Add `"Bash(gh pr reopen:*)"` if you want ghx to own it too.
 - **Why a repo wants both.** `permissions.deny` rules match the command as typed, from the start. gh also takes `-R`/`--repo` before the command words, so `Bash(gh pr merge:*)` does not match `gh -R o/r pr merge 12` or `gh --repo=o/r pr create`. You also can't write a prefix rule for every repo. The hook parses the command, finds the gh command wherever the repo flag sits, and denies these writes. The deny rules still block the plain forms when the hook isn't running: when it isn't installed, when `ghx` isn't on the hook's `PATH`, or when it fails open on an internal error.
 - **Either part works alone**, but neither covers everything alone. Where both match, both deny.
-- **To ask about read suggestions instead of denying them**, set the mode in the same file: `"env": { "GHX_HOOK_MODE": "ask" }`. Use `"off"` to silence suggestions and the `run_in_background` rewrite. Wrapped writes are denied in every mode.
+- **To ask about read suggestions instead of denying them**, set the mode in the same file: `"env": { "GHX_HOOK_MODE": "ask" }`. Use `"off"` to silence suggestions and the wait placement rewrite. Wrapped writes are denied in every mode.
 - By hand, `ghx` has to be on the `PATH` that Claude Code runs hooks with. Otherwise use the absolute path to `bin/ghx.js`, as `ghx install` does.
 
 ## The hook
@@ -84,17 +84,20 @@ This is what `ghx install --scope project` merges in, for reference or to instal
 
 It registers with matcher `Bash|Monitor`.
 
-**It enforces only in configured repos.** It reads `cwd` from the event and walks up to the nearest directory with a `.git` entry (a directory, or the file a worktree or submodule has). If that checkout has `.github/ghx.json`, every row below applies. If not, only the `ghx ci wait` rewrite does, and gh reads and writes get no output. A missing `cwd`, or no checkout above it, counts as not configured. The walk is filesystem only (no gh, no git process) and takes well under a millisecond.
+**It enforces only in configured repos.** It reads `cwd` from the event and walks up to the nearest directory with a `.git` entry (a directory, or the file a worktree or submodule has). If that checkout has `.github/ghx.json`, every row below applies. If not, only the wait placement (`ghx ci wait`, `ghx pr land`) does, and gh reads and writes get no output. A missing `cwd`, or no checkout above it, counts as not configured. The walk is filesystem only (no gh, no git process) and takes well under a millisecond.
+
+**A gh call aimed at another repo is judged by that repo.** When it names a repo explicitly (`-R`/`--repo`, a github.com URL argument, or a literal `gh api repos/o/r/…` path) and that repo isn't one of the checkout's own remotes (read from its git config file), the call is out of scope: `gh pr view 1 -R nodejs/node` from inside a ghx repo goes ahead.
 
 In a configured repo it handles these cases:
 
 | Tool call | Reply |
 |---|---|
-| Bash or Monitor: a raw gh write that ghx wraps, with or without `-R`/`--repo` anywhere in it. These are `gh pr merge`, `gh pr create`, `gh pr edit`, `gh pr ready`, `gh pr review`, `gh pr comment`, `gh pr close` and `gh run rerun` (the deny list above), plus a `gh api` write to an endpoint a ghx command replaces, such as `gh api -X PUT repos/o/r/pulls/12/merge` | `deny` in **every** mode, including `off`, with a reason quoting the exact replacement, such as `ghx pr merge 12 -R o/r`. This check runs first, so chaining a write after `ghx ci wait` doesn't get it rewritten instead |
-| Bash: a command that starts with `ghx ci wait` (after optional whitespace or `VAR=value` prefixes), without `run_in_background: true` | `updatedInput`: the whole tool input with `run_in_background: true`. **No `permissionDecision`**, so your permission rules still apply to the rewritten call |
-| Bash or Monitor: gh polling CI in a loop. That means `gh pr checks`, `gh run watch`, `gh run list`, `gh run view`, a check-runs or statuses `gh api` GET, `ghx pr status` or `ghx ci wait`, inside `while`/`until`, `watch`, or next to a `sleep` (a `for` over a fixed list, such as one status per PR, is not polling on its own) | `deny`, with a reason naming `ghx ci wait <pr>` with `run_in_background: true`. The PR number, or `run:<id>` for a `gh run` command, is taken from the command when it is there |
-| Monitor running `ghx ci wait` | `deny`: run it with the Bash tool and `run_in_background: true` instead |
-| Bash or Monitor: a gh read that ghx wraps (`gh pr view`, `gh pr checks`, `gh run view --log`, `gh run watch`, …), or `gh pr reopen` | `deny`, with a reason quoting the exact replacement, such as `ghx pr status 3266` or `ghx ci why run:123` |
+| Bash or Monitor: a raw gh write that ghx wraps, with or without `-R`/`--repo` anywhere in it. These are `gh pr merge`, `gh pr create`, `gh pr edit`, `gh pr ready`, `gh pr review`, `gh pr comment`, `gh pr close` and `gh run rerun` (the deny list above), plus a `gh api` write to an endpoint a ghx command replaces, such as `gh api -X PUT repos/o/r/pulls/12/merge` | `deny` in **every** mode, including `off`, with a reason quoting the exact replacement, such as `ghx pr merge 12 -R o/r`; for `gh pr create` and `gh pr edit` it names `ghx pr create --example` (`ghx pr edit --example`), which prints a valid input for the repo. This check runs first, so chaining a write after `ghx ci wait` doesn't get it rewritten instead |
+| Bash, main thread: a command that starts with `ghx ci wait` or `ghx pr land` (after optional whitespace or `VAR=value` prefixes), without `run_in_background: true` | `updatedInput`: the whole tool input with `run_in_background: true`. **No `permissionDecision`**, so your permission rules still apply to the rewritten call |
+| Bash, subagent (the event carries `agent_id`), or an explicit `--foreground` anywhere: the same commands, without `run_in_background: true` | `updatedInput`: `--foreground` inserted after the verb (so a `Bash(ghx ci wait:*)` rule still matches) and `timeout` raised to the Bash tool's 10-minute cap. The wait returns within 9 minutes, exit 15 if CI hasn't settled, and the subagent re-runs the identical command. A subagent can't end its turn and be woken by a background task, so a background wait made it hand back mid-wait. No `permissionDecision`. An explicit `run_in_background: true`, `--help`, `-h` or `--schema` is left alone |
+| Bash or Monitor: gh polling CI in a loop. That means `gh pr checks`, `gh run watch`, `gh run list`, `gh run view`, a check-runs or statuses `gh api` GET, `ghx pr status`, `ghx ci wait` or `ghx pr land`, inside `while`/`until`, `watch`, or next to a `sleep` (a `for` over a fixed list, such as one status per PR, is not polling on its own) | `deny`, with a reason naming `ghx ci wait <pr>`: with `run_in_background: true` in the main thread, in the foreground with `--foreground` in a subagent. The PR number, or `run:<id>` for a `gh run` command, is taken from the command when it is there |
+| Monitor running `ghx ci wait` or `ghx pr land` | `deny`, with the same main-thread or subagent advice |
+| Bash or Monitor: a gh read that ghx wraps (`gh pr view`, `gh pr checks`, `gh run view --log`, `gh run watch`, …), or `gh pr reopen` | `deny`, with a reason quoting the exact replacement, such as `ghx pr status 3266` or `ghx ci why run:123`. (Typed as `ghx pr view 3266`, the same read runs `ghx pr status` with a `REDIRECTED` warning instead; the hook only sees raw gh) |
 | Anything else, including allowlisted gh reads such as `gh pr diff` or a single `gh run list` | No output: the call goes ahead as usual |
 
 The replacements come from two sources, so they stay in step with the commands:
@@ -108,9 +111,9 @@ The replacements come from two sources, so they stay in step with the commands:
 |---|---|
 | `deny` (default; also any unrecognised value) | `permissionDecision: "deny"`. The agent gets the reason and runs the ghx replacement, with no one in the loop |
 | `ask` | `permissionDecision: "ask"`. You get a permission dialog showing the reason; the agent waits on it and sees the reason only if you refuse. In auto mode and in background subagents, that stalls the run until someone answers |
-| `off` | No suggestions and no `run_in_background` rewrite. Wrapped writes are still denied |
+| `off` | No suggestions and no wait placement rewrite. Wrapped writes are still denied |
 
-The `run_in_background` rewrite never carries a decision in any mode.
+The wait placement rewrite never carries a decision in any mode.
 
 **It fails open.** Any internal error, unparseable stdin, an unknown tool, a missing `tool_input`, or a `cwd` it can't resolve to a configured repo exits 0 with no output (for gh calls), so a broken ghx never blocks the agent. It makes no gh or network calls, and loads only its own module, which keeps it well under the 100 ms budget.
 
