@@ -202,3 +202,20 @@ test('a redirected command that fails still names the redirect in error.details.
   assert.equal(r.json.error.details?.warnings?.[0]?.code, 'REDIRECTED');
   assert.equal(r.json.error.details.warnings[0].details.ran, 'ghx ci why job:abc -R o/r');
 });
+
+test('selector hints: a bare branch names branch:<name>, a malformed one shows an example, pr status names both', async () => {
+  const wait = await runInProcess(['ci', 'why', 'main']);
+  assert.match(wait.json.error.hint, /ghx ci why branch:main/);
+  const empty = await runInProcess(['ci', 'why', 'branch:']);
+  assert.equal(empty.json.error.code, 'USAGE_BAD_SELECTOR');
+  assert.equal(empty.json.error.hint, 'Use branch:<name> (branch:main) or branch:<name>@<sha> (branch:main@1a2b3c4).');
+  for (const sel of ['branch:feat/x', 'feat/x']) {
+    const r = await runInProcess(['pr', 'status', sel]);
+    assert.equal(r.json.error.code, 'USAGE_BAD_SELECTOR', r.stdout);
+    assert.match(
+      r.json.error.hint,
+      /For branch feat\/x: ghx pr list --head feat\/x names its PR; ghx ci why branch:feat\/x/,
+    );
+    assert.equal(r.calls.length, 0);
+  }
+});

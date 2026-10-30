@@ -96,8 +96,13 @@ export function tryParseTargetRef(s: string, defaultHost = DEFAULT_HOST): Target
 export function parseTargetRef(s: string, defaultHost = DEFAULT_HOST): TargetRef {
   const r = tryParseTargetRef(s, defaultHost);
   if (!r) {
+    // A branch (branch:main, or a bare feat/x) is not a PR: say where each lives.
+    const branch = /^branch:(.+)$/.exec(s)?.[1] ?? (/^[\w.-]+(?:\/[\w.-]+)*$/.test(s) ? s : undefined);
     throw new GhxError('USAGE_BAD_SELECTOR', `'${s}' is not a PR selector.`, {
-      hint: 'Use 3198, #3198, owner/repo#3198 or a PR URL.',
+      hint:
+        branch === undefined
+          ? 'Use 3198, #3198, owner/repo#3198 or a PR URL.'
+          : `Use 3198, #3198, owner/repo#3198 or a PR URL. For branch ${branch}: ghx pr list --head ${branch} names its PR; ghx ci why branch:${branch} reads its CI.`,
     });
   }
   return r;

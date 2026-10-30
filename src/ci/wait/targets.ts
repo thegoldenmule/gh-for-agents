@@ -59,7 +59,14 @@ export function parseCiTarget(
     const at = rest.lastIndexOf('@');
     const suffix = at > 0 ? rest.slice(at + 1) : '';
     const [branch, sha] = SHA_SUFFIX.test(suffix) ? [rest.slice(0, at), suffix] : [rest, null];
-    if (branch === '' || /\s|\.\.|^\/|\/$/.test(branch)) throw badTarget(raw, command, allow);
+    if (branch === '' || /\s|\.\.|^\/|\/$/.test(branch)) {
+      throw badTarget(
+        raw,
+        command,
+        allow,
+        'Use branch:<name> (branch:main) or branch:<name>@<sha> (branch:main@1a2b3c4).',
+      );
+    }
     if (!allow.includes('branch')) refuse('branch');
     return { kind: 'branch', raw: s, branch, sha };
   }
