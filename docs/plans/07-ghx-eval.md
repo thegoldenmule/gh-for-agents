@@ -1,6 +1,6 @@
 # 07: ghx-eval, a measure of ghx against raw gh in the sessions on disk
 
-ghx-eval is a dev-only tool that reads the Claude Code sessions on this computer and reports what ghx changed about agents' GitHub work: turns, round trips, tool calls, tokens, cost, errors and glue. It builds on [ghx-impact-findings.md](../research/ghx-impact-findings.md), which holds the evidence for the rules below.
+ghx-eval is a dev-only tool that reads the Claude Code sessions on this computer and reports what ghx changed about agents' GitHub work: first-try hit rate, agent mistakes, turns, round trips, tool calls, tokens, cost and glue. It builds on [ghx-impact-findings.md](../research/ghx-impact-findings.md), which holds the evidence for the rules below.
 
 An earlier version also had a fake-gh replay oracle and a snapshot store with manifests. Both were removed on 2026-10-29 at the user's direction: the tool analyses the sessions that exist, and nothing else.
 
@@ -12,7 +12,11 @@ One command:
 pnpm eval [--summary] [--projects DIR] [--out DIR] [--json] [--era FILE]
 ```
 
-- Start with `pnpm eval --summary`: one screen, in plain words, on whether ghx helps or hurts and where (median cost per task before and after ghx, the biggest problems, the caveats), rendered from the same report.json as the full report. `--summary --json` prints its data.
+- Start with `pnpm eval --summary`: one screen, in plain words, on whether ghx helps or hurts and where, rendered from the same report.json as the full report. `--summary --json` prints its data. It shows:
+  - one block per context (main thread, subagents), each task with its first-try hit rate and then its median cost, before and after ghx;
+  - for whole PRs led from the main thread, how much of their work ran in subagents;
+  - failed GitHub commands by class, with the agent-mistake rate per command first;
+  - the biggest problems, and the caveats.
 
 - It walks the projects directory (default `$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects`) in UTF-8 path order and reads every `*.jsonl` transcript, `*.meta.json` subagent meta and `*.forked-skill*.json` marker in place. Nothing is copied or cached.
 - It prints report.md to stdout. `--json` prints report.json instead; `--out DIR` writes both files there.
@@ -80,6 +84,12 @@ Each has a unit test with a fixture built from a real record shape.
 8. For ghx, exits 10, 11 and 15 are outcomes, not errors. An error is a JSON `{"error":{"code"}}` body, even when a pipe turned the exit into 0.
 9. `cost-state` is per process and resets on resume. Use it only as a cross-check on unresumed sessions.
 10. Stop reading a live file at its last newline.
+11. A failed call is a mistake, an outcome or a denial (METRIC_VERSION 2.0.0, `classify/errors.ts`):
+    - **Mistake** (the agent's): a usage error, an unknown command, flag or JSON field, input that fails validation (on a real call or a `--dry-run`), a not-found selector, or glue that breaks on the output (a Python traceback, a jq error, an unquoted zsh glob).
+    - **Outcome** (the world's): `ci wait` exits 12–14, ghx state, GitHub, config, environment and timeout errors, `gh pr checks` exits 1 and 8, kills, and non-zero exits that no error message explains (most often a trailing `grep` in a compound command).
+    - **Denial**: a hook, the permission system, the harness or ghx policy refused the call.
+
+    ghx error codes take the class of their exit code in `src/core/errors.ts` (usage and not-found are mistakes, policy is a denial, the rest are outcomes; MERGE_BLOCKED is an outcome). Raw gh is classed by its own messages, anchored to their shapes, because a result also holds whatever the command printed and CI logs say "not found" all the time.
 
 ## What "turns" means
 
@@ -94,6 +104,11 @@ Wakeups (notifications that start a turn) sit beside round trips for wait units.
 1. **Intent episode with continuations.** The atomic unit (findings §3). Background-wait episodes, notification-triggered calls and output-file reads attach to the episode that started them.
 2. **PR cycle.** The waits and status reads on one PR between two head SHAs. Head SHAs come from `headRefOid` in gh output and `headSha` in ghx output; fall back to `git push` boundaries only when neither appears, and flag it.
 3. **PR lifecycle.** One session and its subagents, one PR, create to merge. A lifecycle takes every unit on the PR.
+
+**PR attribution (METRIC_VERSION 2.0.0).** A call names a PR through its arguments, or a create through the URL it printed.
+- A create that names none (a failed or dry-run attempt) belongs to the PR the next create in the same file produced, unless their `--head` flags differ (flag `create-forward`). A create whose PR never shows up belongs to none.
+- Any other call that names no PR takes its own unit's PR. A unit that names none is charged to the PR its file named last (`charged-to-last-pr`).
+- Waits on the main branch's CI after a merge (`ghx ci wait branch:main@sha`) belong to no PR. Their units get their own intent, `main_ci`.
 4. **Session.** GitHub's share of a session's calls and cost.
 
 **The post-wake rule (METRIC_VERSION 1.1.0).** After a background wait's notification wakes the agent, the wait keeps its glue (output-file reads, TaskOutput, TaskStop) and status reads or foreground waits on its own target. Any other GitHub call opens a new episode flagged `after-wake`, linked to the wait through `parent_unit_id`.
@@ -102,10 +117,24 @@ Wakeups (notifications that start a turn) sit beside round trips for wait units.
 
 `metrics/catalog.ts` holds the 32 metrics of the prototype catalog plus the three turns numbers, each with an id, a unit, a formula and a robustness flag.
 
-- **Robust:** round trips, tool calls, GitHub invocations, glue calls, distinct commands, repeats, result tokens (`chars / 2.2 + 70`), cache rewrites, cost, `cost_norm`, errors, refusals, pipes, jq, sleep loops, `--watch`, background waits, Monitor scripts, notifications, human turns.
+- **Robust:** round trips, tool calls, GitHub invocations, glue calls, distinct commands, repeats, result tokens (`chars / 2.2 + 70`), cache rewrites, cost, `cost_norm`, errors, mistakes, dry-run mistakes, outcomes, denials, first try, subagent share, refusals, pipes, jq, sleep loops, `--watch`, background waits, Monitor scripts, notifications, human turns.
 - **Proxy:** write tokens (allocated across parallel tool calls), recovered subagent output tokens, carry-forward cost (capped at 50 calls), retries, intent, wall-clock (it includes CI's own duration; report it, never optimise it).
 
-`cost_norm` is the headline dollar figure (findings §2).
+`cost_norm` is the headline dollar figure (findings §2). It replaces each agent's base context with 50k: since METRIC_VERSION 2.0.0 the base C0 is the context of the first span call in the same transcript file. Before that, one C0 per unit came from the unit's first call. A lifecycle led from a 200–800k main thread then charged its subagents' calls zero input: #3313 cost $14.16 and showed $0.47.
+
+The failure metrics (METRIC_VERSION 2.0.0):
+
+| metric | what it counts |
+|---|---|
+| `mistakes` | GitHub calls that failed by the agent's mistake (rule 11). The headline failure count. |
+| `dry_run_mistakes` | Mistakes on a `--dry-run`: validation working as designed, but still a first-try miss. Included in `mistakes`. |
+| `outcomes` | GitHub calls that failed on CI, PR or GitHub state. |
+| `denials` | GitHub calls a hook, the permission system, the harness or ghx policy refused. |
+| `errors` | Every failed GitHub call: `mistakes + outcomes + denials`. |
+| `first_try` | The hit rate: 1 when the task went right the first time, else 0. A cell's mean is the share. |
+| `subagent_share` | For lifecycles and sessions: the share of the unit's round trips made in subagents. |
+
+`first_try` for an episode or wait: every non-meta GitHub call up to and including the first call of the unit's intent ran without a mistake or a denial. For a create or edit, that first call can be a dry run or a real one. An unknown command tried first (`ghx pr view` before `ghx pr status`) counts as a miss. For a PR cycle, lifecycle or session, no GitHub call in it made a mistake or was denied. Outcomes are never misses.
 
 ## Comparison rules
 
