@@ -2,7 +2,7 @@
 //   1. the cwd toplevel resolves to the target → read the local working copy (uncommitted edits count);
 //   2. otherwise → GET repos/{o}/{r}/contents/.github/ghx.json on the default branch (a read call).
 // Local wins whenever it applies; the two are never merged. Invalid is always an error, whatever the need.
-import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { ConfigNeed } from '../core/command.ts';
@@ -93,10 +93,12 @@ export function parseConfigText(text: string, source: ConfigSource): GhxConfig {
   return r.data;
 }
 
-async function readLocal(toplevel: string): Promise<{ text: string; path: string } | undefined> {
+// Synchronous, like the wait state and cache reads: an async read is a threadpool hop that tests driving a
+// fake clock cannot wait for, so fake time could pass before the command's first call.
+function readLocal(toplevel: string): { text: string; path: string } | undefined {
   const path = join(toplevel, CONFIG_PATH);
   try {
-    return { text: await readFile(path, 'utf8'), path };
+    return { text: readFileSync(path, 'utf8'), path };
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw new GhxError('CONFIG_INVALID', `Cannot read ${path}: ${(e as Error).message}`, {
@@ -130,7 +132,7 @@ export function localApplies(target: ResolvedRepo | undefined, toplevel: string 
 export async function loadConfig(o: LoadConfigOptions): Promise<LoadedConfig> {
   const toplevel = await o.git.toplevel();
   if (localApplies(o.target, toplevel)) {
-    const local = await readLocal(toplevel as string);
+    const local = readLocal(toplevel as string);
     if (local)
       return {
         config: parseConfigText(local.text, { kind: 'local', path: local.path }),
