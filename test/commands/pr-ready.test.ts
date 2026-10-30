@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { EXIT } from '../contract/exit-table.ts';
-import type { FakeGh } from '../helpers/fake-gh.ts';
+import { FakeGh } from '../helpers/fake-gh.ts';
 import { runInProcess } from '../helpers/harness.ts';
 import { editScene, editSequence } from './pr-edit-scene.ts';
 
@@ -52,4 +52,12 @@ test('a read-back that disagrees is READBACK_MISMATCH', async () => {
   const s = editScene({ pr: { isDraft: true }, reread: { isDraft: true } });
   const r = await run(s.gh);
   assert.equal(r.json.error.code, 'READBACK_MISMATCH', r.stdout);
+});
+
+test('the smoke/pr-ready scenario replays the example to the mutation halt under --dry-run', async () => {
+  const gh = FakeGh.fromScenario('smoke/pr-ready');
+  const r = await runInProcess(['pr', 'ready', 'octo/demo#12', '--dry-run'], { gh });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.dryRun, true);
+  gh.expectNoMutations();
 });

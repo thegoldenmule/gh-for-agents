@@ -121,17 +121,15 @@ export async function checkCreate(
     ...(plan !== null ? { components: plan.input.components } : {}),
     ...(plan?.input.refs !== undefined ? { refs: plan.input.refs } : {}),
   };
-  if (
-    (merged.components === undefined || merged.components.length === 0) &&
-    !('components' in value && s.issues.some((i) => i.path.startsWith('components')))
-  ) {
-    const why = plan === null ? 'ghx could not read the diff to derive it' : 'the diff touches no component with paths';
+  // Only once the diff was read: without it (a state failure, no base or head yet) the next run derives it.
+  const componentsIssue = s.issues.some((i) => i.path.startsWith('components'));
+  if (plan !== null && !componentsIssue && (merged.components === undefined || merged.components.length === 0)) {
     issues.push({
       path: 'components',
       code: 'invalid_type',
       expected: 'array',
       received: 'undefined',
-      message: `missing required field 'components': component names from .github/ghx.json (${why}); e.g. ["${Object.keys(config.components)[0] ?? 'app'}"]`,
+      message: `missing required field 'components': component names from .github/ghx.json (the diff touches no component with paths); e.g. ["${Object.keys(config.components)[0] ?? 'app'}"]`,
     });
   }
   issues.push(...partialRules(merged, { config }, s.testingAt));
