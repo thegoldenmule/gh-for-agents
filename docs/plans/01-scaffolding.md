@@ -513,6 +513,7 @@ export const ConfigSchema = z.strictObject({
   components: z.record(ComponentName, z.strictObject({
     description: z.string().max(200).optional(),
     paths: z.array(Glob).min(1).optional(),            // maps changed files → components
+    aliases: z.array(ComponentName).max(20).optional(), // old names / log scopes; unique, never a component name
   })).refine((r) => Object.keys(r).length > 0, 'declare at least one component'),
   checks: z.strictObject({
     ignore: z.array(z.union([
