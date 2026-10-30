@@ -136,6 +136,16 @@ test('bash-ci-wait-subagent.json: a subagent waits in the foreground with --fore
   assert.equal((await hook(fixture('bash-ci-wait-subagent.json'), { GHX_HOOK_MODE: 'off' })).stdout, '');
 });
 
+test('ghx pr land: main thread to the background, a subagent foreground with --foreground; gh pr merge still denied', () => {
+  assert.equal(decideHook(bash('ghx pr land 12'), 'deny')?.hookSpecificOutput.updatedInput?.run_in_background, true);
+  const sub = decideHook({ ...bash('ghx pr land 12'), agent_id: 'a1' }, 'deny')?.hookSpecificOutput.updatedInput;
+  assert.deepEqual(sub, { command: 'ghx pr land --foreground 12', timeout: 600_000 });
+  assert.equal(
+    decideHook(bash('ghx pr land 12 && gh pr merge 12'), 'deny')?.hookSpecificOutput.permissionDecision,
+    'deny',
+  );
+});
+
 test('ghx ci wait --help or --schema is not moved anywhere', () => {
   for (const c of ['ghx ci wait --help', 'ghx ci wait -h', 'ghx ci wait --schema']) {
     assert.equal(decideHook(bash(c), 'deny'), null, c);
@@ -264,7 +274,7 @@ test('wrapped gh commands, including piped and chained ones, name their replacem
     ['gh run view --log 123', /ghx ci why run:123/],
     ['cd repo && gh pr merge 12 --merge', /ghx pr merge 12/],
     ['gh pr create --title x --body y', /ghx pr create --input pr\.json/],
-    ['gh pr ready 12', /ghx pr edit 12 --input ready\.json/],
+    ['gh pr ready 12', /ghx pr ready 12 \(toggles draft/],
     ['gh run rerun 99 --failed', /ghx ci rerun/],
     ['X=$(gh pr view 12 --json headRefOid --jq .headRefOid)', /ghx pr status 12/],
     ['gh api repos/o/r/actions/jobs/123/logs', /ghx ci why/],

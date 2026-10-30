@@ -80,3 +80,18 @@ test('runWaitAdvice: background for main, foreground with --foreground and the e
   assert.match(sub, /exit 15 re-run the identical command/);
   assert.doesNotMatch(sub, /run_in_background: true/);
 });
+
+test('ghx pr land is placed exactly like ghx ci wait', () => {
+  assert.equal(startsWithWait('ghx pr land 12'), true);
+  assert.equal(startsWithWait('ghx pr landing 12'), false);
+  assert.deepEqual(waitRewrite(MAIN, { command: 'ghx pr land 12' }), {
+    kind: 'background',
+    input: { command: 'ghx pr land 12', run_in_background: true },
+  });
+  assert.deepEqual(waitRewrite(SUB, { command: 'ghx pr land 12 -R o/r' }), {
+    kind: 'foreground',
+    input: { command: 'ghx pr land --foreground 12 -R o/r', timeout: BASH_TIMEOUT_CAP_MS },
+  });
+  assert.equal(waitRewrite(SUB, { command: 'ghx pr land --help' }), null);
+  assert.equal(waitRewrite(MAIN, { command: 'ghx pr land 12', run_in_background: true }), null);
+});

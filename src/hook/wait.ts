@@ -1,4 +1,4 @@
-// Where a `ghx ci wait` runs (02 §11.0; research: subagent lifecycles). The main thread can end its turn
+// Where a `ghx ci wait` (or `ghx pr land`, which waits the same way) runs (02 §11.0; research: subagent lifecycles). The main thread can end its turn
 // and be re-invoked when a background task exits, so its waits go to the background. A subagent cannot:
 // ending its turn hands back to its parent with the wait still running, which is where the relaunched
 // waits, Monitor/pgrep polling and orphaned waits came from. So a subagent's wait runs in the foreground
@@ -10,8 +10,11 @@ import { scanShell } from './shell.ts';
 /** Claude Code's Bash tool timeout cap (ms); the foreground rewrite sets the call's timeout to it. */
 export const BASH_TIMEOUT_CAP_MS = 600_000;
 
-/** The ghx commands that wait on CI and follow these rules. */
-export const WAIT_COMMANDS: readonly (readonly [string, string])[] = [['ci', 'wait']];
+/** The ghx commands that wait on CI and follow these rules (pr land waits until mergeable, then merges). */
+export const WAIT_COMMANDS: readonly (readonly [string, string])[] = [
+  ['ci', 'wait'],
+  ['pr', 'land'],
+];
 
 const ENV_PREFIX = String.raw`(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|[^\s'"]*)\s+)*`;
 
