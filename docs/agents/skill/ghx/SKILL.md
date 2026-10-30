@@ -7,7 +7,7 @@ description: Use for any GitHub PR or CI task (status, why CI failed, waiting fo
 
 ## GitHub: use `ghx` in repos that have `.github/ghx.json`
 
-- In a repo with `.github/ghx.json`, use `ghx` for PRs and CI, not raw `gh`. Elsewhere `ghx` reads still work but aren't required. Discover with `ghx --help`, `ghx pr --help`, `ghx <cmd> --help`; check setup with `ghx doctor`.
+- In a repo with `.github/ghx.json`, use `ghx` for PRs and CI, not raw `gh`. Elsewhere `ghx` reads still work but aren't required. Discover with `ghx --help`, `ghx pr --help`, `ghx <cmd> --help` or `--schema`; check setup with `ghx doctor`.
 - Run `ghx` as one plain command: no pipes, `--jq`, `head`, `sleep` or `timeout`. It bounds its own output and time. To keep only some fields, use `--brief` or `--fields a.b,c.d` (a path through an array maps over it), not jq.
 - One call per question:
   - PR state, mergeability, CI for the head SHA and feedback: `ghx pr status <pr>` (several: `ghx pr status 12 13 14`).
