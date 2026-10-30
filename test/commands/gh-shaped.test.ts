@@ -219,3 +219,21 @@ test('selector hints: a bare branch names branch:<name>, a malformed one shows a
     assert.equal(r.calls.length, 0);
   }
 });
+
+test('--fields passthrough.json.<key> without gh --json adds --json <keys>, with a JSON_ADDED warning', async () => {
+  const fake = new FakeGh();
+  fake.on((a) => a[0] === 'pr' && a[1] === 'list' && a.includes('--json') && a.includes('number,title'), {
+    exitCode: 0,
+    stdout: JSON.stringify([{ number: 3, title: 'x' }]),
+    stderr: '',
+  });
+  const r = await runInProcess(
+    ['pr', 'list', '--author', '@me', '-R', 'o/r', '--fields', 'passthrough.json.number,passthrough.json[].title'],
+    { gh: fake, env: { GHX_ARTIFACT_DIR: mkdtempSync(join(scratchDir(), 'json-added-')) } },
+  );
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(r.json.passthrough.json, [{ number: 3, title: 'x' }]);
+  assert.equal(r.json.warnings[0].code, 'JSON_ADDED');
+  assert.match(r.json.warnings[0].message, /added --json number,title/);
+  fake.expectNoMutations();
+});

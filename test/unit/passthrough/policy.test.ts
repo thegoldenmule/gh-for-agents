@@ -277,7 +277,7 @@ const WRAPPED: WrapRow[] = [
   ],
   [
     ['pr', 'ready', '12'],
-    ['ghx', 'pr', 'edit', '12', '--input', 'ready.json'],
+    ['ghx', 'pr', 'ready', '12'],
   ],
   [
     ['pr', 'close', '12', '--comment', 'dup'],
@@ -306,11 +306,15 @@ describe('wrapped commands are refused with the replacement argv', () => {
     assert.deepEqual(e.details?.alternatives, [['ghx', 'pr', 'status', '12']]);
   });
 
-  test('pr ready names the patch; --undo flips it; a PR without a block needs adopt', () => {
-    const hint = refused(decide(['pr', 'ready', '1'])).hint ?? '';
-    assert.match(hint, /\{"draft": false\}/);
-    assert.match(hint, /"adopt": true/);
-    assert.match(refused(decide(['pr', 'ready', '1', '--undo'])).hint ?? '', /\{"draft": true\}/);
+  test('gh pr ready is ghx pr ready; --undo is carried over', () => {
+    assert.match(refused(decide(['pr', 'ready', '1'])).hint ?? '', /^Use: ghx pr ready 1 \(toggles draft on any PR/);
+    assert.deepEqual(refused(decide(['pr', 'ready', '1', '--undo'])).details?.suggestion, [
+      'ghx',
+      'pr',
+      'ready',
+      '1',
+      '--undo',
+    ]);
   });
 
   test('a wrapped refusal also lists the ghx command in details.suggestions', () => {

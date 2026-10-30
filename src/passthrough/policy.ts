@@ -220,6 +220,8 @@ export interface PassthroughPlan {
   maxBytes?: number;
   /** --fields was given: parsed JSON stays inline at any size, since the projection runs before the bound. */
   projected?: boolean;
+  /** --json keys ghx added because --fields named passthrough.json keys and gh would print text. */
+  jsonAdded?: string;
 }
 
 export type Decision =
@@ -238,7 +240,7 @@ interface Globals {
 /**
  * Take ghx's own output flags (--pretty, --max-bytes N, --timeout D, --fields P, --brief) out of the gh
  * argv, up to a bare `--` (after it every token is gh's). gh has no --fields or --brief flag (2.x), so
- * neither is ever forwarded: the runner projects the envelope (--fields passthrough.json[].headSha) or
+ * neither is ever forwarded: the runner projects the envelope (--fields passthrough.json.headSha) or
  * refuses --brief, before gh runs.
  */
 function takeGhxGlobals(tokens: readonly string[]): Globals {
@@ -476,8 +478,8 @@ function wrapped(top: string, sub: string, args: readonly string[], repo: string
       };
     case 'pr ready':
       return {
-        suggestion: prCmd('pr', 'edit', '--input', 'ready.json'),
-        hint: `ready.json is {"draft": ${has(args, '--undo') ? 'true' : 'false'}}; a PR without a ghx block also needs "adopt": true and the full object`,
+        suggestion: [...prCmd('pr', 'ready'), ...(has(args, '--undo') ? ['--undo'] : [])],
+        hint: 'toggles draft on any PR, ghx block or not, and reads it back',
       };
     case 'pr merge':
       return { suggestion: prCmd('pr', 'merge'), hint: 'policy-checked, pinned to the head SHA' };
@@ -690,6 +692,52 @@ export function ghCall(tokens: readonly string[]): GhCall | undefined {
   return { top, sub, args, ...(taken.repo !== undefined ? { repo: taken.repo } : {}), globals: g.globals };
 }
 
+/** Allowlisted reads that print text unless gh's --json names the keys. */
+const JSON_READS = new Set([
+  'pr list',
+  'issue view',
+  'issue list',
+  'search issues',
+  'search prs',
+  'search repos',
+  'search commits',
+  'search code',
+  'release list',
+  'release view',
+  'repo view',
+  'workflow list',
+  'workflow view',
+  'run list',
+  'run view',
+  'label list',
+]);
+
+/**
+ * --fields passthrough.json.<key> on a read run without gh's --json would project text to nothing
+ * ({"passthrough":{}}): the keys the paths name, to pass as --json, or undefined when there is nothing to add.
+ */
+function jsonFromFields(
+  name: string,
+  args: readonly string[],
+  fields: readonly string[] | undefined,
+): string | undefined {
+  if (!JSON_READS.has(name) || fields === undefined || flagNames(args).includes('--json')) return undefined;
+  const keys: string[] = [];
+  for (const raw of fields.flatMap((v) => v.split(',')).map((x) => x.trim())) {
+    const key = /^passthrough\.json(?:\[\])?\.([A-Za-z_]\w*)/.exec(raw)?.[1];
+    if (key !== undefined && !keys.includes(key)) keys.push(key);
+  }
+  return keys.length > 0 ? keys.join(',') : undefined;
+}
+
+/** args with --json <keys>, before any `--`. */
+function withJson(args: readonly string[], keys: string): string[] {
+  const at = args.indexOf('--');
+  const out = [...args];
+  out.splice(at === -1 ? out.length : at, 0, '--json', keys);
+  return out;
+}
+
 /** Decide what to do with an argv that names no ghx command. */
 export function decide(tokens: readonly string[]): Decision {
   const g = takeGhxGlobals(tokens);
@@ -743,7 +791,12 @@ export function decide(tokens: readonly string[]): Decision {
             ? 'positional'
             : 'none'
           : 'flag';
-    return guarded({ name: [top, sub], args: [top, sub, ...args], inject }, gg);
+    const added = jsonFromFields(`${top} ${sub}`, args, g.globals.fields);
+    const full = added === undefined ? args : withJson(args, added);
+    return guarded(
+      { name: [top, sub], args: [top, sub, ...full], inject, ...(added !== undefined ? { jsonAdded: added } : {}) },
+      gg,
+    );
   }
 
   const third = args[0];

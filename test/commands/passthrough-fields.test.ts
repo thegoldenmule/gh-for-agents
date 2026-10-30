@@ -58,7 +58,7 @@ test('a path outside the envelope is VALIDATION before gh runs, and the hint exp
   assert.equal(r.exitCode, EXIT.USAGE, r.stdout);
   assert.equal(r.json.error.code, 'VALIDATION');
   assert.match(r.json.error.hint, /Top-level fields: passthrough, warnings\. Passthrough has no --schema/);
-  assert.match(r.json.error.hint, /--fields passthrough\.json\[\]\.headSha.*--json <fields> and --jq/);
+  assert.match(r.json.error.hint, /--fields passthrough\.json\.headSha.*--json <fields> and --jq/);
   assert.deepEqual(gh.calls, []);
 });
 

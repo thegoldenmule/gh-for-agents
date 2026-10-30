@@ -20,7 +20,7 @@ function flagLine(g: (typeof GLOBAL_FLAGS)[number]): string {
 export function globalHelp(specs: readonly AnyCommandSpec[], version: string): Record<string, unknown> {
   // A `timeout: null` command has no deadline and rejects --timeout; say so where the flag is listed.
   const noDeadline = specs.filter((s) => s.timeout === null).map(commandName);
-  // Likewise --brief: only commands with a preset take it.
+  // --brief: every command takes it; these have a preset, the rest print in full (BRIEF_NO_PRESET).
   const withBrief = specs.filter((s) => s.brief !== undefined).map(commandName);
   const line = (g: (typeof GLOBAL_FLAGS)[number]): string =>
     g.flag === '--timeout' && noDeadline.length > 0
@@ -95,7 +95,7 @@ export function commandHelp(spec: AnyCommandSpec): Record<string, unknown> {
     examples: spec.examples ?? [],
     replaces: spec.replaces ?? [],
     timeout,
-    // --fields works on every command; --brief is this list (null: refused).
+    // --fields works on every command; --brief is this list (null: no preset, so the full output).
     brief: spec.brief ?? null,
     ...(spec.kind === 'write' ? { dryRun: `ghx ${name} … --dry-run shows exactly what would be sent` } : {}),
   };

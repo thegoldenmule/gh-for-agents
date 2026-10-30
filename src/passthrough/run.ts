@@ -37,6 +37,7 @@ const Input = z.object({
   inject: z.enum(['flag', 'positional', 'placeholders', 'none']),
   maxBytes: z.number().int().optional(),
   projected: z.boolean().optional(),
+  jsonAdded: z.string().optional(),
 });
 
 /** The inline cap for json/text: the bound minus the envelope's reserve. */
@@ -127,13 +128,19 @@ export function passthroughSpec(name: readonly string[]): AnyCommandSpec {
     timeout: { defaultMs: 120_000, maxMs: 600_000 },
     output: passthroughOutput,
     fieldsHint:
-      "Passthrough has no --schema: its fields are passthrough.{argv, exitCode, json, text, stdoutPath, stdoutBytes, stderr}, and paths under passthrough.json (gh's parsed output) are not checked, e.g. --fields passthrough.json[].headSha. gh's own --json <fields> and --jq select inside gh's output.",
+      "Passthrough has no --schema: its fields are passthrough.{argv, exitCode, json, text, stdoutPath, stdoutBytes, stderr}, and paths under passthrough.json (gh's parsed output) are not checked, e.g. --fields passthrough.json.headSha. gh's own --json <fields> and --jq select inside gh's output.",
     async run(input, ctx) {
       const needsRepo =
         input.inject === 'flag' ||
         input.inject === 'positional' ||
         (input.inject === 'placeholders' && /\{(owner|repo)\}/.test(apiShape(input.args).endpoint ?? ''));
       const resolved = needsRepo ? await ctx.tryRepo() : undefined;
+      if (input.jsonAdded !== undefined) {
+        ctx.warn({
+          code: 'JSON_ADDED',
+          message: `gh ${input.name.join(' ')} prints text without --json, so ghx added --json ${input.jsonAdded} (the keys --fields names under passthrough.json).`,
+        });
+      }
       const planArgs = input.name.join(' ') === 'run list' ? await expandCommit(input.args, ctx, resolved) : input.args;
       const args = finalArgs({ ...input, args: planArgs }, resolved?.repo);
       const envMax = ctx.env.GHX_MAX_BYTES;
