@@ -286,3 +286,29 @@ test('a PR with no runs at all stays no-checks', async () => {
   assert.equal(r.json.ci.state, 'no-checks');
   assert.equal(r.json.warnings, undefined);
 });
+
+test('job:<id> diagnoses that one job of its run; a green job points at its raw log', async () => {
+  const two: WJob[] = [
+    { id: 1, runId: RUN, name: 'test', conclusion: 'failure', log: { text: vitestLog(['src/a.test.ts > a']) } },
+    { id: 4, runId: RUN, name: 'build', conclusion: 'failure', log: { text: vitestLog(['src/b.test.ts > b']) } },
+    { id: 2, runId: RUN, name: 'lint', conclusion: 'success' },
+  ];
+  const r = await why(world(two), ['job:4', '-R', 'o/run'], noPr);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.target, 'job:4');
+  assert.deepEqual(
+    r.json.failing.map((f: { jobId: number }) => f.jobId),
+    [4],
+  );
+  assert.deepEqual(r.json.failing[0].tests, ['src/b.test.ts > b']);
+  r.fake.expectNoMutations();
+
+  const green = await why(world(two), ['job:2', '-R', 'o/run'], noPr);
+  assert.equal(green.exitCode, EXIT.OK, green.stdout);
+  assert.deepEqual(green.json.failing, []);
+  assert.ok(green.json.next.includes('ghx api repos/o/run/actions/jobs/2/logs'), green.stdout);
+
+  const bad = await why(world(two), ['job:abc', '-R', 'o/run'], noPr);
+  assert.equal(bad.exitCode, EXIT.USAGE, bad.stdout);
+  assert.match(bad.json.error.hint, /job:<id> with the numeric job id/);
+});

@@ -14,6 +14,7 @@ import {
   isDiagnosable,
 } from '../../ci/diagnose.ts';
 import { wildcard } from '../../ci/flake.ts';
+import { fetchJob } from '../../ci/github.ts';
 import { invalidRunNext, isInvalidRunCheck } from '../../ci/invalid-runs.ts';
 import { findSuspicious, Suspicious } from '../../ci/key-steps.ts';
 import { readSubject } from '../../ci/subject.ts';
@@ -34,7 +35,7 @@ const WhyJob = FailingJob.extend({ firstError: FailingJob.shape.exitLine });
 const Output = z.object({
   /** owner/repo#N for a PR; null for a run or branch target. */
   ref: PrRef.nullable(),
-  /** What was diagnosed: owner/repo#N, run:<id> or branch:<name>@<sha7>. */
+  /** What was diagnosed: owner/repo#N, run:<id>, job:<id> or branch:<name>@<sha7>. */
   target: z.string(),
   headSha: Sha,
   ci: CiSummary,
@@ -50,7 +51,9 @@ const Input = z.strictObject({
     .string()
     .min(1)
     .optional()
-    .describe('A PR (3198, owner/repo#3198, a PR URL), run:<id> (or a run URL), branch:<name> or branch:<name>@<sha>'),
+    .describe(
+      'A PR (3198, owner/repo#3198, a PR URL), run:<id> (or a run URL), job:<id> (one job), branch:<name> or branch:<name>@<sha>',
+    ),
   run: z.string().min(1).optional().describe('A workflow run id or URL (the same as run:<id>)'),
   job: z.array(z.string().min(1)).optional().describe('Only failing jobs whose name matches (repeatable; * and ?)'),
   compareMain: z
@@ -73,7 +76,22 @@ const Input = z.strictObject({
     .describe('Log excerpt lines per job'),
 });
 
-const USAGE_HINT = 'ghx ci why <pr|run:<id>|branch:<name>>, or ghx ci why --run <run-id|run-url> -R owner/repo.';
+const USAGE_HINT =
+  'ghx ci why <pr|run:<id>|job:<id>|branch:<name>>, or ghx ci why --run <run-id|run-url> -R owner/repo.';
+const JOB_PREFIX = 'job:';
+
+/** `job:<id>`: one Actions job, diagnosed within its run. parseCiTarget has no job kind, so it is read here. */
+function jobIdOf(target: string | undefined): number | undefined {
+  if (target === undefined || !target.startsWith(JOB_PREFIX)) return undefined;
+  const raw = target.slice(JOB_PREFIX.length);
+  const id = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new GhxError('USAGE_BAD_SELECTOR', `'${target}' is not a ci why target.`, {
+      hint: 'Use job:<id> with the numeric job id (job:51234567890); ghx run view <run-id> --json jobs lists them.',
+    });
+  }
+  return id;
+}
 const TARGETS: readonly CiTargetKind[] = ['pr', 'run', 'branch'];
 
 /** The target, from the positional or --run (an alias of run:<id>). */
@@ -113,10 +131,10 @@ export default defineCommand({
   name: ['ci', 'why'],
   summary: 'Why CI is red: failing jobs, step, tests, errors, log path, shared-with-main and flake',
   description:
-    'Diagnoses the failing checks on a PR head, one workflow run (run:<id>; --run is the same), or a branch head ' +
-    "(branch:<name>: every workflow's newest run on the branch's head commit) in one call. Logs come from the jobs " +
-    'API, so a finished job is diagnosed while the rest of its run is still going. Full logs are written to files ' +
-    '(logPath). Green jobs whose ci.keySteps step was skipped are listed in suspicious.',
+    'Diagnoses the failing checks on a PR head, one workflow run (run:<id>; --run is the same), one job ' +
+    "(job:<id>), or a branch head (branch:<name>: every workflow's newest run on the branch's head commit) in one " +
+    'call. Logs come from the jobs API, so a finished job is diagnosed while the rest of its run is still going. ' +
+    'Full logs are written to files (logPath). Green jobs whose ci.keySteps step was skipped are listed in suspicious.',
   kind: 'read',
   input: Input,
   positionals: ['target'],
@@ -147,12 +165,19 @@ export default defineCommand({
     { argv: 'ghx ci why 3301 -R powerhouse-inc/powerhouse', note: 'Diagnose the failing checks on PR #3301' },
     { argv: "ghx ci why owner/repo#12 --job 'Test*'", note: 'Only jobs whose name starts with Test' },
     { argv: 'ghx ci why run:37948190914 -R owner/repo', note: 'One workflow run, without a PR' },
+    { argv: 'ghx ci why job:51234567890 -R owner/repo', note: 'One job (gh run view --job <id> --log-failed)' },
     { argv: 'ghx ci why branch:main -R owner/repo', note: 'Is main red, and why: every workflow on its head' },
     { argv: 'ghx ci why 12 --no-compare-main', note: 'Skip the comparison with the default branch' },
   ],
   async run(input, ctx) {
-    const target = targetOf(input);
-    const resolved = await ctx.repo({ ref: targetRepo(target) });
+    const jobId = jobIdOf(input.target);
+    if (jobId !== undefined && input.run !== undefined) targetOf(input); // a target and --run: refused there
+    const resolved0 = jobId === undefined ? undefined : await ctx.repo();
+    // A job is diagnosed as its run, with the candidates cut to that job.
+    const job =
+      resolved0 && jobId !== undefined ? await fetchJob({ gh: ctx.gh, repo: resolved0.repo, jobId }) : undefined;
+    const target: CiTarget = job ? { kind: 'run', raw: `run:${job.run_id}`, runId: job.run_id } : targetOf(input);
+    const resolved = resolved0 ?? (await ctx.repo({ ref: targetRepo(target) }));
     const { repo } = resolved;
     if (resolved.source !== 'cwd' && resolved.cwdRepo && !sameRepo(resolved.cwdRepo, repo)) {
       ctx.warn({
@@ -167,6 +192,7 @@ export default defineCommand({
     const patterns = (input.job ?? []).map(wildcard);
     const candidates = red
       .filter(isDiagnosable)
+      .filter((c) => jobId === undefined || c.jobId === jobId)
       .filter((c) => patterns.length === 0 || patterns.some((p) => p.test(c.name)));
     const diagnoser = createDiagnoser({
       gh: ctx.gh,
@@ -207,9 +233,13 @@ export default defineCommand({
       for (const runId of flakyRuns) next.push(`ghx ci rerun run:${runId} -R ${repoSlug(repo)} --flaky`);
     } else if (flakyRuns.length > 0) next.push(`ghx ci rerun ${s.arg} --flaky`);
     if (d.omitted > 0) next.push(`ghx ci why ${s.arg} --job '<name>'`);
+    // A job that is not red has nothing to diagnose; its raw log is one read away.
+    if (jobId !== undefined && candidates.length === 0) {
+      next.push(`ghx api repos/${repoSlug(repo)}/actions/jobs/${jobId}/logs`);
+    }
     return {
       ref: s.ref,
-      target: s.target,
+      target: jobId !== undefined ? `job:${jobId}` : s.target,
       headSha: s.headSha,
       ci: s.summary,
       failing: d.jobs.map((j) => ({ ...j, firstError: compactDiagnosis(j).firstError })),
