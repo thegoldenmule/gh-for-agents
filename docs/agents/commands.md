@@ -16,7 +16,9 @@ Every command prints one JSON document (or a spill result). Errors are `{"error"
 - [`ghx pr create`](#ghx-pr-create) (write): Open a PR from validated JSON: compact body, hidden ghx block, exact read-back
 - [`ghx pr edit`](#ghx-pr-edit) (write): Patch a ghx PR: re-validated, block rev+1, retarget or draft toggle, exact read-back
 - [`ghx pr feedback`](#ghx-pr-feedback) (read): All PR feedback (reviews, findings, comments, bots), filterable; full bodies in a file
+- [`ghx pr land`](#ghx-pr-land) (write): Wait until mergeable, then merge pinned to that head (run like ci wait)
 - [`ghx pr merge`](#ghx-pr-merge) (write): Merge when policy allows, pinned to the evaluated head; every blocker reported together
+- [`ghx pr ready`](#ghx-pr-ready) (write): Mark a PR ready for review, or back to draft with --undo; any PR, no ghx block needed
 - [`ghx pr resolve`](#ghx-pr-resolve) (write): Set the status of findings or preconditions (append-only event; resolves the review thread)
 - [`ghx pr review`](#ghx-pr-review) (write): Post a review: verdict, inline findings in the diff, hidden blocks, pinned to the head
 - [`ghx pr status`](#ghx-pr-status) (read): One object: description, block, merge readiness, CI for the head, feedback, preconditions, stack
@@ -96,7 +98,7 @@ Wait for CI on a PR, branch or run; one JSON summary, exit code = outcome (run i
 
 read, stream, no deadline.
 
-Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then continue other work or end your turn. Do not poll, sleep, or use Monitor for CI. You will be re-invoked when it exits. Its stdout is the full answer and its exit code is the outcome. The summary is never spilled: it is compacted to 16 KB, and --max-bytes and GHX_MAX_BYTES are ignored.
+Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then continue other work or end your turn. Do not poll, sleep, or use Monitor for CI. You will be re-invoked when it exits. Its stdout is the full answer and its exit code is the outcome. In a subagent, which cannot end its turn and be woken, run it in the foreground with --foreground (the ghx hook adds it, with the 10-minute Bash timeout): it returns within 9 minutes, and on exit 15 you re-run the identical command, which resumes from the saved state. The summary is never spilled: it is compacted to 16 KB, and --max-bytes and GHX_MAX_BYTES are ignored.
 
 Flags:
 
@@ -107,6 +109,8 @@ Flags:
 - `--diagnose` (default `true`): Diagnose each failure as it lands; --no-diagnose skips it
 - `--compare-main` (default `true`): Compare failures with the default branch; --no-compare-main skips it
 - `--stream` (default `false`): Print every event as NDJSON (for humans; agents use the default)
+- `--expect-head <string>`: One PR: judge CI only once its head is this SHA or has moved past it (default: the local HEAD when the cwd is on the PR branch and pushed)
+- `--foreground` (default `false`): Return pending (exit 15) after 9 min, under the Bash tool cap: for a foreground call in a subagent; re-run the identical command
 
 Input: Flags and positionals only; --input file.json is also accepted.
 
@@ -116,10 +120,12 @@ Examples:
 
 - `ghx ci wait 3301 -R powerhouse-inc/powerhouse`: Run with run_in_background: true
 - `ghx ci wait owner/repo#12 --until settled`: Wait for every check, not the first failure
+- `ghx ci wait owner/repo#12 --expect-head 9f2c4e1`: After a push: judge CI on 9f2c4e1, not the old head
 - `ghx ci wait owner/repo#12 --until mergeable`: Settled CI, then the merge CI gate
 - `ghx ci wait branch:main@9f2c4e1 -R owner/repo`: CI for one commit on a branch
 - `ghx ci wait run:40345582950 --until settled -R owner/repo`: One workflow run until it completes (e.g. after ghx ci rerun run:<id>)
 - `ghx ci wait owner/repo#12 owner/repo#13 --any`: Return at the first target that finishes
+- `ghx ci wait --foreground owner/repo#12 --until mergeable`: In a subagent: foreground, returns within 9 min; re-run on exit 15
 
 Schema: `ghx ci wait --schema`.
 
@@ -131,7 +137,7 @@ Why CI is red: failing jobs, step, tests, errors, log path, shared-with-main and
 
 read, single document, timeout 2m (max 5m).
 
-Diagnoses the failing checks on a PR head, one workflow run (run:<id>; --run is the same), or a branch head (branch:<name>: every workflow's newest run on the branch's head commit) in one call. Logs come from the jobs API, so a finished job is diagnosed while the rest of its run is still going. Full logs are written to files (logPath). Green jobs whose ci.keySteps step was skipped are listed in suspicious.
+Diagnoses the failing checks on a PR head, one workflow run (run:<id>; --run is the same), one job (job:<id>), or a branch head (branch:<name>: every workflow's newest run on the branch's head commit) in one call. Logs come from the jobs API, so a finished job is diagnosed while the rest of its run is still going. Full logs are written to files (logPath). Green jobs whose ci.keySteps step was skipped are listed in suspicious.
 
 Flags:
 
@@ -150,6 +156,7 @@ Examples:
 - `ghx ci why 3301 -R powerhouse-inc/powerhouse`: Diagnose the failing checks on PR #3301
 - `ghx ci why owner/repo#12 --job 'Test*'`: Only jobs whose name starts with Test
 - `ghx ci why run:37948190914 -R owner/repo`: One workflow run, without a PR
+- `ghx ci why job:51234567890 -R owner/repo`: One job (gh run view --job <id> --log-failed)
 - `ghx ci why branch:main -R owner/repo`: Is main red, and why: every workflow on its head
 - `ghx ci why 12 --no-compare-main`: Skip the comparison with the default branch
 
@@ -198,7 +205,7 @@ Write a starter .github/ghx.json (components inferred from the workspace).
 
 write, single document, timeout 1m (max 5m).
 
-Components come from --component (repeatable), else package.json workspaces / pnpm-workspace.yaml, else top-level directories. Refuses to overwrite without --force; --dry-run returns the config without writing.
+Components come from --component (repeatable), else package.json workspaces / pnpm-workspace.yaml, else top-level directories. They take the names the git log uses as commit scopes (type(scope): …) where a directory or package name matches, with the other names as aliases; a nested package stays part of its parent unless the log scopes it. Refuses to overwrite without --force; --dry-run returns the config without writing.
 
 Flags:
 
@@ -282,22 +289,24 @@ Open a PR from validated JSON: compact body, hidden ghx block, exact read-back
 
 write, single document, timeout 2m (max 10m).
 
-Write the PR object with your file tool and pass --input pr.json. Draft and stackedOn are derived from the base. components lists every component the diff touches; past 5, list the 5 primary ones and ghx records the rest (alsoTouched). Fails with every input issue at once (VALIDATION), DUPLICATE_PR when the head already has an open PR.
+ghx pr create --example prints a valid input for this repo; write it to pr.json, edit it, and pass --input pr.json. Required: title, description, testing, risk, revertPolicy. base and head default to the default and current branch; components the diff touches are added (past 5, ghx records the rest as alsoTouched); draft and stackedOn follow the base. Validation runs before any write and reports every issue at once (VALIDATION); DUPLICATE_PR when the head already has an open PR.
 
 Flags:
 
+- `--example`: Print a valid input for this repo (its component names) and the rules
 - `--batch`: Create several PRs from {defaults, items}
 
 JSON-only fields: `title`, `description`, `testing`, `risk`, `riskNote`, `components`, `revertPolicy`, `revertNote`, `revertWith`, `base`, `head`, `draft`, `refs`, `defaults`, `items`.
 
-Input: JSON input is required: write it to a file, then ghx pr create --input file.json (or --input -).
+Input: JSON-only fields go in --input file.json (or --input -); flags and positionals cover the rest.
 
 Replaces: `gh pr create`.
 
 Examples:
 
 - `ghx pr create -R octo/demo --input -`: or --input pr.json
-- `ghx pr create --input pr.json --dry-run`: validate, check and render without creating
+- `ghx pr create --example`: a valid input for this repo, with its component names and the rules
+- `ghx pr create --input pr.json --dry-run`: preview the rendered body without creating
 - `ghx pr create --batch --input prs.json`: several PRs: {defaults, items}; stacked items in order
 
 Schema: `ghx pr create --schema`.
@@ -306,27 +315,29 @@ Schema: `ghx pr create --schema`.
 
 Patch a ghx PR: re-validated, block rev+1, retarget or draft toggle, exact read-back
 
-`ghx pr edit <pr> [flags]`
+`ghx pr edit [<pr>] [flags]`
 
 write, single document, timeout 2m (max 10m).
 
-Write the patch with your file tool and pass --input patch.json; only the fields to change. DESCRIPTION_DRIFT when the visible text was edited in the UI (include it, or --discard-ui-edits); NO_BLOCK unless "adopt": true with the full object. components follows pr create: past 5 touched, the 5 primary ones (ghx records the rest). GH_FORBIDDEN unless you have write access or opened the PR yourself (GitHub lets authors edit their own PRs). CONCURRENT_EDIT when the title or body changed since the read; GitHub has no If-Match, so an edit made in the moment between the final re-read and the PATCH is still overwritten.
+Write the patch with your file tool and pass --input patch.json; only the fields to change (ghx pr edit --example shows one). Every issue comes back at once (VALIDATION), before any write. DESCRIPTION_DRIFT when the visible text was edited in the UI (include it, or --discard-ui-edits); {"draft": …} or {"base": …} alone works on any PR; other fields on a PR without a ghx block are NO_BLOCK unless "adopt": true with the full object. components follows pr create: past 5 touched, the 5 primary ones (ghx records the rest). GH_FORBIDDEN unless you have write access or opened the PR yourself (GitHub lets authors edit their own PRs). CONCURRENT_EDIT when the title or body changed since the read; GitHub has no If-Match, so an edit made in the moment between the final re-read and the PATCH is still overwritten.
 
 Flags:
 
 - `--discard-ui-edits`: Proceed when the visible description or title was edited outside ghx; the block wins
+- `--example`: Print an example patch and the rules for this repo
 
 JSON-only fields: `title`, `description`, `testing`, `risk`, `riskNote`, `components`, `revertPolicy`, `revertNote`, `revertWith`, `base`, `draft`, `refs`, `adopt`.
 
-Input: JSON input is required: write it to a file, then ghx pr edit --input file.json (or --input -).
+Input: JSON-only fields go in --input file.json (or --input -); flags and positionals cover the rest.
 
-Replaces: `gh pr edit`, `gh pr ready`.
+Replaces: `gh pr edit`.
 
 Examples:
 
 - `ghx pr edit octo/demo#12 --input -`: or --input patch.json
-- `ghx pr edit 12 --input patch.json --dry-run`: validate and render without editing
-- `ghx pr edit 12 --input ready.json`: {"draft": false} marks it ready for review
+- `ghx pr edit --example`: an example patch and the rules for this repo
+- `ghx pr edit 12 --input patch.json --dry-run`: preview the rendered body without editing
+- `ghx pr ready 12`: mark it ready for review (any PR; --undo converts back to draft)
 
 Schema: `ghx pr edit --schema`.
 
@@ -359,6 +370,35 @@ Examples:
 
 Schema: `ghx pr feedback --schema`.
 
+## ghx pr land
+
+Wait until mergeable, then merge pinned to that head (run like ci wait)
+
+`ghx pr land <pr> [flags]`
+
+write, stream, no deadline.
+
+ci wait --until mergeable, then pr merge, in one call. The wait binds one head (--expect-head, or the local HEAD when the cwd is on the PR branch and pushed) and stops with exit 12 if the head moves; the merge is pinned to that head and runs pr merge's policy checks. Never merges on red CI (exit 10, with the diagnosis), no checks or a conflict (13), a stall (14), a moved head (12) or a merge refusal (error: MERGE_BLOCKED exit 9 or 6, HEAD_MOVED 9). Run it like ci wait: in the background on the main thread; in a subagent in the foreground with --foreground (the ghx hook arranges both), re-running the identical command on exit 15. --dry-run waits, then plans the merge without sending it.
+
+Flags:
+
+- `--expect-head <string>`: Land only this head (7–40 hex): wait for the PR to reach it; default the local HEAD when on the PR branch and pushed
+- `--method <merge|squash|rebase>`: merge (default: merge.method); squash or rebase only when config allows
+- `--override <string>` (repeatable): Overridable blocker codes the user accepted (CODE or CODE,CODE); needs --reason
+- `--reason <string>`: Why the override is allowed (who asked); one line, ≤200 chars
+- `--delete-branch`: Delete the same-repo head branch after merging (default: merge.deleteBranch); remote ref only
+- `--foreground` (default `false`): Return pending (exit 15) after 9 min, under the Bash tool cap (a subagent); re-run the identical command
+
+Input: Flags and positionals only; --input file.json is also accepted.
+
+Examples:
+
+- `ghx pr land 3301 -R owner/repo`: Main thread: run with run_in_background: true
+- `ghx pr land --foreground owner/repo#12`: Subagent: foreground; re-run on exit 15
+- `ghx pr land owner/repo#12 --expect-head 9f2c4e1`: Land exactly 9f2c4e1, after a push
+
+Schema: `ghx pr land --schema`.
+
 ## ghx pr merge
 
 Merge when policy allows, pinned to the evaluated head; every blocker reported together
@@ -389,6 +429,32 @@ Examples:
 - `ghx pr merge 12 --expect-head 9f2c4e1 --delete-branch`: Merge, then delete the remote head branch
 
 Schema: `ghx pr merge --schema`.
+
+## ghx pr ready
+
+Mark a PR ready for review, or back to draft with --undo; any PR, no ghx block needed
+
+`ghx pr ready <pr> [flags]`
+
+write, single document, timeout 1m (max 5m).
+
+Toggles draft through GraphQL and reads it back. A PR already in the wanted state is a no-op (changed: false). Works on PRs ghx did not open; for other edits use ghx pr edit.
+
+Flags:
+
+- `--undo`: Convert the PR back to a draft (gh pr ready --undo)
+- `--draft`: Same as --undo
+
+Input: Flags and positionals only; --input file.json is also accepted.
+
+Replaces: `gh pr ready`.
+
+Examples:
+
+- `ghx pr ready octo/demo#12`: mark it ready for review
+- `ghx pr ready 12 --undo`: convert it back to a draft
+
+Schema: `ghx pr ready --schema`.
 
 ## ghx pr resolve
 

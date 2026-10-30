@@ -60,10 +60,6 @@
     "command": "pr edit"
   },
   {
-    "pattern": "gh pr ready",
-    "command": "pr edit"
-  },
-  {
     "pattern": "gh api repos/{o}/{r}/issues/{n}/comments",
     "command": "pr feedback"
   },
@@ -86,6 +82,10 @@
   {
     "pattern": "gh pr merge --match-head-commit",
     "command": "pr merge"
+  },
+  {
+    "pattern": "gh pr ready",
+    "command": "pr ready"
   },
   {
     "pattern": "gh pr review",
