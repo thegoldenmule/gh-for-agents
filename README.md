@@ -11,13 +11,15 @@ These are the v1 commands, specified in [02-api](docs/plans/02-api.md).
 
 | | What it does |
 | --- | --- |
-| `pr create` | Opens a PR from validated JSON and renders a short body. `--batch` opens several. |
+| `pr create` | Opens a PR from validated JSON and renders a short body. `--example` prints a valid input for the repo; `--batch` opens several. |
 | `pr edit` | Patches a PR's structured fields and re-renders the body, with the same validation. |
+| `pr ready` | Marks any PR ready for review, or back to draft with `--undo`. |
 | `pr status` | Returns one object: description, metadata, merge state, CI for the head SHA, feedback and blockers. Several PRs (`pr status 12 13 14`) return `{results: […]}`. |
 | `pr feedback` | Merges feedback from all three GitHub sources into one list, with bots kept separate. |
 | `pr comment`, `pr review` | Post structured comments and reviews. |
 | `pr resolve` | Records a status on feedback items, such as addressed or wontfix. |
 | `pr merge` | Merges according to the repo's policy, with the head SHA pinned. Overrides need a reason. |
+| `pr land` | Waits until the PR is mergeable, then merges it pinned to that head. Never merges on red CI. |
 | `ci why` | Diagnoses a failing run in one call, including runs still in progress. Takes a PR, `run:<id>`, or `branch:main` for every failing workflow on main's head. |
 | `ci wait` | Waits for CI to finish, then prints one JSON summary. The caller never sets a duration. Takes PRs, `branch:<name>[@sha]` or `run:<id>`. |
 | `ci rerun`, `ci retrigger` | Rerun failed jobs (of a PR's head or of `run:<id>`), or trigger CI again. |
@@ -25,20 +27,25 @@ These are the v1 commands, specified in [02-api](docs/plans/02-api.md).
 | `init` | Writes a starter `.github/ghx.json`, with components inferred from the workspace. |
 | `version` | Prints the `ghx` version, Node version and platform, with no `gh` calls. |
 | `help`, `schema` | JSON help, and the JSON Schema of any command's input and output or of the config. |
-| `hook claude-pretooluse` | The Claude Code PreToolUse hook: runs `ghx ci wait` in the background and steers raw `gh` to `ghx`. |
+| `hook claude-pretooluse` | The Claude Code PreToolUse hook: places `ghx ci wait` and `ghx pr land` (background in the main thread, foreground in a subagent) and steers raw `gh` to `ghx`. |
 
-Raw `gh` commands that `ghx` wraps are refused, and the error names the `ghx`
-command to use instead. A short list of read-only `gh` commands still runs, with
-its output wrapped in JSON.
+A `gh`-shaped read typed through `ghx` runs its `ghx` equivalent, with a
+`REDIRECTED` warning naming the command for next time: `ghx pr view 12` runs
+`ghx pr status 12`, and `ghx run view 99 --log-failed` runs `ghx ci why run:99`.
+`gh` writes that `ghx` wraps are refused, and the error names the `ghx` command
+to use instead. A short list of read-only `gh` commands still runs, with its
+output wrapped in JSON.
 
-Every JSON command takes `--fields a.b,c[].d` to keep only the parts the agent
-needs, and `pr status`, `ci wait`, `pr create`, `pr merge` and `pr feedback`
-take `--brief` for the fields agents usually extract. Errors are never trimmed.
-This replaces the `| jq` and `| head -c` that agents otherwise add.
+Every JSON command takes `--fields a.b,c.d` to keep only the parts the agent
+needs (a path through an array maps over it, so `ci.failing.name` needs no
+`[]`), and `--brief` for the fields agents usually extract. Errors are never
+trimmed. This replaces the `| jq` and `| head -c` that agents otherwise add.
 
 ## Example
 
-The agent writes the PR as data (`ghx pr create --input pr.json`):
+The agent starts from `ghx pr create --example`, which prints a valid input
+with the repo's component names and the rules, edits it, and writes the PR as
+data (`ghx pr create --input pr.json`):
 
 ```json
 {
@@ -52,20 +59,23 @@ The agent writes the PR as data (`ghx pr create --input pr.json`):
   "riskNote": "Clients that sign without a documentId now get a verification error.",
   "components": ["reactor", "shared"],
   "revertPolicy": "revert-safe",
-  "base": "main",
-  "head": "fix/reactor-bind-document-id",
   "refs": {"closes": ["#2894"]}
 }
 ```
 
 `ghx` checks the title format and length, the description length, and that
-each test can be re-run. It checks the components against `.github/ghx.json`
-and the diff: every component the PR touches must be listed. A PR that touches
-more than 5 lists its 5 primary components, and `ghx` records the rest in the
-hidden block (`alsoTouched`), shown as `Components: a, b, c, d, e (+21 more)`.
-A Claude Code footer appended to `description` is stripped with a
-`FOOTER_STRIPPED` warning, since `ghx` renders its own. It then renders a short
-body:
+each test can be re-run, and reports every issue in one pass before it writes
+anything, so there is no need for a dry run first. `base` and `head` default to
+the default and current branch. It checks the components against
+`.github/ghx.json` and adds the ones the diff touches; a PR that touches more
+than 5 lists its 5 primary components, and `ghx` records the rest in the hidden
+block (`alsoTouched`), shown as `Components: a, b, c, d, e (+21 more)`. Mechanical
+slips are fixed with a warning instead of a rejection: a `body` field becomes
+`description` (`FIELD_RENAMED`), a trailing period leaves the title
+(`TITLE_PERIOD_REMOVED`), an old component name maps through the config's
+`aliases` (`COMPONENT_ALIAS`), and a Claude Code footer appended to
+`description` is stripped (`FOOTER_STRIPPED`), since `ghx` renders its own. It
+then renders a short body:
 
 ```markdown
 The primary write path signed actions without binding documentId.
@@ -83,7 +93,11 @@ GitHub doesn't show the hidden block, but `pr status` reads it back.
 Waiting for CI works the same way every time. The agent runs `ghx ci wait <pr>`
 in the background and moves on. It is woken once, when CI finishes or stalls.
 The JSON summary includes the failure diagnosis, and the exit code gives the
-outcome.
+outcome. A subagent can't be woken by a background task, so it waits in the
+foreground with `--foreground`, which returns within 9 minutes (exit 15 if CI
+hasn't settled; it re-runs the identical command, which resumes). A second wait
+on the same PR follows the first instead of polling again. `ghx pr land <pr>`
+waits until the PR is mergeable and then merges it.
 
 ## Status
 
