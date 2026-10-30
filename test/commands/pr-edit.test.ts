@@ -74,8 +74,8 @@ test('draft:false goes through GraphQL markPullRequestReadyForReview; the block 
   const s = editScene({ pr: { isDraft: true } });
   const r = await run(s.gh, { draft: false });
   assert.equal(r.exitCode, EXIT.OK, r.stdout);
-  assert.deepEqual(editSequence(s.gh), ['config', 'snapshot', 'preflight', 'compare', 'snapshot', 'ready', 'readback']);
-  const call = s.gh.calls[5];
+  assert.deepEqual(editSequence(s.gh), ['config', 'snapshot', 'snapshot', 'ready', 'readback']);
+  const call = s.gh.calls[3];
   assert.ok(call);
   const sent = JSON.parse(call.stdin ?? '{}') as { query: string; variables: unknown };
   assert.match(sent.query, /^mutation\(\$id:ID!\)\{markPullRequestReadyForReview\(input:\{pullRequestId:\$id\}\)/);
@@ -150,11 +150,67 @@ test('an empty patch is VALIDATION with no gh call', async () => {
   assert.equal(s.gh.calls.length, 0);
 });
 
-test('head is not patchable', async () => {
+test('head is not patchable; a patch with nothing valid stops after the config', async () => {
   const s = editScene();
   const r = await run(s.gh, { head: 'other' });
   assert.equal(r.exitCode, EXIT.USAGE, r.stdout);
-  assert.equal(s.gh.calls.length, 0);
+  assert.equal(r.json.error.details.issues[0].path, 'head');
+  assert.deepEqual(editSequence(s.gh), ['config']);
+});
+
+test('one pass: a patch issue and a merged-object issue come back together', async () => {
+  const s = editScene();
+  const r = await run(s.gh, { risk: 'medium', testing: 'pnpm test', labels: ['x'] });
+  assert.equal(r.exitCode, EXIT.USAGE, r.stdout);
+  assert.deepEqual(
+    r.json.error.details.issues.map((i: { path: string; code: string }) => `${i.path} ${i.code}`),
+    ['labels unrecognized_keys', 'testing invalid_type', 'riskNote risk.note_required'],
+  );
+  assert.match(r.json.error.hint, /ghx pr edit --example/);
+  s.gh.expectNoMutations();
+});
+
+test('a draft or base change alone works on a PR without a ghx block; other fields still need adopt', async () => {
+  const bare = { body: 'Opened with gh.', isDraft: true };
+  const ready = editScene({ pr: bare });
+  const r = await run(ready.gh, { draft: false });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(ready.drafts, ['ready']);
+  assert.equal(r.json.blockId, null);
+  assert.equal(r.json.rev, null);
+  assert.deepEqual(r.json.changed, ['draft']);
+
+  const retarget = editScene({ pr: bare, branches: { develop: { oid: PARENT_OID } } });
+  const b = await run(retarget.gh, { base: 'develop' });
+  assert.equal(b.exitCode, EXIT.OK, b.stdout);
+  assert.deepEqual(retarget.patched, [{ base: 'develop' }]);
+  assert.deepEqual(b.json.changed, ['base']);
+
+  const content = editScene({ pr: bare });
+  const c = await run(content.gh, { description: NEW_DESCRIPTION });
+  assert.equal(c.json.error.code, 'NO_BLOCK');
+});
+
+test('an old component name in the block is mapped through aliases, so the edit validates', async () => {
+  const config = {
+    version: 1,
+    components: { web: { paths: ['src/**'], aliases: ['app'] }, docs: { paths: ['docs/**'] } },
+  };
+  const s = editScene({ config });
+  const r = await run(s.gh, { description: NEW_DESCRIPTION });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.ok(r.json.warnings.some((w: { code: string }) => w.code === 'COMPONENT_ALIAS'));
+  const block = blockOf(String(s.patched[0]?.body));
+  assert.deepEqual(block.components, ['web']);
+  assert.equal(block.title, 'feat(web): show a banner when a request is retried');
+});
+
+test('--example prints a patch and the rules, without a PR', async () => {
+  const s = editScene();
+  const r = await runInProcess(['pr', 'edit', '-R', 'octo/demo', '--example'], { gh: s.gh });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.ok(r.json.example.description);
+  assert.ok(r.json.rules.some((x: string) => x.includes('ghx pr ready')));
 });
 
 test('the merged object is re-validated with the full createRules: medium risk needs riskNote', async () => {
@@ -165,7 +221,8 @@ test('the merged object is re-validated with the full createRules: medium risk n
     r.json.error.details.issues.map((i: { code: string }) => i.code),
     ['risk.note_required'],
   );
-  assert.deepEqual(editSequence(s.gh), ['config', 'snapshot']);
+  assert.deepEqual(editSequence(s.gh), ['config', 'snapshot', 'preflight', 'compare'], 'one pass: reads, no write');
+  s.gh.expectNoMutations();
 });
 
 test('the network checks run on the merged object: a touched component is added to the block', async () => {

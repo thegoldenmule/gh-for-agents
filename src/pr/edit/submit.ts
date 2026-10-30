@@ -22,8 +22,8 @@ export async function applyEdit(ctx: Context, repo: RepoRef, plan: EditPlan): Pr
   const pr = plan.snapshot;
   const target: Applied = {
     url: pr.url,
-    title: plan.input.title,
-    base: plan.input.base,
+    title: plan.title,
+    base: plan.base,
     draft: plan.draft ?? pr.isDraft,
     body: plan.body,
   };
