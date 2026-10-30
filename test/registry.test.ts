@@ -138,6 +138,9 @@ function assertSmoke(spec: AnyCommandSpec, r: HarnessResult): void {
   );
   if (spec.kind === 'write' && LOCAL_WRITES.has(spec.name.join(' '))) {
     assert.deepEqual(ghCalls, [], 'a local-only write makes no gh call');
+  } else if (spec.kind === 'write' && spec.mode === 'stream') {
+    // A stream cannot halt at a mutation (src/core/stream.ts): its --dry-run plans the write and returns its
+    // own summary (pr land: would-merge). What must hold is above: no mutating call, never exit 1.
   } else if (spec.kind === 'write') {
     assert.equal(
       r.json?.dryRun,

@@ -52,6 +52,8 @@ export interface SimPr {
   head: string;
   /** The head branch name (REST head.ref). Default 'feat/x'. */
   headRef?: string;
+  /** merge_commit_sha once merged (pr land's merge read-back). */
+  mergeCommit?: string;
   base?: string;
   /** REST `mergeable`: false = conflicts with the base. Default null (not computed). */
   mergeable?: boolean | null;
@@ -327,6 +329,7 @@ export class GitHubSim {
         mergeable: pr.mergeable ?? null,
         merged: pr.merged === true,
         merged_at: pr.merged ? this.iso(0) : null,
+        merge_commit_sha: pr.mergeCommit ?? null,
         head: { sha: pr.head, ref: pr.headRef ?? 'feat/x' },
         base: { ref: pr.base ?? 'main', repo: { default_branch: 'main' } },
       });

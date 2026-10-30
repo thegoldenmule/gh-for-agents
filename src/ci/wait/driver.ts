@@ -127,6 +127,8 @@ export interface WaitOptions {
    * HEAD equals its upstream (it was pushed).
    */
   expectHead?: string | undefined;
+  /** The command a re-run uses, when it is not this ci wait (ghx pr land's own). */
+  rerun?: string | undefined;
 }
 
 /** M6.6: given a settled CI outcome, the merge gate's final word, or null to keep polling. */
@@ -386,6 +388,7 @@ export async function* runWait(
    * `branch:<name>` after the branch moved would bind the new head and lose the commit being waited on.
    */
   const identical = (): string =>
+    o.rerun ??
     identicalCommand({
       ...shape,
       targets: runs.map((r, i) =>
@@ -780,7 +783,7 @@ export async function* runWait(
    */
   async function expectedHeadReached(r: Run, res: TickResult): Promise<boolean> {
     const pull = res.pull;
-    if (!pull || pull.state !== 'OPEN') return true;
+    if (pull?.state !== 'OPEN') return true;
     if (!r.defaultLooked) {
       r.defaultLooked = true;
       const sha = await localHeadDefault(r, pull);
