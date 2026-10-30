@@ -347,6 +347,103 @@ test('PRs: multi-pr flag, charge to the last PR named, unrelated reads stay unat
   assert.equal(c?.pr, null);
 });
 
+const failing = (msg: string, when: string, id: string, command: string, code = 'VALIDATION') =>
+  call({
+    msg,
+    at: when,
+    tools: [{ id, command, isError: true, result: `Exit code 2\n{"error":{"code":"${code}","message":"m"}}` }],
+  });
+const edit = (msg: string, id: string, when: string) =>
+  call({ msg, at: when, tools: [{ id, name: 'Edit', input: { file_path: '/src/a.ts' }, result: 'ok' }] });
+
+test('PRs: a failed or dry-run create is the PR the next create in its file produced, not the last PR named', () => {
+  const us = units([
+    main([
+      human('next PR', 'p1', at(0)),
+      bash('msg_1', at(1), 'tu_st', 'ghx pr status 3287', ghxStatus(3287, 'a'.repeat(40))),
+      edit('msg_e1', 'tu_e1', at(2)),
+      failing('msg_2', at(3), 'tu_dry1', 'ghx pr create --input /tmp/w/pr.json --dry-run'),
+      bash('msg_3', at(4), 'tu_dry2', 'ghx pr create --input /tmp/w/pr.json --dry-run', '{"preview":{}}'),
+      bash(
+        'msg_4',
+        at(5),
+        'tu_create',
+        'ghx pr create --input /tmp/w/pr.json',
+        '{"url":"https://github.com/acme/widgets/pull/3288"}',
+      ),
+      edit('msg_e2', 'tu_e2', at(6)),
+      failing('msg_5', at(7), 'tu_other', 'gh pr create --head feat-b --title T --body B'),
+    ]),
+  ]);
+  const [status, create, other] = ofKind(us, 'episode') as [Unit, Unit, Unit];
+  assert.equal(status.pr, 'acme/widgets#3287');
+  assert.equal(create.pr, 'acme/widgets#3288');
+  assert.ok(create.flags.includes('create-forward'));
+  assert.ok(!create.flags.includes('charged-to-last-pr') && !create.flags.includes('multi-pr'));
+  assert.deepEqual([create.metrics.mistakes, create.metrics.dry_run_mistakes, create.metrics.first_try], [1, 1, 0]);
+  assert.equal(other.pr, null, 'a create whose PR never showed up is charged to no PR');
+  assert.ok(!other.flags.includes('charged-to-last-pr'));
+  const life = new Map(ofKind(us, 'pr_lifecycle').map((u) => [u.pr, u]));
+  assert.deepEqual([...life.keys()], ['acme/widgets#3287', 'acme/widgets#3288']);
+  assert.deepEqual(life.get('acme/widgets#3287')?.tool_use_ids, ['tu_st']);
+  assert.deepEqual(life.get('acme/widgets#3288')?.tool_use_ids, ['tu_dry1', 'tu_dry2', 'tu_create']);
+  assert.ok(life.get('acme/widgets#3288')?.flags.includes('created'));
+  assert.ok(!life.get('acme/widgets#3287')?.flags.includes('created'));
+});
+
+test('PRs: a create attempt with another --head is not the next create’s PR', () => {
+  const us = units([
+    main([
+      human('two PRs', 'p1', at(0)),
+      failing('msg_1', at(1), 'tu_a', 'gh pr create --head feat-a --title T --body B', 'X'),
+      bash('msg_2', at(2), 'tu_b', 'gh pr create --head feat-b --title T --body B', 'https://github.com/acme/w/pull/7'),
+    ]),
+  ]);
+  const ep = ofKind(us, 'episode')[0] as Unit;
+  assert.ok(!ep.flags.includes('create-forward'));
+  assert.equal(ep.pr, 'acme/w#7', 'the unit still names #7 through the second create');
+});
+
+test('PRs: a call naming no PR takes its own unit’s PR, not the one its file named last', () => {
+  const us = units([
+    main([
+      human('next PR', 'p1', at(0)),
+      bash('msg_1', at(1), 'tu_v', 'gh pr view 40 --json state'),
+      edit('msg_e', 'tu_e', at(2)),
+      bash('msg_2', at(3), 'tu_help', 'ghx pr create --help', '{"name":"pr create"}'),
+      bash('msg_3', at(4), 'tu_c', 'ghx pr create --input pr.json', 'https://github.com/acme/w/pull/41'),
+    ]),
+  ]);
+  const life = new Map(ofKind(us, 'pr_lifecycle').map((u) => [u.pr, u.tool_use_ids]));
+  assert.deepEqual(life.get('acme/w#40'), ['tu_v'], 'the --help call no longer drags the create episode into #40');
+  assert.deepEqual(life.get('acme/w#41'), ['tu_help', 'tu_c']);
+});
+
+test('PRs: a wait on main-branch CI after a merge is no PR’s work and has its own intent', () => {
+  const us = units([
+    main([
+      human('land #12', 'p1', at(0)),
+      bash('msg_1', at(1), 'tu_merge', 'ghx pr merge 12', '{"merged":true,"mergeCommit":"abc1234"}'),
+      call({
+        msg: 'msg_2',
+        at: at(2),
+        tools: [{ id: 'tu_mw', command: 'ghx ci wait branch:main@abc1234 --until settled', result: '', bgTask: 'b1' }],
+      }),
+      notify({ taskId: 'b1', toolUseId: 'tu_mw', status: 'completed', summary: 'exit 0', at: at(9), promptId: 'p2' }),
+      call({
+        msg: 'msg_3',
+        at: at(10),
+        tools: [{ id: 'tu_out', name: 'Read', input: { file_path: `${TASKS}/b1.output` }, result: '{}' }],
+      }),
+    ]),
+  ]);
+  const w = ofKind(us, 'wait')[0] as Unit;
+  assert.deepEqual([w.intent, w.category, w.pr], ['main_ci', 'bg-ghx-ci-wait', null]);
+  assert.ok(!w.flags.includes('charged-to-last-pr'));
+  assert.deepEqual(ofKind(us, 'pr_lifecycle')[0]?.tool_use_ids, ['tu_merge']);
+  assert.equal(w.metrics.first_try, 1);
+});
+
 test('PR cycles: split by head SHA; units before the first SHA join it', () => {
   const A = 'a'.repeat(40);
   const B = 'b'.repeat(40);

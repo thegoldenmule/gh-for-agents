@@ -5,7 +5,7 @@ import { CONSTANTS } from '../metrics/catalog.ts';
 import type { EraConfig, Tables } from '../model/session.ts';
 import { type Draft, finalize } from './draft.ts';
 import { episodeDraft, segmentFile } from './episode.ts';
-import { assignPrs, buildCycles, buildLifecycles } from './pr.ts';
+import { assignPrs, buildCycles, buildLifecycles, labelMainBranchWaits } from './pr.ts';
 import { sessionDrafts } from './session.ts';
 import { indexTables } from './tables.ts';
 import type { Unit } from './types.ts';
@@ -50,6 +50,7 @@ export function buildUnits(tables: Tables, opts: BuildUnitsOptions = {}): Unit[]
       atoms.push(ep.kind === 'wait_bg' ? waitDraft(idx, f, ep) : episodeDraft(idx, f, ep));
   }
   assignPrs(idx, atoms);
+  labelMainBranchWaits(atoms);
   const derived = atoms.flatMap((d) => (d.kind === 'episode' ? [derivedWait(d)].filter((x) => x !== null) : []));
   const all = [...atoms, ...derived];
   const cycles = buildCycles(idx, atoms);
