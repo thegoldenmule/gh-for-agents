@@ -77,7 +77,7 @@ test('an unknown path is VALIDATION before the command runs, naming the top-leve
   assert.deepEqual(w.calls, []);
 });
 
-test('error and dry-run documents are never projected', async () => {
+test('error documents are never projected; the dry-run envelope only by its own paths', async () => {
   const e = await runInProcess(['t', 'doc', '--fail', '--fields', 'state'], { commands });
   assert.deepEqual(Object.keys(e.json), ['error']);
   assert.equal(e.json.error.code, 'GH_FAILED');
@@ -93,6 +93,12 @@ test('error and dry-run documents are never projected', async () => {
   assert.deepEqual(d.json.wouldRun, [{ argv: ['pr', 'merge', '1'] }]);
   const w = await runInProcess(['t', 'write', '--fields', 'merged'], { commands });
   assert.deepEqual(w.json, { merged: true });
+  // preview.* and wouldRun name the envelope: accepted under --dry-run, and they project it.
+  const own = await runInProcess(['t', 'write', '--dry-run', '--fields', 'wouldRun.argv,preview.title'], { commands });
+  assert.equal(own.exitCode, 0, own.stdout);
+  assert.deepEqual(own.json, { dryRun: true, wouldRun: [{ argv: ['pr', 'merge', '1'] }], preview: null });
+  const real = await runInProcess(['t', 'write', '--fields', 'preview.title'], { commands });
+  assert.equal(real.json.error.code, 'VALIDATION', 'preview is a dry-run path only');
 });
 
 test('--brief on a command without a preset is USAGE_UNKNOWN_FLAG', async () => {

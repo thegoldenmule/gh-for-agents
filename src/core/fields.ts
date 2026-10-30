@@ -11,8 +11,9 @@
 // an allowed path.
 import { z } from 'zod';
 import { type AnyCommandSpec, commandName, Warning } from './command.ts';
+import { DryRunEnvelope } from './envelopes.ts';
 import { GhxError } from './errors.ts';
-import { suggest } from './suggest.ts';
+import { editDistance, suggest } from './suggest.ts';
 
 export interface FieldSegment {
   key: string;
@@ -37,6 +38,8 @@ interface Issue {
   path: string;
   code: string;
   message: string;
+  /** The closest real paths, best first. */
+  suggestions?: string[];
 }
 
 function fieldsError(issues: Issue[], hint: string, details: Record<string, unknown> = {}): GhxError {
@@ -180,15 +183,18 @@ function throughArrays(nodes: readonly Js[], defs: Record<string, Js>): Js[] {
   return out;
 }
 
+/** Why a path does not resolve: an unknown key (with what was there instead), or a plain reason. */
+type Problem = { index: number; key: string; where: string; keys: string[] } | { text: string };
+
 /** Why `p` does not resolve against `roots`, or undefined when it does. */
-function pathProblem(p: FieldPath, roots: readonly Js[], defs: Record<string, Js>): string | undefined {
+function pathProblem(p: FieldPath, roots: readonly Js[], defs: Record<string, Js>): Problem | undefined {
   let nodes = roots.flatMap((r) => branches(r, defs));
   let at = '';
-  for (const s of p.segments) {
+  for (const [index, s] of p.segments.entries()) {
     nodes = throughArrays(nodes, defs);
     if (nodes.some(isOpen)) return undefined;
     const objects = nodes.filter(isObject);
-    if (objects.length === 0) return `'${at}' has no fields`;
+    if (objects.length === 0) return { text: `'${at}' has no fields` };
     const next = objects.flatMap((o) => {
       const prop = o.properties?.[s.key];
       if (prop) return [prop];
@@ -196,46 +202,107 @@ function pathProblem(p: FieldPath, roots: readonly Js[], defs: Record<string, Js
       return extra === true ? [{}] : extra && typeof extra === 'object' ? [extra] : [];
     });
     if (next.length === 0) {
-      const keys = keysOf(objects);
-      const near = suggest(s.key, keys);
-      const where = at === '' ? 'the output' : `'${at}'`;
-      return `'${s.key}' is not a field of ${where}${near.length > 0 ? ` (did you mean '${near[0]}'?)` : ''}; fields: ${keys.join(', ')}`;
+      return { index, key: s.key, where: at === '' ? 'the output' : `'${at}'`, keys: keysOf(objects) };
     }
     at = at === '' ? s.key : `${at}.${s.key}`;
     const resolved = next.flatMap((n) => branches(n, defs));
-    if (s.each && !resolved.some(isOpen) && !resolved.some(isArray)) return `'${at}' is not an array: drop the []`;
+    if (s.each && !resolved.some(isOpen) && !resolved.some(isArray))
+      return { text: `'${at}' is not an array: drop the []` };
     nodes = resolved;
   }
   return undefined;
 }
 
-const schemaCache = new WeakMap<z.ZodType, Js>();
+/** A document shape paths resolve against (see rootsOf). */
+interface Shape {
+  roots: Js[];
+  defs: Record<string, Js>;
+  perResult: boolean;
+}
 
-/** The JSON Schema of a spec's stdout document (output, or a stream's summary), with `warnings`. */
-function outputJson(spec: AnyCommandSpec): Js {
-  const base = spec.mode === 'single' ? spec.output : spec.summarySchema;
-  let js = schemaCache.get(base);
-  if (!js) {
-    const schema = base.extend({ warnings: Warning.array().optional() });
-    js = z.toJSONSchema(schema, { io: 'output', unrepresentable: 'any' }) as Js;
-    schemaCache.set(base, js);
-  }
-  return js;
+/** How deep allPaths goes: past it, the parent's field list in the message still helps. */
+const PATH_DEPTH = 5;
+
+/** Every path of a shape, dotted and without [] (arrays are mapped over), at most PATH_DEPTH deep. */
+function allPaths(shape: Shape): string[] {
+  const out = new Set<string>();
+  const walk = (nodes: readonly Js[], prefix: string, depth: number): void => {
+    if (depth >= PATH_DEPTH || out.size > 5_000) return;
+    const objects = throughArrays(nodes, shape.defs).filter(isObject);
+    for (const key of keysOf(objects)) {
+      const path = prefix === '' ? key : `${prefix}.${key}`;
+      out.add(path);
+      const next = objects.flatMap((o) => (o.properties?.[key] ? branches(o.properties[key], shape.defs) : []));
+      walk(next, path, depth + 1);
+    }
+  };
+  walk(
+    shape.roots.flatMap((r) => branches(r, shape.defs)),
+    '',
+    0,
+  );
+  return [...out];
 }
 
 /**
- * The roots paths resolve against: a document that always has `results[]` resolves against its
- * elements; one that may have it (an optional `results`) against either.
+ * The candidates closest to `p`, best first: by edit distance over the whole dotted path (a case-only
+ * difference is nearest), with a missing or extra prefix counted as near (`failing.name` →
+ * `ci.failing.name`) and the same leaf elsewhere next (`merge.failing` → `ci.failing`).
  */
-function rootsOf(js: Js, defs: Record<string, Js>): { roots: Js[]; perResult: boolean } {
-  const results = js.properties?.results;
-  const arrays = branches(results, defs).filter(isArray);
-  if (arrays.length === 0) return { roots: [js], perResult: false };
-  const items = arrays.map((a) => a.items ?? {});
-  return js.required?.includes('results')
-    ? { roots: items, perResult: true }
-    : { roots: [js, ...items], perResult: false };
+export function closestPaths(p: FieldPath, candidates: readonly string[], max = 3): string[] {
+  const want = p.segments
+    .map((s) => s.key)
+    .join('.')
+    .toLowerCase();
+  const last = want.split('.').at(-1) ?? want;
+  const limit = Math.max(2, Math.ceil(want.length / 4));
+  const scored = new Map<string, number>();
+  for (const c of candidates) {
+    const lc = c.toLowerCase();
+    let d = lc === want ? 0.5 : editDistance(want, lc);
+    if (lc.endsWith(`.${want}`) || want.endsWith(`.${lc}`)) d = Math.min(d, 1);
+    else if (lc.split('.').at(-1) === last) d = Math.min(d, 2);
+    if (d <= limit && d < (scored.get(c) ?? Number.POSITIVE_INFINITY)) scored.set(c, d);
+  }
+  const ranked = [...scored].sort(([a, x], [b, y]) => x - y || a.length - b.length || a.localeCompare(b));
+  // Within one of the best: a near miss is not diluted by every path that shares its leaf name.
+  const best = ranked[0]?.[1] ?? 0;
+  return ranked
+    .filter(([, d]) => d < best + 1)
+    .slice(0, max)
+    .map(([c]) => c);
 }
+
+const schemaCache = new WeakMap<z.ZodType, Shape>();
+
+/**
+ * The shape of a schema's document, with `warnings`. A document that always has `results[]` resolves
+ * against its elements; one that may have it (an optional `results`) against either.
+ */
+function shapeOf(base: z.ZodObject): Shape {
+  let shape = schemaCache.get(base);
+  if (!shape) {
+    const schema = base.extend({ warnings: Warning.array().optional() });
+    const js = z.toJSONSchema(schema, { io: 'output', unrepresentable: 'any' }) as Js;
+    const defs = js.$defs ?? {};
+    const arrays = branches(js.properties?.results, defs).filter(isArray);
+    const items = arrays.map((a) => a.items ?? {});
+    shape =
+      arrays.length === 0
+        ? { roots: [js], defs, perResult: false }
+        : js.required?.includes('results')
+          ? { roots: items, defs, perResult: true }
+          : { roots: [js, ...items], defs, perResult: false };
+    schemaCache.set(base, shape);
+  }
+  return shape;
+}
+
+/** The shape of a spec's stdout document: its output, or a stream's summary. */
+const outputShape = (spec: AnyCommandSpec): Shape => shapeOf(spec.mode === 'single' ? spec.output : spec.summarySchema);
+
+/** The --dry-run envelope's top-level keys a command's output never has (pr create): they select the envelope. */
+const DRY_RUN_KEYS = ['wouldRun', 'preview'] as const;
 
 /**
  * `error`/`error.*` names the error envelope, which is never projected (emitDocument): such a path is
@@ -243,40 +310,84 @@ function rootsOf(js: Js, defs: Record<string, Js>): { roots: Js[]; perResult: bo
  */
 const namesError = (p: FieldPath): boolean => p.segments[0]?.key === 'error';
 
+/** The paths to project the command's output with, and the --dry-run envelope with. */
+export interface CheckedFields {
+  output: FieldPath[];
+  dryRun: FieldPath[];
+}
+
 /**
- * Throw VALIDATION unless every path resolves in the command's output schema; return the paths to
- * project with (an `error` path the output does not have is accepted and left out).
+ * Throw VALIDATION unless every path resolves in the command's output schema (or, with `dryRun`, in
+ * that or the dry-run envelope); return the paths each document is projected with. An `error` path the
+ * output does not have is accepted and left out of both.
  */
-export function checkFields(spec: AnyCommandSpec, paths: readonly FieldPath[]): FieldPath[] {
-  const js = outputJson(spec);
-  const defs = js.$defs ?? {};
-  const { roots, perResult } = rootsOf(js, defs);
+export function checkFields(
+  spec: AnyCommandSpec,
+  paths: readonly FieldPath[],
+  o: { dryRun?: boolean | undefined } = {},
+): CheckedFields {
+  const shape = outputShape(spec);
+  const envelope = o.dryRun ? shapeOf(DryRunEnvelope) : undefined;
   const issues: Issue[] = [];
-  const kept: FieldPath[] = [];
+  const kept: CheckedFields = { output: [], dryRun: [] };
   for (const p of paths) {
-    let problem = pathProblem(p, roots, defs);
-    if (problem && namesError(p)) continue;
-    if (!problem) {
-      kept.push(p);
-      continue;
-    }
-    if (problem && perResult && p.segments[0]?.key === 'results') {
-      const rest = p.segments
-        .slice(1)
-        .map((x) => x.key)
-        .join('.');
-      problem = `paths resolve against each results[] element: write '${rest || '…'}'`;
-    }
-    issues.push({ path: '--fields', code: 'unknown_field', message: `${p.raw}: ${problem}` });
+    const problem = pathProblem(p, shape.roots, shape.defs);
+    const inEnvelope = envelope !== undefined && pathProblem(p, envelope.roots, envelope.defs) === undefined;
+    if (!problem) kept.output.push(p);
+    if (inEnvelope) kept.dryRun.push(p);
+    if (!problem || inEnvelope || namesError(p)) continue;
+    issues.push(fieldIssue(p, problem, shape, envelope));
   }
   if (issues.length === 0) return kept;
-  const top = keysOf(roots.flatMap((r) => branches(r, defs)));
-  const scope = perResult
+  const top = keysOf(shape.roots.flatMap((r) => branches(r, shape.defs)));
+  const scope = shape.perResult
     ? 'Fields of each results[] element (other top-level keys are always kept)'
     : 'Top-level fields';
-  throw fieldsError(issues, `${issues[0]?.message}. ${scope}: ${top.join(', ')}. ${seeFields(spec)}`, {
+  const dry = envelope ? ` With --dry-run, also the envelope's: dryRun, ${DRY_RUN_KEYS.join(', ')}.` : '';
+  throw fieldsError(issues, `${issues[0]?.message}. ${scope}: ${top.join(', ')}.${dry} ${seeFields(spec)}`, {
     fields: top,
   });
+}
+
+/**
+ * `p` with the segment that failed replaced by a near key that was there (`runid` → `runId`), when the
+ * result resolves: this reaches paths past allPaths' depth and below an open node (`previw.title`).
+ */
+function segmentFixes(p: FieldPath, problem: Problem | undefined, shape: Shape): string[] {
+  if (!problem || 'text' in problem) return [];
+  const lower = problem.key.toLowerCase();
+  const near = [...problem.keys.filter((k) => k.toLowerCase() === lower), ...suggest(problem.key, problem.keys)];
+  return near.flatMap((k) => {
+    const segments = p.segments.map((s, i) => (i === problem.index ? { key: k, each: false } : s));
+    const fixed: FieldPath = { raw: segments.map((s) => s.key).join('.'), segments };
+    return pathProblem(fixed, shape.roots, shape.defs) === undefined ? [fixed.raw] : [];
+  });
+}
+
+function fieldIssue(p: FieldPath, problem: Problem, shape: Shape, envelope: Shape | undefined): Issue {
+  if (shape.perResult && p.segments[0]?.key === 'results') {
+    const rest = p.segments
+      .slice(1)
+      .map((x) => x.key)
+      .join('.');
+    const message = `${p.raw}: paths resolve against each results[] element: write '${rest || '…'}'`;
+    return { path: '--fields', code: 'unknown_field', message };
+  }
+  if ('text' in problem) return { path: '--fields', code: 'unknown_field', message: `${p.raw}: ${problem.text}` };
+  const shapes = envelope ? [shape, envelope] : [shape];
+  const near = closestPaths(
+    p,
+    shapes.flatMap((sh) => [...segmentFixes(p, pathProblem(p, sh.roots, sh.defs), sh), ...allPaths(sh)]),
+  );
+  const mean = near.length > 0 ? ` (did you mean ${near.map((n) => `'${n}'`).join(' or ')}?)` : '';
+  // A top-level miss: the hint lists the top-level fields once, after the issue.
+  const fields = problem.index === 0 ? '' : `; fields: ${problem.keys.join(', ')}`;
+  return {
+    path: '--fields',
+    code: 'unknown_field',
+    message: `${p.raw}: '${problem.key}' is not a field of ${problem.where}${mean}${fields}`,
+    ...(near.length > 0 ? { suggestions: near } : {}),
+  };
 }
 
 const seeFields = (spec: AnyCommandSpec): string => spec.fieldsHint ?? `See ghx ${commandName(spec)} --schema.`;
@@ -284,13 +395,35 @@ const seeFields = (spec: AnyCommandSpec): string => spec.fieldsHint ?? `See ghx 
 export interface FieldOptions {
   fields?: readonly string[] | undefined;
   brief?: boolean | undefined;
+  /** --dry-run: paths may also name the dry-run envelope ({dryRun, wouldRun, preview, warnings}). */
+  dryRun?: boolean | undefined;
 }
 
+/** What --fields and --brief resolve to; each projection is undefined when it keeps the whole document. */
+export interface Projection {
+  /** The command's output document (a stream's summary). */
+  project: ((doc: unknown) => unknown) | undefined;
+  /**
+   * The --dry-run envelope, projected only when a path names its own keys (preview.title, wouldRun):
+   * the command's output paths (--brief) describe a document a dry run does not print. It keeps
+   * `dryRun` and `warnings`.
+   */
+  dryRun: ((doc: unknown) => unknown) | undefined;
+  /** Warnings for the run's document (added to the command's own). */
+  warnings: Warning[];
+}
+
+const projector = (paths: readonly FieldPath[]): ((doc: unknown) => unknown) => {
+  const tree = fieldTree(paths);
+  return (doc) => projectDocument(doc, tree);
+};
+
 /**
- * Resolve --fields and --brief for a spec into a projection, or undefined when neither is given.
- * --brief with --fields selects the union. Throws before the command runs.
+ * Resolve --fields and --brief for a spec, before the command runs. --brief with --fields selects
+ * the union. Throws VALIDATION on a path that resolves nowhere.
  */
-export function fieldProjection(spec: AnyCommandSpec, o: FieldOptions): ((doc: unknown) => unknown) | undefined {
+export function fieldProjection(spec: AnyCommandSpec, o: FieldOptions): Projection {
+  const none: Projection = { project: undefined, dryRun: undefined, warnings: [] };
   const values: string[] = [];
   if (o.brief) {
     if (!spec.brief || spec.brief.length === 0) {
@@ -302,10 +435,13 @@ export function fieldProjection(spec: AnyCommandSpec, o: FieldOptions): ((doc: u
     values.push(spec.brief.join(','));
   }
   if (o.fields !== undefined) values.push(...o.fields);
-  if (values.length === 0) return undefined;
-  const paths = checkFields(spec, parseFields(values));
-  // Only `error` paths: a failure prints the whole envelope anyway, and a success prints in full.
-  if (paths.length === 0) return undefined;
-  const tree = fieldTree(paths);
-  return (doc) => projectDocument(doc, tree);
+  if (values.length === 0) return none;
+  const checked = checkFields(spec, parseFields(values), { dryRun: o.dryRun });
+  const own = checked.dryRun.some((p) => DRY_RUN_KEYS.some((k) => k === p.segments[0]?.key));
+  return {
+    // Only `error` paths: a failure prints the whole envelope anyway, and a success prints in full.
+    project: checked.output.length > 0 ? projector(checked.output) : undefined,
+    dryRun: own ? projector([...checked.dryRun, ...parseFields(['dryRun'])]) : undefined,
+    warnings: [],
+  };
 }

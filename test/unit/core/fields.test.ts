@@ -187,14 +187,14 @@ test('checkFields accepts real paths, records and nullable objects', () => {
 test('error and error.* are always allowed: they name the error envelope, which is never projected', () => {
   const kept = checkFields(statusSpec, parseFields(['state,error,error.code,error.details.warnings']));
   assert.deepEqual(
-    kept.map((p) => p.raw),
+    kept.output.map((p) => p.raw),
     ['state'],
   );
-  assert.deepEqual(fieldProjection(statusSpec, { fields: ['state,error'] })?.(doc), {
+  assert.deepEqual(fieldProjection(statusSpec, { fields: ['state,error'] }).project?.(doc), {
     state: 'OPEN',
     warnings: doc.warnings,
   });
-  assert.equal(fieldProjection(statusSpec, { fields: ['error'] }), undefined, 'nothing else selected: no projection');
+  assert.equal(fieldProjection(statusSpec, { fields: ['error'] }).project, undefined, 'only error: no projection');
   // A results[] element that has an `error` of its own keeps it as a real path.
   const withError = defineCommand({
     name: ['t', 'many'],
@@ -207,19 +207,29 @@ test('error and error.* are always allowed: they name the error envelope, which 
     },
   });
   assert.deepEqual(
-    checkFields(withError, parseFields(['error.code'])).map((p) => p.raw),
+    checkFields(withError, parseFields(['error.code'])).output.map((p) => p.raw),
     ['error.code'],
   );
 });
 
-test('checkFields names the valid top-level keys and suggests a near miss', () => {
+test('checkFields names the valid top-level keys and suggests the closest real paths', () => {
   const e = thrown(() => checkFields(statusSpec, parseFields(['stat'])));
   assert.equal(e.code, 'VALIDATION');
   assert.match(e.hint ?? '', /did you mean 'state'/);
   assert.match(e.hint ?? '', /Top-level fields: ref, state, head/);
   assert.ok((e.details as { fields: string[] }).fields.includes('merge'));
   const nested = thrown(() => checkFields(statusSpec, parseFields(['ci.stat'])));
-  assert.match(nested.hint ?? '', /'stat' is not a field of 'ci'.*did you mean 'state'/);
+  assert.match(
+    nested.hint ?? '',
+    /'stat' is not a field of 'ci' \(did you mean 'ci\.state'.*\); fields: state, counts, failing/,
+  );
+  // A missing or wrong prefix finds the real path by its tail; suggestions are whole paths, never [].
+  const prefix = thrown(() => checkFields(statusSpec, parseFields(['failing.name,blockers'])));
+  const issues = (prefix.details as { issues: { suggestions?: string[] }[] }).issues;
+  assert.deepEqual(issues[0]?.suggestions?.[0], 'ci.failing.name');
+  assert.deepEqual(issues[1]?.suggestions?.[0], 'merge.blockers');
+  const wrong = thrown(() => checkFields(statusSpec, parseFields(['merge.failing'])));
+  assert.match(wrong.hint ?? '', /did you mean 'ci\.failing'/);
 });
 
 test('[] is optional: a path through an array maps over it, checked and projected the same', () => {
@@ -236,7 +246,7 @@ test('[] is optional: a path through an array maps over it, checked and projecte
     passthrough: { json: { jobs: [{ name: 'a' }, [{ name: 'b' }]] } },
   });
   const bad = thrown(() => checkFields(statusSpec, parseFields(['merge.blockers.cod'])));
-  assert.match(bad.hint ?? '', /'cod' is not a field of 'merge\.blockers'.*did you mean 'code'/);
+  assert.match(bad.hint ?? '', /'cod' is not a field of 'merge\.blockers' \(did you mean 'merge\.blockers\.code'/);
 });
 
 test('hints never write [] (unquoted, zsh globs it)', () => {
@@ -264,10 +274,10 @@ test('a results document checks paths against the element, and a results[] prefi
 });
 
 test('fieldProjection: none, --brief, the --brief ∪ --fields union, and --brief without a preset', () => {
-  assert.equal(fieldProjection(statusSpec, {}), undefined);
-  const brief = fieldProjection(statusSpec, { brief: true });
+  assert.deepEqual(fieldProjection(statusSpec, {}), { project: undefined, dryRun: undefined, warnings: [] });
+  const brief = fieldProjection(statusSpec, { brief: true }).project;
   assert.deepEqual(brief?.(doc), { state: 'OPEN', merge: { ready: false }, warnings: doc.warnings });
-  const union = fieldProjection(statusSpec, { brief: true, fields: ['head.sha'] });
+  const union = fieldProjection(statusSpec, { brief: true, fields: ['head.sha'] }).project;
   assert.deepEqual(union?.(doc), {
     state: 'OPEN',
     head: { sha: 'abc' },
@@ -286,4 +296,52 @@ test('every shipped brief preset resolves against its command output schema', as
     assert.ok((s.brief?.length ?? 0) > 0, `${commandName(s)}: an empty brief`);
     checkFields(s, parseFields(s.brief ?? []));
   }
+});
+
+const writeSpec = defineCommand({
+  name: ['t', 'create'],
+  summary: 'c',
+  kind: 'write',
+  input: z.object({}),
+  output: z.object({ ref: z.string(), url: z.string(), draft: z.boolean() }),
+  brief: ['ref', 'url'],
+  async run() {
+    throw new Error('unused');
+  },
+});
+
+const envelope = {
+  dryRun: true,
+  wouldRun: [{ argv: ['api', 'POST'] }],
+  preview: { title: 't', body: 'b', base: 'main' },
+  warnings: [{ code: 'W', message: 'w' }],
+};
+
+test('--dry-run: paths may name the envelope (preview.*, wouldRun), which they then project', () => {
+  const fp = fieldProjection(writeSpec, { dryRun: true, fields: ['preview.title,wouldRun.argv'] });
+  assert.deepEqual(fp.dryRun?.(envelope), {
+    dryRun: true,
+    wouldRun: [{ argv: ['api', 'POST'] }],
+    preview: { title: 't' },
+    warnings: envelope.warnings,
+  });
+  assert.equal(fp.project, undefined, 'no path of the real output: one that does print it is whole');
+  const both = fieldProjection(writeSpec, { dryRun: true, fields: ['preview.base,ref'] });
+  assert.deepEqual(both.dryRun?.(envelope), { dryRun: true, preview: { base: 'main' }, warnings: envelope.warnings });
+  assert.deepEqual(both.project?.({ ref: 'r', url: 'u', draft: true }), { ref: 'r' });
+  // Without --dry-run, preview is not a field of the output.
+  const e = thrown(() => fieldProjection(writeSpec, { fields: ['preview.title'] }));
+  assert.match(e.hint ?? '', /'preview' is not a field of the output/);
+});
+
+test("--dry-run: the output paths (--brief, the real run's --fields) leave the envelope whole", () => {
+  const brief = fieldProjection(writeSpec, { dryRun: true, brief: true });
+  assert.equal(brief.dryRun, undefined);
+  assert.deepEqual(brief.project?.({ ref: 'r', url: 'u', draft: true }), { ref: 'r', url: 'u' });
+  const mixed = fieldProjection(writeSpec, { dryRun: true, fields: ['ref,draft,error,warnings'] });
+  assert.equal(mixed.dryRun, undefined, 'warnings alone does not select the envelope');
+  // A path in neither is VALIDATION, and the hint names the envelope's keys too.
+  const e = thrown(() => fieldProjection(writeSpec, { dryRun: true, fields: ['previw.title'] }));
+  assert.match(e.hint ?? '', /did you mean 'preview\.title'?/);
+  assert.match(e.hint ?? '', /With --dry-run, also the envelope's: dryRun, wouldRun, preview/);
 });

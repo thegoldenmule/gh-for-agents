@@ -114,6 +114,7 @@ export async function runStream(
       project: out.project,
     });
     const ctx: StreamContext = { ...built.ctx, events: { path: events.path, setPath: events.setPath } };
+    for (const w of out.fieldWarnings ?? []) ctx.warn(w);
 
     let seq = 0;
     let lastLineAt = clock.monotonic();

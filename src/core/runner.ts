@@ -58,6 +58,10 @@ export interface OutputOptions {
   artifacts: ArtifactStore;
   /** --fields/--brief (src/core/fields.ts): applied to every document but an error, before the bound. */
   project?: (doc: unknown) => unknown;
+  /** --fields under --dry-run that name the dry-run envelope's own keys (preview.title): projects it. */
+  projectDryRun?: (doc: unknown) => unknown;
+  /** Warnings from resolving --fields/--brief, added to the run's before the command's own. */
+  fieldWarnings?: readonly Warning[];
 }
 
 /** Resolve --pretty / --max-bytes / GHX_MAX_BYTES into output options. Invalid values are VALIDATION. */
@@ -258,8 +262,10 @@ export async function runCommandWith(
   try {
     out = outputOptions(globals, deps, name, artifacts);
     // Paths are checked here, before any input is read or gh is called: a typo never follows a write.
-    const project = fieldProjection(spec, globals);
-    if (project) out = { ...out, project };
+    const fp = fieldProjection(spec, globals);
+    if (fp.project) out = { ...out, project: fp.project };
+    if (fp.dryRun) out = { ...out, projectDryRun: fp.dryRun };
+    if (fp.warnings.length > 0) out = { ...out, fieldWarnings: fp.warnings };
   } catch (e) {
     const fallback = { pretty: false, maxBytes: DEFAULT_MAX_BYTES, command: name, artifacts };
     return { exitCode: await emitError(deps.stdout, e, fallback, deps.clock), forced: false };
@@ -303,6 +309,7 @@ export async function runCommandWith(
     });
     warnings = built.warnings;
     previews = built.previews;
+    for (const w of out.fieldWarnings ?? []) built.ctx.warn(w);
 
     const work = spec.run(input, built.ctx);
     const shutdownHit = new Promise<'shutdown'>((r) => {
@@ -352,12 +359,13 @@ export async function runCommandWith(
       const wouldRun =
         e.argv.length === 0 ? [] : [{ argv: e.argv, ...(e.stdin !== undefined ? { stdin: e.stdin } : {}) }];
       const preview = previews.length === 0 ? null : previews.length === 1 ? previews[0] : previews;
-      // The dry-run envelope is not the command's output: --fields does not apply to it.
-      const { project: _project, ...plain } = out;
+      // The dry-run envelope is not the command's output: its paths (--brief) do not apply to it; paths
+      // that name the envelope's own keys (preview.title) do (fields.ts Projection.dryRun).
+      const { project: _project, projectDryRun, ...plain } = out;
       await emitDocument(
         deps.stdout,
         { dryRun: true, wouldRun, preview, ...(warnings.length > 0 ? { warnings } : {}) },
-        plain,
+        projectDryRun ? { ...plain, project: projectDryRun } : plain,
       );
       return { exitCode: ExitCode.OK, forced: false };
     }
