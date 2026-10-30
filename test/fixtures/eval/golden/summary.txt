@@ -7,7 +7,8 @@ Check PR/CI status   100% → 100%  same            $0.027 → $0.027  same
 Too few tasks to compare: Diagnose a CI failure; Create a PR; Merge a PR; Wait for CI; Whole PR,
   create to merge.
 first try = the first attempt at the task worked: no agent mistake and nothing denied, up to and
-  including its first command of that kind (a dry run counts). Red CI or a busy run is not a miss.
+  including its first command of that kind (a dry run counts); for a whole PR, none anywhere in it.
+  Red CI or a busy run is not a miss.
 cost = API spend for one task, as if each agent in it started from a 50k-token context.
 better/worse = a clear difference; same = no clear change; too few = under 5 tasks on a side.
 

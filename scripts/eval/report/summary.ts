@@ -545,7 +545,8 @@ export function renderSummary(report: Report): string {
     ...wrap(
       'first try = ',
       'the first attempt at the task worked: no agent mistake and nothing denied, up to and including its ' +
-        'first command of that kind (a dry run counts). Red CI or a busy run is not a miss.',
+        'first command of that kind (a dry run counts); for a whole PR, none anywhere in it. Red CI or a busy ' +
+        'run is not a miss.',
       2,
     ),
     `cost = API spend for one task, as if each agent in it started from a ${Math.round(s.ref_ctx / 1000)}k-token context.`,
