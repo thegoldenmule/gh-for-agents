@@ -477,11 +477,3 @@ export function isGhx(inv: Invocation): boolean {
 export function isCiWait(inv: Invocation): boolean {
   return isGhx(inv) && inv.argv[1] === 'ci' && inv.argv[2] === 'wait';
 }
-
-/**
- * The command starts with `ghx ci wait` (after whitespace and VAR=value prefixes only), so
- * `cd x && ghx ci wait 1` and `timeout 60 ghx ci wait 1` don't count.
- */
-export function startsWithCiWait(command: string): boolean {
-  return /^\s*(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|[^\s'"]*)\s+)*ghx\s+ci\s+wait(?:\s|$)/.test(command);
-}

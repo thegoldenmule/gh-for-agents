@@ -6,7 +6,8 @@
 // A raw gh write that ghx wraps is denied in every mode, wherever -R/--repo sits (04 final review):
 // permissions.deny prefix rules cannot match `gh -R o/r pr merge 1`. GHX_HOOK_MODE governs the rest.
 // All of that enforcement applies only in a repo with .github/ghx.json (04 "enforcement scope"); elsewhere
-// the hook only moves `ghx ci wait` to the background. A gh call that names another repo (-R, a URL, a
+// the hook only places `ghx ci wait`: the main thread's in the background, a subagent's in the foreground
+// with --foreground and the 10-minute Bash timeout (src/hook/wait.ts). A gh call that names another repo (-R, a URL, a
 // literal gh api repos/o/r path) is judged by that repo, not the cwd: unless it is one of the checkout's
 // own remotes, it is out of scope too (src/hook/foreign.ts).
 import type { Clock } from '../core/clock.ts';
@@ -15,7 +16,8 @@ import { isForeign, localRepoSlugs } from './foreign.ts';
 import { logHookEvent } from './log.ts';
 import REPLACES from './replaces.generated.json' with { type: 'json' };
 import { ghxConfigured } from './repo.ts';
-import { type Invocation, isCiWait, isGh, isGhx, scanShell, startsWithCiWait } from './shell.ts';
+import { type Invocation, isCiWait, isGh, isGhx, scanShell } from './shell.ts';
+import { isSubagent, runWaitAdvice, waitRewrite } from './wait.ts';
 
 export type HookMode = 'ask' | 'deny' | 'off';
 
@@ -107,8 +109,7 @@ function ciWaitCommand(polls: readonly Invocation[]): string {
   return 'ghx ci wait <pr>';
 }
 
-const loopReason = (cmd: string): string =>
-  `Don't poll CI. Run \`${cmd}\` with the Bash tool and run_in_background: true, then continue other work or end your turn. You are re-invoked when it exits; its stdout is one JSON summary with the diagnosis, and its exit code is the outcome.`;
+const loopReason = (cmd: string, subagent: boolean): string => `Don't poll CI. ${runWaitAdvice(cmd, subagent)}`;
 
 /** Does a raw invocation match a spec `replaces` pattern? Placeholders ({x}, <x>) match one path segment. */
 export function matchesPattern(pattern: string, argv: readonly string[]): boolean {
@@ -225,6 +226,7 @@ function nudge(mode: 'ask' | 'deny', reason: string): HookOutput {
 export type HookRule =
   | 'wrapped-write'
   | 'ci-wait-background'
+  | 'ci-wait-foreground'
   | 'monitor-ci-wait'
   | 'poll-loop'
   | 'compound-replaces'
@@ -236,10 +238,16 @@ export interface HookDecision {
 }
 
 const none: HookDecision = { out: null, rule: null };
-const background = (input: Record<string, unknown>): HookDecision => ({
-  out: { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...input, run_in_background: true } } },
-  rule: 'ci-wait-background',
-});
+
+/** The `ghx ci wait` rewrite (src/hook/wait.ts): updatedInput only, no permission decision. */
+function rewriteWait(event: Record<string, unknown>, input: Record<string, unknown>): HookDecision | null {
+  const r = waitRewrite(event, input);
+  if (r === null) return null;
+  return {
+    out: { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: r.input } },
+    rule: r.kind === 'background' ? 'ci-wait-background' : 'ci-wait-foreground',
+  };
+}
 
 export interface HookOptions {
   /**
@@ -267,11 +275,7 @@ export function decideHookRule(event: unknown, mode: HookMode, enforce = true, o
   const command = input.command;
   if (typeof command !== 'string') return none;
 
-  if (!enforce) {
-    if (mode === 'off' || tool !== 'Bash' || !startsWithCiWait(command) || input.run_in_background === true)
-      return none;
-    return background(input);
-  }
+  if (!enforce) return mode === 'off' || tool !== 'Bash' ? none : (rewriteWait(event, input) ?? none);
 
   const scan = scanShell(command);
   // A gh call aimed at another repo is judged by that repo, which never opted into ghx here.
@@ -288,22 +292,21 @@ export function decideHookRule(event: unknown, mode: HookMode, enforce = true, o
     };
   if (mode === 'off') return none;
 
-  if (tool === 'Bash' && startsWithCiWait(command) && input.run_in_background !== true) return background(input);
+  const rewrite = tool === 'Bash' ? rewriteWait(event, input) : null;
+  if (rewrite) return rewrite;
 
+  const subagent = isSubagent(event);
   const waits = invocations.filter(isCiWait);
   if (tool === 'Monitor' && waits.length > 0) {
     return {
-      out: nudge(
-        mode,
-        `Don't run ghx ci wait under Monitor. Run \`${ciWaitCommand(waits)}\` with the Bash tool and run_in_background: true; you are re-invoked once when it exits, with one JSON summary.`,
-      ),
+      out: nudge(mode, `Don't run ghx ci wait under Monitor. ${runWaitAdvice(ciWaitCommand(waits), subagent)}`),
       rule: 'monitor-ci-wait',
     };
   }
 
   const polls = invocations.filter(pollsCi);
   if (polls.length > 0 && (scan.loop || scan.sleep))
-    return { out: nudge(mode, loopReason(ciWaitCommand(polls))), rule: 'poll-loop' };
+    return { out: nudge(mode, loopReason(ciWaitCommand(polls), subagent)), rule: 'poll-loop' };
 
   if (compound) return { out: nudge(mode, compound), rule: 'compound-replaces' };
   for (const inv of gh) {

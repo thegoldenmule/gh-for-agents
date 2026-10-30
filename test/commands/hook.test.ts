@@ -111,6 +111,51 @@ test('leading whitespace and env prefixes are rewritten; anything before ghx is 
   );
 });
 
+test('bash-ci-wait-subagent.json: a subagent waits in the foreground with --foreground and the 10-minute timeout', async () => {
+  const ev = event('bash-ci-wait-subagent.json');
+  const { out } = await hook(fixture('bash-ci-wait-subagent.json'));
+  assert.deepEqual(out, {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      updatedInput: {
+        ...ev.tool_input,
+        command: 'ghx ci wait --foreground 3266 -R octo/demo --until mergeable',
+        timeout: 600_000,
+      },
+    },
+  });
+  // Explicitly in the background: the subagent's choice stands.
+  const bg = { ...ev, tool_input: { ...ev.tool_input, run_in_background: true } };
+  assert.equal((await hook(JSON.stringify(bg))).stdout, '');
+  // The same in an unconfigured repo (placement is not enforcement), but not under GHX_HOOK_MODE=off.
+  const plain = checkout('plain-subagent', { configured: false });
+  assert.equal(
+    (await hook(fixture('bash-ci-wait-subagent.json'), {}, plain)).out?.hookSpecificOutput.updatedInput?.timeout,
+    600_000,
+  );
+  assert.equal((await hook(fixture('bash-ci-wait-subagent.json'), { GHX_HOOK_MODE: 'off' })).stdout, '');
+});
+
+test('ghx ci wait --help or --schema is not moved anywhere', () => {
+  for (const c of ['ghx ci wait --help', 'ghx ci wait -h', 'ghx ci wait --schema']) {
+    assert.equal(decideHook(bash(c), 'deny'), null, c);
+    assert.equal(decideHook({ ...bash(c), agent_id: 'a1' }, 'deny'), null, c);
+  }
+});
+
+test('a subagent is told to wait in the foreground: Monitor and polling loops name --foreground, not the background', () => {
+  const sub = (e: Record<string, unknown>) => ({ ...e, agent_id: 'a1' });
+  const mon = reason(decideHook(sub(monitor('ghx ci wait 12')), 'deny'));
+  assert.match(mon, /`ghx ci wait 12 --foreground`/);
+  assert.match(mon, /exit 15 re-run the identical command/);
+  assert.doesNotMatch(mon, /run_in_background: true/);
+  const loop = reason(decideHook(sub(bash('while true; do gh pr checks 7; sleep 30; done')), 'deny'));
+  assert.match(loop, /`ghx ci wait 7 --foreground`/);
+  assert.doesNotMatch(loop, /run_in_background: true/);
+  // The main thread keeps the background advice.
+  assert.match(reason(decideHook(monitor('ghx ci wait 12'), 'deny')), /run_in_background: true/);
+});
+
 test('GHX_HOOK_MODE=off: no output, not even the rewrite', async () => {
   for (const f of ['bash-ci-wait-foreground.json', 'monitor-gh-checks-loop.json', 'bash-gh-pr-view.json']) {
     assert.equal((await hook(fixture(f), { GHX_HOOK_MODE: 'off' })).stdout, '', f);

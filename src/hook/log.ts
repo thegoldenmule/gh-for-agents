@@ -12,7 +12,8 @@ import type { HookDecision, HookMode, HookRule } from './rules.ts';
  *
  * `decision` is what Claude Code does with the reply: `allow` (no output), `rewrite` (updatedInput
  * only), `ask` or `deny` (permissionDecision). `rule` names the branch: `wrapped-write` is the
- * always-denied raw gh write; `ci-wait-background` is the rewrite; `monitor-ci-wait`, `poll-loop`,
+ * always-denied raw gh write; `ci-wait-background` and `ci-wait-foreground` (a subagent's, or
+ * an explicit --foreground) are the rewrites; `monitor-ci-wait`, `poll-loop`,
  * `compound-replaces` and `replaces` are the nudges toward ghx, delivered as `ask` or `deny` by `mode`.
  */
 export interface HookLogLine {
