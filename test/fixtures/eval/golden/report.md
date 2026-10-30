@@ -58,35 +58,35 @@ Three numbers, because they measure different costs: human turns (prompts a pers
 
 ## By intent
 
-Episodes and background waits by intent (derived waits excluded), gh-pre → ghx-post, one table per repo and model. Tool calls and result characters: median [95% CI] p90.
+Episodes and background waits by intent (derived waits excluded), gh-pre → ghx-post, one table per repo and model. Tool calls and result characters: median [95% CI] p90. First try: the share of tasks with no mistake or denial up to their first call of the intent; with a mistake: the share with any agent mistake.
 
 ### `-tmp-golden-acme`, claude-opus-5-5
 
-| intent | context | n gh / ghx | tool calls | p | result chars | with error | wall-clock s |
-|---|---|---|---|---|---|---|---|
-| create | main | 1° / 3° | _1 p90 1_° → _2 p90 3.6_° | – | _39 p90 39_° → _62 p90 204_° | _0%_° → _33%_° | _3 p90 3_° → _13 p90 29_° |
-| diagnose | main | 3° / 3° | _3 p90 3_° → _1 p90 1_° | – | _1,162 p90 1,210_° → _164 p90 164_° | _0%_° → _0%_° | _23 p90 23_° → _3 p90 3_° |
-| diagnose | subagent | 1° / 1° | _3 p90 3_° → _1 p90 1_° | – | _1,749 p90 1,749_° → _164 p90 164_° | _0%_° → _0%_° | _23 p90 23_° → _3 p90 3_° |
-| merge | main | 3° / 3° | _2 p90 2_° → _1 p90 1_° | – | _293 p90 293_° → _77 p90 77_° | _0%_° → _0%_° | _13 p90 13_° → _3 p90 3_° |
-| status | main | 6 / 8 | 1 [1–1] p90 1 → 1 [1–1] p90 1 | 1.000 | 142 [142–142] p90 252 → 262 [261–263] p90 263 | 0% → 0% | 3 [3–3] p90 3 → 3 [3–3] p90 3 |
-| wait | main | 3° / 3° | _2 p90 2_° → _2 p90 2_° | – | _207 p90 207_° → _285 p90 285_° | _0%_° → _0%_° | _859 p90 859_° → _1,099 p90 1,099_° |
+| intent | context | n gh / ghx | tool calls | p | result chars | first try | p | with a mistake | wall-clock s |
+|---|---|---|---|---|---|---|---|---|---|
+| create | main | 1° / 3° | _1 p90 1_° → _2 p90 3.6_° | – | _39 p90 39_° → _62 p90 204_° | _100%_° → _67%_° | – | _0%_° → _33%_° | _3 p90 3_° → _13 p90 29_° |
+| diagnose | main | 3° / 3° | _3 p90 3_° → _1 p90 1_° | – | _1,162 p90 1,210_° → _164 p90 164_° | _100%_° → _100%_° | – | _0%_° → _0%_° | _23 p90 23_° → _3 p90 3_° |
+| diagnose | subagent | 1° / 1° | _3 p90 3_° → _1 p90 1_° | – | _1,749 p90 1,749_° → _164 p90 164_° | _100%_° → _100%_° | – | _0%_° → _0%_° | _23 p90 23_° → _3 p90 3_° |
+| merge | main | 3° / 3° | _2 p90 2_° → _1 p90 1_° | – | _293 p90 293_° → _77 p90 77_° | _100%_° → _100%_° | – | _0%_° → _0%_° | _13 p90 13_° → _3 p90 3_° |
+| status | main | 6 / 8 | 1 [1–1] p90 1 → 1 [1–1] p90 1 | 1.000 | 142 [142–142] p90 252 → 262 [261–263] p90 263 | 100% → 100% | 1.000 | 0% → 0% | 3 [3–3] p90 3 → 3 [3–3] p90 3 |
+| wait | main | 3° / 3° | _2 p90 2_° → _2 p90 2_° | – | _207 p90 207_° → _285 p90 285_° | _100%_° → _100%_° | – | _0%_° → _0%_° | _859 p90 859_° → _1,099 p90 1,099_° |
 
 ## By unit, split by context
 
-gh-pre → ghx-post. Round trips here are GitHub round trips (API calls emitting a gh/ghx call); cost_norm is the headline dollar figure. Medians [95% CI]; the rest are means per unit.
+gh-pre → ghx-post. Round trips here are GitHub round trips (API calls emitting a gh/ghx call); cost_norm is the headline dollar figure. Medians [95% CI]; the rest are means per unit. Failed GitHub calls split three ways: mistakes (the agent’s), outcomes (CI or PR state, GitHub) and denials (hook, permission, policy).
 
 ### `-tmp-golden-acme`, claude-opus-5-5
 
-| unit | context | n gh / ghx | GitHub round trips | cost_norm | p | pipes | errors | refusals | cache rewrites | result tokens |
-|---|---|---|---|---|---|---|---|---|---|---|
-| create | main | 1° / 3° | _1_° → _1_° | _$0.026_° → _$0.041_° | – | _0.00_° → _0.00_° | _0.00_° → _0.33_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _87.73_° → _98.18_° |
-| diagnose | main | 3° / 3° | _3_° → _1_° | _$0.065_° → _$0.027_° | – | _2.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _738_° → _145_° |
-| diagnose | subagent | 1° / 1° | _3_° → _1_° | _$0.080_° → _$0.032_° | – | _2.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _1,005_° → _145_° |
-| merge | main | 3° / 3° | _2_° → _1_° | _$0.042_° → _$0.026_° | – | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _273_° → _105_° |
-| status | main | 6 / 8 | 1 [1–1] → 1 [1–1] | $0.027 [$0.027–$0.027] → $0.027 [$0.027–$0.028] | 0.846 | 0.00 → 0.00 | 0.00 → 0.00 | 0.00 → 0.00 | 0.00 → 0.00 | 134 [134–134] → 189 [189–190] |
-| pr cycle | main | 3° / 8 | _3_° → 1 [1–2] | _$0.111_° → $0.027 [$0.027–$0.083] | – | _1.00_° → 0.00 | _0.00_° → 0.00 | _0.00_° → 0.00 | _0.00_° → 0.00 | _503_° → 190 [190–458] |
-| pr cycle | subagent | 1° / 1° | _1_° → _1_° | _$0.028_° → _$0.298_° | – | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _1.00_° | _185_° → _270_° |
-| pr lifecycle | main | 3° / 8 | _9_° → 1 [1–10] | _$0.247_° → $0.027 [$0.027–$0.318] | – | _3.67_° → 0.00 | _0.00_° → 0.13 | _0.00_° → 0.00 | _0.00_° → 0.00 | _1,575_° → 190 [190–1,247] |
+| unit | context | n gh / ghx | GitHub round trips | cost_norm | p | pipes | mistakes | outcomes | denials | cache rewrites | result tokens |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| create | main | 1° / 3° | _1_° → _1_° | _$0.026_° → _$0.041_° | – | _0.00_° → _0.00_° | _0.00_° → _0.33_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _87.73_° → _98.18_° |
+| diagnose | main | 3° / 3° | _3_° → _1_° | _$0.065_° → _$0.027_° | – | _2.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _738_° → _145_° |
+| diagnose | subagent | 1° / 1° | _3_° → _1_° | _$0.080_° → _$0.032_° | – | _2.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _1,005_° → _145_° |
+| merge | main | 3° / 3° | _2_° → _1_° | _$0.042_° → _$0.026_° | – | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _273_° → _105_° |
+| status | main | 6 / 8 | 1 [1–1] → 1 [1–1] | $0.027 [$0.027–$0.027] → $0.027 [$0.027–$0.028] | 0.846 | 0.00 → 0.00 | 0.00 → 0.00 | 0.00 → 0.00 | 0.00 → 0.00 | 0.00 → 0.00 | 134 [134–134] → 189 [189–190] |
+| pr cycle | main | 3° / 8 | _3_° → 1 [1–2] | _$0.111_° → $0.027 [$0.027–$0.083] | – | _1.00_° → 0.00 | _0.00_° → 0.00 | _0.00_° → 0.00 | _0.00_° → 0.00 | _0.00_° → 0.00 | _503_° → 190 [190–458] |
+| pr cycle | subagent | 1° / 1° | _1_° → _1_° | _$0.028_° → _$0.298_° | – | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _0.00_° | _0.00_° → _1.00_° | _185_° → _270_° |
+| pr lifecycle | main | 3° / 8 | _9_° → 1 [1–10] | _$0.247_° → $0.027 [$0.027–$0.318] | – | _3.67_° → 0.00 | _0.00_° → 0.13 | _0.00_° → 0.00 | _0.00_° → 0.00 | _0.00_° → 0.00 | _1,575_° → 190 [190–1,247] |
 
 ## Waiting for CI, by mechanism
 
@@ -101,7 +101,7 @@ Wait units per repo, model and bucket. cost_norm per wait: median [95% CI]; cach
 
 ## Whole PR lifecycle
 
-One session (with its subagents) and one PR, created and merged in that session; gh-pre vs ghx-post. A lifecycle is filed under main when any of its work ran in the main thread. Medians [95% CI].
+One session (with its subagents) and one PR, created and merged in that session; gh-pre vs ghx-post. A lifecycle is filed under main when any of its work ran in the main thread; the subagent row says how much of it ran in subagents. Medians [95% CI] unless a row says share or mean.
 
 ### `-tmp-golden-acme`, claude-opus-5-5
 
@@ -109,6 +109,9 @@ main:
 
 |  | raw gh (1°) | ghx (3°) | p |
 |---|---|---|---|
+| No mistake or denial (share) | _100%_° | _67%_° | – |
+| With an agent mistake (share) | _0%_° | _33%_° | – |
+| Round trips in subagents (mean) | _0%_° | _0%_° | – |
 | GitHub calls | _9_° | _7_° | – |
 | Result chars | _1,924_° | _1,027_° | – |
 | Wakeups | _1_° | _1_° | – |

@@ -94,6 +94,13 @@ function nonzeroOf(cell: Cell | undefined, id: string): string {
   return cell.greyed ? `_${pct(m.nonzero)}_${GREY}` : pct(m.nonzero);
 }
 
+/** A share from a 0/1 or ratio metric's mean, as a percentage (first try, subagent share). */
+function rateOf(cell: Cell | undefined, id: string): string {
+  const m = cell?.metrics[id];
+  if (!cell || !m) return '–';
+  return cell.greyed ? `_${pct(m.mean)}_${GREY}` : pct(m.mean);
+}
+
 const nOf = (cell: Cell | undefined): string => (cell ? `${cell.n}${cell.greyed ? GREY : ''}` : '0');
 const arrow = (a: string, b: string): string => `${a} → ${b}`;
 
@@ -277,7 +284,8 @@ function byIntent(v: Ctx): string[] {
     '## By intent',
     '',
     'Episodes and background waits by intent (derived waits excluded), gh-pre → ghx-post, one table per repo ' +
-      'and model. Tool calls and result characters: median [95% CI] p90.',
+      'and model. Tool calls and result characters: median [95% CI] p90. First try: the share of tasks with no ' +
+      'mistake or denial up to their first call of the intent; with a mistake: the share with any agent mistake.',
     '',
   ];
   const groups = comparisonGroups(v.report, 'intent', ['episode'], 'gh-pre', 'ghx-post');
@@ -294,13 +302,26 @@ function byIntent(v: Ctx): string[] {
         arrow(stat(v, a, 'tool_calls', { p90: true }), stat(v, b, 'tool_calls', { p90: true })),
         pOf(c, 'tool_calls'),
         arrow(stat(v, a, 'res_chars', { p90: true }), stat(v, b, 'res_chars', { p90: true })),
-        arrow(nonzeroOf(a, 'errors'), nonzeroOf(b, 'errors')),
+        arrow(rateOf(a, 'first_try'), rateOf(b, 'first_try')),
+        pOf(c, 'first_try'),
+        arrow(nonzeroOf(a, 'mistakes'), nonzeroOf(b, 'mistakes')),
         arrow(stat(v, a, 'wall_s', { p90: true }), stat(v, b, 'wall_s', { p90: true })),
       ];
     });
     out.push(
       ...table(
-        ['intent', 'context', 'n gh / ghx', 'tool calls', 'p', 'result chars', 'with error', 'wall-clock s'],
+        [
+          'intent',
+          'context',
+          'n gh / ghx',
+          'tool calls',
+          'p',
+          'result chars',
+          'first try',
+          'p',
+          'with a mistake',
+          'wall-clock s',
+        ],
         rows,
       ),
     );
@@ -313,7 +334,8 @@ function byUnit(v: Ctx): string[] {
     '## By unit, split by context',
     '',
     'gh-pre → ghx-post. Round trips here are GitHub round trips (API calls emitting a gh/ghx call); cost_norm is ' +
-      'the headline dollar figure. Medians [95% CI]; the rest are means per unit.',
+      'the headline dollar figure. Medians [95% CI]; the rest are means per unit. Failed GitHub calls split three ' +
+      'ways: mistakes (the agent’s), outcomes (CI or PR state, GitHub) and denials (hook, permission, policy).',
     '',
   ];
   const groups = comparisonGroups(v.report, 'unit', ['episode', 'pr_cycle', 'pr_lifecycle'], 'gh-pre', 'ghx-post');
@@ -331,8 +353,9 @@ function byUnit(v: Ctx): string[] {
         arrow(stat(v, a, 'cost_norm'), stat(v, b, 'cost_norm')),
         pOf(c, 'cost_norm'),
         arrow(meanOf(a, 'pipes'), meanOf(b, 'pipes')),
-        arrow(meanOf(a, 'errors'), meanOf(b, 'errors')),
-        arrow(meanOf(a, 'refusals'), meanOf(b, 'refusals')),
+        arrow(meanOf(a, 'mistakes'), meanOf(b, 'mistakes')),
+        arrow(meanOf(a, 'outcomes'), meanOf(b, 'outcomes')),
+        arrow(meanOf(a, 'denials'), meanOf(b, 'denials')),
         arrow(meanOf(a, 'cache_rewrites'), meanOf(b, 'cache_rewrites')),
         arrow(stat(v, a, 'res_tok_est'), stat(v, b, 'res_tok_est')),
       ];
@@ -347,8 +370,9 @@ function byUnit(v: Ctx): string[] {
           'cost_norm',
           'p',
           'pipes',
-          'errors',
-          'refusals',
+          'mistakes',
+          'outcomes',
+          'denials',
           'cache rewrites',
           'result tokens',
         ],
@@ -401,7 +425,10 @@ function waits(v: Ctx): string[] {
   ];
 }
 
-const LIFECYCLE: { id: string; name: string; per?: number; unit?: string }[] = [
+const LIFECYCLE: { id: string; name: string; per?: number; unit?: string; share?: 'mean' | 'nonzero' }[] = [
+  { id: 'first_try', name: 'No mistake or denial (share)', share: 'mean' },
+  { id: 'mistakes', name: 'With an agent mistake (share)', share: 'nonzero' },
+  { id: 'subagent_share', name: 'Round trips in subagents (mean)', share: 'mean' },
   { id: 'gh_tool_calls', name: 'GitHub calls' },
   { id: 'res_chars', name: 'Result chars' },
   { id: 'wakeups', name: 'Wakeups' },
@@ -416,7 +443,8 @@ function lifecycle(v: Ctx): string[] {
     '## Whole PR lifecycle',
     '',
     'One session (with its subagents) and one PR, created and merged in that session; gh-pre vs ghx-post. ' +
-      'A lifecycle is filed under main when any of its work ran in the main thread. Medians [95% CI].',
+      'A lifecycle is filed under main when any of its work ran in the main thread; the subagent row says how ' +
+      'much of it ran in subagents. Medians [95% CI] unless a row says share or mean.',
     '',
   ];
   const groups = comparisonGroups(v.report, 'created_merged', ['pr_lifecycle'], 'gh-pre', 'ghx-post');
@@ -427,6 +455,10 @@ function lifecycle(v: Ctx): string[] {
       const a = cellFor(v, c, c.a);
       const b = cellFor(v, c, c.b);
       const rows = LIFECYCLE.map((m) => {
+        if (m.share) {
+          const f = m.share === 'mean' ? rateOf : nonzeroOf;
+          return [m.name, f(a, m.id), f(b, m.id), pOf(c, m.id)];
+        }
         const o = { ...(m.per ? { per: m.per } : {}), ...(m.unit ? { unit: m.unit } : {}) };
         return [m.name, stat(v, a, m.id, o), stat(v, b, m.id, o), pOf(c, m.id)];
       });
