@@ -321,6 +321,17 @@ test('wrapped gh writes are denied in every mode, wherever -R/--repo sits', asyn
   assert.equal(out?.hookSpecificOutput.permissionDecision, 'deny');
 });
 
+test('gh pr create and gh pr edit point at ghx pr create --example, not the schema', () => {
+  const create = reason(decideHook(bash('gh pr create --title x --body y'), 'deny'));
+  assert.match(create, /ghx pr create --input pr\.json/);
+  assert.match(create, /`ghx pr create --example`/);
+  assert.doesNotMatch(create, /ghx schema/);
+  const edit = reason(decideHook(bash('gh pr edit 12 --body z'), 'deny'));
+  assert.match(edit, /ghx pr edit 12 --input patch\.json/);
+  assert.match(edit, /`ghx pr create --example`/);
+  assert.match(reason(decideHook(bash('gh -R o/r pr create --title x'), 'deny')), /--input pr\.json -R o\/r/);
+});
+
 test('a foreground ghx ci wait chained with a raw write is denied, not rewritten', () => {
   const out = decideHook(bash('ghx ci wait 1 && gh pr merge 1'), 'ask');
   assert.equal(out?.hookSpecificOutput.permissionDecision, 'deny');

@@ -154,6 +154,16 @@ function isBare(pattern: string): boolean {
   return /^gh [a-z-]+ [a-z-]+$/.test(pattern.trim());
 }
 
+/**
+ * PR writes start from a worked example, not the schema: `ghx pr create --example` prints a valid pr.json
+ * for this repo (its components and rules), which is what agents otherwise copy from a sibling's file.
+ */
+const PR_INPUT_NOTE: Readonly<Record<string, string>> = {
+  'pr create':
+    'Run `ghx pr create --example` first: it prints a valid pr.json for this repo to edit, then pass it with --input.',
+  'pr edit': 'patch.json holds only the fields to change; `ghx pr create --example` shows the shape of each field.',
+};
+
 /** The nudge for one gh invocation outside a loop, or undefined. */
 function replacementReason(inv: Invocation): string | undefined {
   const raw = inv.argv.slice(1);
@@ -162,6 +172,8 @@ function replacementReason(inv: Invocation): string | undefined {
   if (d.kind === 'refuse' && d.error.code === 'USAGE_UNKNOWN_COMMAND' && isObject(d.error.details)) {
     const suggestion = d.error.details.suggestion;
     if (Array.isArray(suggestion)) {
+      const note = d.wrapped === undefined ? undefined : PR_INPUT_NOTE[d.wrapped];
+      if (note !== undefined) return `ghx replaces \`${shown}\`. Use: ${suggestion.join(' ')}. ${note}`;
       return `ghx replaces \`${shown}\`. ${d.error.hint ?? `Use: ${suggestion.join(' ')}.`}`;
     }
   }
