@@ -62,6 +62,12 @@ interface BaseSpec<I extends z.ZodObject> {
   brief?: readonly string[];
   /** Where a --fields or --brief error sends the caller for the field list. Default: `See ghx <name> --schema.` */
   fieldsHint?: string;
+  /**
+   * `ghx schema <name>` and `--schema`: fields that replace the derived document's (a compact `input` with
+   * the rules, say). `config` is the cwd repo's .github/ghx.json when one is found. `schema --all` keeps
+   * the derived schema.
+   */
+  schemaView?: (config: LoadedConfig['config'] | undefined) => Record<string, unknown>;
   /** 'required': JSON must come from --input (USAGE_INPUT_MISSING otherwise). Default 'optional'. */
   jsonInput?: 'required' | 'optional';
   /**

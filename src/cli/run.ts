@@ -17,7 +17,7 @@ import { ALLOWED_NAMES, API_USAGE } from '../passthrough/policy.ts';
 import { deriveInterface, parseCommandArgv } from './args.ts';
 import { commandHelp, globalHelp, groupHelp } from './help.ts';
 import type { Registry } from './registry.ts';
-import { allSchemas, commandSchema, SCHEMA_TARGETS, schemaIndex } from './schema.ts';
+import { allSchemas, commandSchema, cwdConfig, SCHEMA_TARGETS, schemaIndex } from './schema.ts';
 import { onUnknown as defaultOnUnknown, type UnknownContext, type UnknownResult } from './unknown.ts';
 
 export interface CliDeps extends RunDeps {
@@ -114,7 +114,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<Ru
       }
       const hit = await deps.registry.resolve(target);
       if (hit && hit.consumed === target.length) {
-        await emitDocument(deps.stdout, commandSchema(hit.spec), unbounded(out));
+        await emitDocument(deps.stdout, commandSchema(hit.spec, { config: cwdConfig(deps.cwd) }), unbounded(out));
         return done(ExitCode.OK);
       }
       const names = [...Object.keys(SCHEMA_TARGETS), ...(await deps.registry.names()).map((n) => n.join(' '))];
@@ -159,7 +159,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<Ru
       return done(ExitCode.OK);
     }
     if (parsed.globals.schema) {
-      await emitDocument(deps.stdout, commandSchema(spec), unbounded(out));
+      await emitDocument(deps.stdout, commandSchema(spec, { config: cwdConfig(deps.cwd) }), unbounded(out));
       return done(ExitCode.OK);
     }
     return await runCommand(spec, parsed, deps);
