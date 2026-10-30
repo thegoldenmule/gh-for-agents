@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { z } from 'zod';
 import { parseConfigText } from '../../../src/config/load.ts';
 import { ConfigSchema, defaultConfig } from '../../../src/config/schema.ts';
+import { aliasMap } from '../../../src/config/sections/components.ts';
 import { type GhxError, isGhxError } from '../../../src/core/errors.ts';
 import { isValidGlob, matchesGlob } from '../../../src/util/glob.ts';
 
@@ -119,4 +120,31 @@ test('glob validity and matching', () => {
   for (const ok of ['packages/*/src/**', '**/*.md', 'docs/{a,b}/**', 'a\\[b']) assert.ok(isValidGlob(ok), ok);
   for (const bad of ['', '/abs/**', '../x', 'a/[b', 'a/{b', 'a}', 'x\\']) assert.ok(!isValidGlob(bad), bad);
   assert.ok(matchesGlob('packages/reactor/src/a.ts', 'packages/reactor/**'));
+});
+
+test('component aliases: optional, scope tokens, unique across components, never a component name', () => {
+  const parse = (components: unknown) => ConfigSchema.safeParse({ version: 1, components });
+  const ok = parse({
+    'reactor-monitor-app': { aliases: ['apps-reactor-monitor'] },
+    codegen: { aliases: ['packages-codegen'] },
+  });
+  assert.ok(ok.success);
+  assert.deepEqual(
+    [...aliasMap(ok.success ? ok.data.components : {})],
+    [
+      ['apps-reactor-monitor', 'reactor-monitor-app'],
+      ['packages-codegen', 'codegen'],
+    ],
+  );
+  const msgs = (components: unknown) => {
+    const r = parse(components);
+    return r.success ? [] : r.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`);
+  };
+  assert.deepEqual(msgs({ a: { aliases: ['b'] }, b: {} }), [
+    "components.a.aliases.0: alias 'b' is already a component name",
+  ]);
+  assert.deepEqual(msgs({ a: { aliases: ['x'] }, b: { aliases: ['x'] } }), [
+    "components.b.aliases.0: alias 'x' is also an alias of 'a'",
+  ]);
+  assert.equal(parse({ a: { aliases: ['Not A Token'] } }).success, false);
 });
