@@ -107,7 +107,7 @@ function reference(specs: readonly AnyCommandSpec[]): string {
     '',
     '## Passthrough reads',
     '',
-    `These gh reads run through ghx in a bounded JSON envelope (\`{passthrough:{argv, exitCode, json|text|stdoutPath, stdoutBytes, stderr}}\`): ${ALLOWED_NAMES.map((n) => `\`ghx ${n}\``).join(', ')}. \`api\` is GET only; \`run view\` without \`--log\`; \`run download\` needs \`-D <dir>\`. Commands ghx wraps (\`gh pr view\`, \`gh pr checks\`, \`gh run view --log\`, \`gh pr merge\`, …) are refused with the exact replacement; other writes are refused.`,
+    `These gh reads run through ghx in a bounded JSON envelope (\`{passthrough:{argv, exitCode, json|text|stdoutPath, stdoutBytes, stderr}}\`): ${ALLOWED_NAMES.map((n) => `\`ghx ${n}\``).join(', ')}. \`api\` is GET only; \`run view\` without \`--log\`; \`run download\` needs \`-D <dir>\`. A read ghx wraps runs its ghx equivalent with a \`REDIRECTED\` warning naming the command to call next time: \`ghx pr view <pr> [--json f,…]\` runs \`ghx pr status <pr>\` (gh's field names mapped to \`--fields\`; \`--comments\` runs \`ghx pr feedback\`), \`ghx pr checks <pr>\` runs \`ghx pr status <pr> --fields ref,head.sha,ci\`, \`ghx run view <id> --log-failed\` runs \`ghx ci why run:<id>\`. Forms with no faithful equivalent (no selector, \`--web\`, \`--watch\`, a whole-run \`--log\`) are refused with the replacement, as are writes ghx wraps (\`gh pr merge\`, …); other writes are refused.`,
     '',
     ...specs.map(commandSection),
   ].join('\n');
