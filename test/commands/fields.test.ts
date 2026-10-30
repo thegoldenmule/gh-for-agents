@@ -81,6 +81,12 @@ test('error and dry-run documents are never projected', async () => {
   const e = await runInProcess(['t', 'doc', '--fail', '--fields', 'state'], { commands });
   assert.deepEqual(Object.keys(e.json), ['error']);
   assert.equal(e.json.error.code, 'GH_FAILED');
+  // Asking for the error is fine: it is the whole envelope on a failure and absent on a success.
+  const asked = await runInProcess(['t', 'doc', '--fail', '--fields', 'state,error.code'], { commands });
+  assert.equal(asked.exitCode, 7, asked.stdout);
+  assert.deepEqual(Object.keys(asked.json.error), ['code', 'message', 'hint', 'details']);
+  const ok = await runInProcess(['t', 'doc', '--fields', 'state,error'], { commands });
+  assert.deepEqual(ok.json, { state: 'OPEN', warnings: ok.json.warnings });
   const d = await runInProcess(['t', 'write', '--dry-run', '--fields', 'merged'], { commands });
   assert.equal(d.exitCode, 0, d.stdout);
   assert.equal(d.json.dryRun, true);

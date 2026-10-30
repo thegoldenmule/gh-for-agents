@@ -184,6 +184,34 @@ test('checkFields accepts real paths, records and nullable objects', () => {
   checkFields(statusSpec, parseFields(['extra.anything.below', 'warnings[].code']));
 });
 
+test('error and error.* are always allowed: they name the error envelope, which is never projected', () => {
+  const kept = checkFields(statusSpec, parseFields(['state,error,error.code,error.details.warnings']));
+  assert.deepEqual(
+    kept.map((p) => p.raw),
+    ['state'],
+  );
+  assert.deepEqual(fieldProjection(statusSpec, { fields: ['state,error'] })?.(doc), {
+    state: 'OPEN',
+    warnings: doc.warnings,
+  });
+  assert.equal(fieldProjection(statusSpec, { fields: ['error'] }), undefined, 'nothing else selected: no projection');
+  // A results[] element that has an `error` of its own keeps it as a real path.
+  const withError = defineCommand({
+    name: ['t', 'many'],
+    summary: 'm',
+    kind: 'read',
+    input: z.object({}),
+    output: z.object({ results: z.array(z.object({ ref: z.string(), error: z.object({ code: z.string() }) })) }),
+    async run() {
+      throw new Error('unused');
+    },
+  });
+  assert.deepEqual(
+    checkFields(withError, parseFields(['error.code'])).map((p) => p.raw),
+    ['error.code'],
+  );
+});
+
 test('checkFields names the valid top-level keys and suggests a near miss', () => {
   const e = thrown(() => checkFields(statusSpec, parseFields(['stat'])));
   assert.equal(e.code, 'VALIDATION');

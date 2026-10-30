@@ -2,12 +2,13 @@
 //
 // A path is dot-separated keys. A path through an array maps over its elements, so `ci.failing.name`
 // and `ci.failing[].name` are the same path; `[]` is optional (and unquoted, zsh globs it, so the
-// hints never write it). Projection rule (the contract): if the
-// document has a top-level `results` array, paths resolve against each element and the other
-// top-level keys are kept; otherwise they resolve against the document. `warnings` is always kept,
-// and so is what names a results[] element and its failure (RESULT_KEEP): a failed PR in pr status
-// N M is {selector, ref, error}, never {}. Paths are checked against the output schema before the command runs, so a typo fails
-// as VALIDATION and never after a write. Error documents are never projected (emitDocument).
+// hints never write it). Projection rule (the contract): if the document has a top-level `results`
+// array, paths resolve against each element and the other top-level keys are kept; otherwise they
+// resolve against the document. `warnings` is always kept, and so is what names a results[] element
+// and its failure (RESULT_KEEP): a failed PR in pr status N M is {selector, ref, error}, never {}.
+// Paths are checked against the output schema before the command runs, so a typo fails as VALIDATION
+// and never after a write. Error documents are never projected (emitDocument), so `error` is always
+// an allowed path.
 import { z } from 'zod';
 import { type AnyCommandSpec, commandName, Warning } from './command.ts';
 import { GhxError } from './errors.ts';
@@ -236,14 +237,29 @@ function rootsOf(js: Js, defs: Record<string, Js>): { roots: Js[]; perResult: bo
     : { roots: [js, ...items], perResult: false };
 }
 
-/** Throw VALIDATION unless every path resolves in the command's output schema. */
-export function checkFields(spec: AnyCommandSpec, paths: readonly FieldPath[]): void {
+/**
+ * `error`/`error.*` names the error envelope, which is never projected (emitDocument): such a path is
+ * always allowed, and selects nothing in a document that has no `error` of its own.
+ */
+const namesError = (p: FieldPath): boolean => p.segments[0]?.key === 'error';
+
+/**
+ * Throw VALIDATION unless every path resolves in the command's output schema; return the paths to
+ * project with (an `error` path the output does not have is accepted and left out).
+ */
+export function checkFields(spec: AnyCommandSpec, paths: readonly FieldPath[]): FieldPath[] {
   const js = outputJson(spec);
   const defs = js.$defs ?? {};
   const { roots, perResult } = rootsOf(js, defs);
   const issues: Issue[] = [];
+  const kept: FieldPath[] = [];
   for (const p of paths) {
     let problem = pathProblem(p, roots, defs);
+    if (problem && namesError(p)) continue;
+    if (!problem) {
+      kept.push(p);
+      continue;
+    }
     if (problem && perResult && p.segments[0]?.key === 'results') {
       const rest = p.segments
         .slice(1)
@@ -251,9 +267,9 @@ export function checkFields(spec: AnyCommandSpec, paths: readonly FieldPath[]): 
         .join('.');
       problem = `paths resolve against each results[] element: write '${rest || '…'}'`;
     }
-    if (problem) issues.push({ path: '--fields', code: 'unknown_field', message: `${p.raw}: ${problem}` });
+    issues.push({ path: '--fields', code: 'unknown_field', message: `${p.raw}: ${problem}` });
   }
-  if (issues.length === 0) return;
+  if (issues.length === 0) return kept;
   const top = keysOf(roots.flatMap((r) => branches(r, defs)));
   const scope = perResult
     ? 'Fields of each results[] element (other top-level keys are always kept)'
@@ -287,8 +303,9 @@ export function fieldProjection(spec: AnyCommandSpec, o: FieldOptions): ((doc: u
   }
   if (o.fields !== undefined) values.push(...o.fields);
   if (values.length === 0) return undefined;
-  const paths = parseFields(values);
-  checkFields(spec, paths);
+  const paths = checkFields(spec, parseFields(values));
+  // Only `error` paths: a failure prints the whole envelope anyway, and a success prints in full.
+  if (paths.length === 0) return undefined;
   const tree = fieldTree(paths);
   return (doc) => projectDocument(doc, tree);
 }
