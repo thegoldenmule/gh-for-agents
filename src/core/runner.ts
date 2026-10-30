@@ -21,7 +21,7 @@ import { type AnyCommandSpec, commandName, DEFAULT_TIMEOUT, Warning } from './co
 import { createContext } from './context.ts';
 import { parseDuration } from './duration.ts';
 import { ErrorEnvelope } from './envelopes.ts';
-import { GhxError, toErrorObject } from './errors.ts';
+import { type ErrorObject, GhxError, toErrorObject } from './errors.ts';
 import { ExitCode, exitForSignal } from './exit.ts';
 import { fieldProjection } from './fields.ts';
 import { createLineLogger, type Logger, nullLogger } from './log.ts';
@@ -111,10 +111,34 @@ export async function emitDocument(stdout: Sink, doc: unknown, o: OutputOptions)
   );
 }
 
-/** Emit an error envelope and return its exit code. Unknown throws become INTERNAL with a stack artifact. */
-export async function emitError(stdout: Sink, e: unknown, o: OutputOptions, clock: Clock): Promise<number> {
+/**
+ * Warnings collected before a failure ride in the error envelope as `error.details.warnings` (02 §1.3),
+ * after any the error itself carries; one under the error's own code is dropped. The envelope stays {error:{code, message, hint, details}}: a
+ * top-level `warnings` beside `error` would break that strict shape, and emitDocument would then
+ * project the error document.
+ */
+export function withWarnings(obj: ErrorObject, all: readonly Warning[]): ErrorObject {
+  // A warning under the error's own code (WORKFLOW_INVALID) repeats what the error already says.
+  const warnings = all.filter((w) => w.code !== obj.error.code);
+  if (warnings.length === 0) return obj;
+  const details = obj.error.details ?? {};
+  const own = Array.isArray(details.warnings) ? (details.warnings as unknown[]) : [];
+  return { error: { ...obj.error, details: { ...details, warnings: [...own, ...warnings] } } };
+}
+
+/**
+ * Emit an error envelope and return its exit code. Unknown throws become INTERNAL with a stack artifact.
+ * `warnings` (the run's so far) go into details.warnings (withWarnings).
+ */
+export async function emitError(
+  stdout: Sink,
+  e: unknown,
+  o: OutputOptions,
+  clock: Clock,
+  warnings: readonly Warning[] = [],
+): Promise<number> {
   if (e instanceof GhxError) {
-    await emitDocument(stdout, toErrorObject(e), o);
+    await emitDocument(stdout, withWarnings(toErrorObject(e), warnings), o);
     return e.exitCode;
   }
   const err = e instanceof Error ? e : new Error(String(e));
@@ -127,7 +151,7 @@ export async function emitError(stdout: Sink, e: unknown, o: OutputOptions, cloc
     stackPath = undefined;
   }
   const wrapped = new GhxError('INTERNAL', `Unexpected: ${err.message}`, stackPath ? { details: { stackPath } } : {});
-  await emitDocument(stdout, toErrorObject(wrapped), o);
+  await emitDocument(stdout, withWarnings(toErrorObject(wrapped), warnings), o);
   return ExitCode.INTERNAL;
 }
 
@@ -298,7 +322,7 @@ export async function runCommandWith(
       const g = await withinGrace(work, { clock: deps.clock, shutdown: deps.shutdown });
       const reason = deps.shutdown.signal.reason as GhxError;
       if (!g.settled) {
-        await emitDocument(deps.stdout, toErrorObject(reason), out);
+        await emitDocument(deps.stdout, withWarnings(toErrorObject(reason), warnings), out);
         return { exitCode: exitForSignal(deps.shutdown.cause), forced: true };
       }
       // Single mode has no graceful summary: a shutdown always ends in INTERRUPTED (01 §3.6).
@@ -337,7 +361,7 @@ export async function runCommandWith(
       );
       return { exitCode: ExitCode.OK, forced: false };
     }
-    return { exitCode: await emitError(deps.stdout, e, out, deps.clock), forced: false };
+    return { exitCode: await emitError(deps.stdout, e, out, deps.clock, warnings), forced: false };
   } finally {
     deadline?.cancel();
   }

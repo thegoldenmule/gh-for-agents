@@ -82,7 +82,7 @@ stdout takes exactly one of three shapes:
 
 `--fields`/`--brief` (§1.1) project the document before the bound is applied, so a projection that fits is printed and a spilled file holds the projected document. Command-level fitting (`pr status` caps feedback to 16 KB, `ci wait` compacts its summary) runs inside the command and measures the projected document, so it only cuts what will be printed.
 
-Errors are `{"error": {"code", "message", "hint", "details"}}`. All four keys are always present, with `null` when empty. The exit code is non-zero (§6).
+Errors are `{"error": {"code", "message", "hint", "details"}}`. All four keys are always present, with `null` when empty. The exit code is non-zero (§6). Warnings the command raised before it failed (an input it normalized, then rejected) are not lost: they are `details.warnings: {code, message}[]`, after any the error carries itself (one with the error's own code is dropped as a repeat), and `details` is created for them when it would be `null`. They go inside `details`, not beside `error`, so the envelope keeps its one key and is never projected by `--fields`. A final-mode stream (`ci wait`) does the same; an NDJSON stream has already printed them as `warning` lines.
 
 ### 1.4 IDs
 
@@ -528,7 +528,7 @@ When `ci wait` watches several targets, the aggregate exit code is the first tha
 
 ### 6.2 Error catalogue
 
-`details` is `null` when there's nothing to say.
+`details` is `null` when there's nothing to say. Any error can also carry `details.warnings` (§1.3).
 
 | Code | Exit | Example |
 |---|---:|---|

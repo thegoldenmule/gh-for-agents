@@ -20,7 +20,15 @@ import { ExitCode, exitForSignal } from './exit.ts';
 import { createLineLogger, nullLogger } from './log.ts';
 import { byteLength, DEFAULT_MAX_EVENT_BYTES, serializeJson } from './output.ts';
 import { secureHex } from './random.ts';
-import { emitDocument, emitError, type OutputOptions, type RunDeps, type RunOutcome, timeoutMsFor } from './runner.ts';
+import {
+  emitDocument,
+  emitError,
+  type OutputOptions,
+  type RunDeps,
+  type RunOutcome,
+  timeoutMsFor,
+  withWarnings,
+} from './runner.ts';
 import { createDeadline, GRACE_MS } from './signals.ts';
 
 type AnyStreamSpec = StreamCommandSpec<z.ZodObject, z.ZodType, z.ZodObject>;
@@ -167,9 +175,12 @@ export async function runStream(
         await deps.stdout.writeLine(text);
       }
     };
+    // In final mode stdout gets no warning lines, so an error carries them in details.warnings (runner.ts).
+    const errorDoc = (e: unknown): object =>
+      mode === 'final' ? withWarnings(toErrorObject(e), built.warnings) : toErrorObject(e);
     const terminalError = async (e: unknown): Promise<number> => {
       if (e instanceof GhxError) {
-        await terminal('error', toErrorObject(e));
+        await terminal('error', errorDoc(e));
         return e.exitCode;
       }
       const err = e instanceof Error ? e : new Error(String(e));
@@ -187,9 +198,7 @@ export async function runStream(
       }
       await terminal(
         'error',
-        toErrorObject(
-          new GhxError('INTERNAL', `Unexpected: ${err.message}`, stackPath ? { details: { stackPath } } : {}),
-        ),
+        errorDoc(new GhxError('INTERNAL', `Unexpected: ${err.message}`, stackPath ? { details: { stackPath } } : {})),
       );
       return ExitCode.INTERNAL;
     };
@@ -249,7 +258,7 @@ export async function runStream(
         if (step === 'grace') {
           // Ungraceful: the generator did not settle within the grace window (or a second signal came).
           void gen.return(undefined as never).catch(() => {});
-          await terminal('error', toErrorObject(shutdown.signal.reason));
+          await terminal('error', errorDoc(shutdown.signal.reason));
           return { exitCode: exitForSignal(shutdown.cause), forced: true };
         }
         if (step.kind === 'throw') {

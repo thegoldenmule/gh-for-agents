@@ -185,7 +185,13 @@ test('a head that moves while the files are read is HEAD_MOVED (9); nothing is p
   const r = await run(s.gh, REVIEW);
   assert.equal(r.exitCode, EXIT.STATE, r.stdout);
   assert.equal(r.json.error.code, 'HEAD_MOVED');
-  assert.deepEqual(r.json.error.details, { expected: HEAD, actual: 'c'.repeat(40) });
+  const { warnings, ...details } = r.json.error.details;
+  assert.deepEqual(details, { expected: HEAD, actual: 'c'.repeat(40) });
+  // What the run had warned before it failed rides along (02 §1.3).
+  assert.deepEqual(
+    warnings.map((w: { code: string }) => w.code),
+    ['VERDICT_DOWNGRADED'],
+  );
   assert.deepEqual(sequence(s.gh), ['q1', 'files', 'pull']);
   assert.equal(s.sent['post-review'], undefined);
 });
