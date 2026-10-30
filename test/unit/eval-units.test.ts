@@ -435,9 +435,11 @@ test('PRs: a wait on main-branch CI after a merge is no PR’s work and has its 
         at: at(10),
         tools: [{ id: 'tu_out', name: 'Read', input: { file_path: `${TASKS}/b1.output` }, result: '{}' }],
       }),
+      bash('msg_4', at(10, 30), 'tu_runs', 'ghx run list --branch main --limit 3', '[]'),
     ]),
   ]);
   const w = ofKind(us, 'wait')[0] as Unit;
+  assert.deepEqual(w.tool_use_ids, ['tu_mw', 'tu_out', 'tu_runs'], 'a read of main after the wake stays with it');
   assert.deepEqual([w.intent, w.category, w.pr], ['main_ci', 'bg-ghx-ci-wait', null]);
   assert.ok(!w.flags.includes('charged-to-last-pr'));
   assert.deepEqual(ofKind(us, 'pr_lifecycle')[0]?.tool_use_ids, ['tu_merge']);

@@ -65,14 +65,23 @@ export function isMainBranchWait(t: ToolCallRow): boolean {
   return prsOfCall(t).length === 0 && invs.some((i) => i.positional.some((w) => MAIN_BRANCH.test(w)));
 }
 
-/** Relabel units whose waits are all on the main branch's CI: intent (and an episode's category) MAIN_CI. */
+/**
+ * Relabel units whose waits are all on the main branch's CI: intent (and an episode's category) MAIN_CI. Such a
+ * unit (with the reads of main it took after its wake) is no PR's work unless one of its calls names a PR.
+ */
 export function labelMainBranchWaits(drafts: readonly Draft[]): void {
   for (const d of drafts) {
     if (d.intent !== 'wait') continue;
-    const waits = d.calls.filter((t) => isGitHubCall(t) && t.intents.includes('wait'));
+    const gh = d.calls.filter(isGitHubCall);
+    const waits = gh.filter((t) => t.intents.includes('wait'));
     if (waits.length === 0 || !waits.every(isMainBranchWait)) continue;
     d.intent = MAIN_CI;
     if (d.kind === 'episode') d.category = MAIN_CI;
+    if (gh.some((t) => prsOfCall(t).length > 0)) continue;
+    d.pr = null;
+    d.prs = [];
+    for (const t of gh) d.callPrs.set(t.tool_use_id, []);
+    d.flags.delete('charged-to-last-pr');
   }
 }
 
