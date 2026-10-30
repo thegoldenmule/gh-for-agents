@@ -82,6 +82,16 @@ import {
 
 /** Unattended sessions self-return `pending` after this much waiting (02 §11.1). */
 export const UNATTENDED_RETURN_MS = 25 * 60_000;
+/**
+ * --foreground self-returns `pending` (exit 15) after this much waiting, so a foreground Bash call ends
+ * under Claude Code's 10-minute cap (the hook sets the call's timeout to that cap). A subagent cannot end
+ * its turn and be woken by a background task, so it waits in the foreground and re-runs the identical
+ * command, which resumes from the saved state. The minute left covers startup, the last tick (whose
+ * diagnosis is cut to FOREGROUND_TICK_MARGIN_MS past the return) and the merge gate's read.
+ */
+export const FOREGROUND_RETURN_MS = 9 * 60_000;
+/** How far past FOREGROUND_RETURN_MS the last tick's diagnosis may run. */
+export const FOREGROUND_TICK_MARGIN_MS = 15_000;
 /** Consecutive failed ticks after which a mid-wait gh failure is fatal (error line, exit 7). */
 export const MAX_TICK_FAILURES = 5;
 /** Room kept for the runner's `warnings` array when fitting the summary into maxBytes. */
@@ -100,6 +110,8 @@ export interface WaitOptions {
   diagnose: boolean;
   compareMain: boolean;
   stream: boolean;
+  /** Self-return `pending` after FOREGROUND_RETURN_MS (a foreground call under the Bash tool's cap). */
+  foreground?: boolean | undefined;
 }
 
 /** M6.6: given a settled CI outcome, the merge gate's final word, or null to keep polling. */
@@ -188,7 +200,13 @@ export async function* runWait(
   const attended = ctx.env.CLAUDE_CODE_SESSION_ATTENDED === '1';
   const offset = ctx.env.GHX_TEST_HOOKS === '1' ? Number(ctx.env.GHX_TEST_CLOCK_OFFSET_MS ?? 0) || 0 : 0;
   const startedMono = clock.monotonic();
-  const returnAt = attended ? Number.POSITIVE_INFINITY : startedMono + UNATTENDED_RETURN_MS - offset;
+  const foreground = o.foreground === true;
+  const returnAt = Math.min(
+    attended ? Number.POSITIVE_INFINITY : startedMono + UNATTENDED_RETURN_MS - offset,
+    foreground ? startedMono + FOREGROUND_RETURN_MS - offset : Number.POSITIVE_INFINITY,
+  );
+  /** A foreground call's diagnosis never runs far past the return (the Bash tool kills it at its cap). */
+  const diagnoseBy = foreground ? returnAt + FOREGROUND_TICK_MARGIN_MS : Number.POSITIVE_INFINITY;
 
   const globs = o.check ?? [];
   // --until mergeable evaluates the full required set (04, final review): a required check outside the
@@ -649,11 +667,14 @@ export async function* runWait(
     for (const c of failures) {
       if (!isDiagnosable(c) || !needsDiagnosis(st, c)) continue;
       if (!st.diagnoses[String(c.jobId)] && Object.keys(st.diagnoses).length >= DIAGNOSIS_MAX_JOBS) return;
-      const left = DIAGNOSIS_BUDGET_MS - st.diagnosis.spentMs;
-      if (left <= 0) {
+      const budget = DIAGNOSIS_BUDGET_MS - st.diagnosis.spentMs;
+      if (budget <= 0) {
         st.diagnosis.partial = true;
         return;
       }
+      // Out of foreground time: leave it undiagnosed (not partial), so the re-run diagnoses it in full.
+      const left = Math.min(budget, diagnoseBy - clock.monotonic());
+      if (left <= 0) return;
       r.diagnoser ??= createDiagnoser({
         gh: ctx.gh,
         artifacts: ctx.artifacts,
@@ -908,7 +929,9 @@ export async function* runWait(
         ? `signal ${interruptedBy}`
         : anySatisfied
           ? 'any-satisfied'
-          : 'unattended-self-return';
+          : foreground
+            ? 'foreground-self-return'
+            : 'unattended-self-return';
       if (r.st) {
         r.summary = summarise(r, outcome, reason, r.lastDecision);
         save(r);
@@ -917,6 +940,14 @@ export async function* runWait(
       }
     }
     const results = runs.map((r) => r.summary as TargetSummary);
+    if (foreground && !interruptedBy && !anySatisfied && results.some((x) => x.outcome === 'pending')) {
+      warn({
+        code: 'WAIT_FOREGROUND_RETURN',
+        message:
+          `Returned before the Bash tool's 10-minute cap; CI is still running. Re-run the identical command ` +
+          `in the foreground (next[0]) to resume from the saved state: ${identical()}`,
+      });
+    }
     const done = o.any ? results.filter((x) => x.outcome !== 'pending') : results;
     const agg = interruptedBy
       ? { outcome: 'interrupted' as const, exitCode: exitForSignal(interruptedBy) }

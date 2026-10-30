@@ -1,7 +1,8 @@
 // ghx ci wait <target>… (02 §11; 03 M4.7–M4.9): wait for CI on a bound SHA until a state the agent can
 // act on, then print one WaitSummary. The caller never supplies a duration: the wait ends on CI-derived
 // states only (green, red, red-shared, no-checks, stalled, superseded/closed), on a signal
-// (interrupted), or with `pending` (exit 15) after 25 min in an unattended session.
+// (interrupted), or with `pending` (exit 15) after 25 min in an unattended session, or after 9 min with
+// --foreground (a subagent's foreground call, under the Bash tool's 10-minute cap).
 import { z } from 'zod';
 import { runWait } from '../../ci/wait/driver.ts';
 import { createMergeGate } from '../../ci/wait/mergeable.ts';
@@ -47,12 +48,22 @@ const Input = z.strictObject({
     .default(true)
     .describe('Compare failures with the default branch; --no-compare-main skips it'),
   stream: z.boolean().default(false).describe('Print every event as NDJSON (for humans; agents use the default)'),
+  foreground: z
+    .boolean()
+    .default(false)
+    .describe(
+      'Return pending (exit 15) after 9 min, under the Bash tool cap: for a foreground call in a subagent; re-run the identical command',
+    ),
 });
 
 export default defineStreamCommand({
   name: ['ci', 'wait'],
   summary: 'Wait for CI on a PR, branch or run; one JSON summary, exit code = outcome (run in background)',
-  description: `${PROTOCOL} The summary is never spilled: it is compacted to 16 KB, and --max-bytes and GHX_MAX_BYTES are ignored.`,
+  description:
+    `${PROTOCOL} In a subagent, which cannot end its turn and be woken, run it in the foreground with ` +
+    '--foreground (the ghx hook adds it, with the 10-minute Bash timeout): it returns within 9 minutes, and on ' +
+    'exit 15 you re-run the identical command, which resumes from the saved state. The summary is never ' +
+    'spilled: it is compacted to 16 KB, and --max-bytes and GHX_MAX_BYTES are ignored.',
   kind: 'read',
   input: Input,
   positionals: ['targets'],
@@ -95,6 +106,10 @@ export default defineStreamCommand({
       note: 'One workflow run until it completes (e.g. after ghx ci rerun run:<id>)',
     },
     { argv: 'ghx ci wait owner/repo#12 owner/repo#13 --any', note: 'Return at the first target that finishes' },
+    {
+      argv: 'ghx ci wait --foreground owner/repo#12 --until mergeable',
+      note: 'In a subagent: foreground, returns within 9 min; re-run on exit 15',
+    },
   ],
   exitCode: (s) => s.exitCode as ExitCode,
   run(input, ctx) {
