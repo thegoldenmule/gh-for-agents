@@ -400,6 +400,8 @@ test('the hook command it writes runs without PATH, denies a raw gh write in a c
   assert.equal(command, r.json.hookCommand);
   const repo = join(tmp, `repo-${n++}`);
   mkdirSync(join(repo, '.git'), { recursive: true });
+  // -R o/r names this checkout's own remote, so the hook judges it as this repo (src/hook/foreign.ts).
+  writeFileSync(join(repo, '.git', 'config'), '[remote "origin"]\n\turl = git@github.com:o/r.git\n');
   const send = (cwd: string) =>
     spawnSync('/bin/sh', ['-c', command], {
       input: JSON.stringify({ cwd, tool_name: 'Bash', tool_input: { command: 'gh -R o/r pr merge 12' } }),

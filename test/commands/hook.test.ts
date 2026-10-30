@@ -16,12 +16,21 @@ const event = (name: string): Record<string, any> => JSON.parse(fixture(name));
 const tmp = mkdtempSync(join(tmpdir(), 'ghx-hook-'));
 after(() => rmSync(tmp, { recursive: true, force: true }));
 
-/** A checkout under tmp: `.git` as a dir (or a worktree's file), optionally with .github/ghx.json. */
+/**
+ * A checkout under tmp: `.git` as a dir whose config has remote origin github.com/o/r (or a worktree's
+ * file), optionally with .github/ghx.json.
+ */
 function checkout(name: string, o: { configured: boolean; gitFile?: boolean }): string {
   const root = join(tmp, name);
   mkdirSync(join(root, 'src', 'deep'), { recursive: true });
   if (o.gitFile) writeFileSync(join(root, '.git'), 'gitdir: /elsewhere/.git/worktrees/x\n');
-  else mkdirSync(join(root, '.git'));
+  else {
+    mkdirSync(join(root, '.git'));
+    writeFileSync(
+      join(root, '.git', 'config'),
+      '[core]\n\tbare = false\n[remote "origin"]\n\turl = https://github.com/o/r.git\n',
+    );
+  }
   if (o.configured) {
     mkdirSync(join(root, '.github'));
     writeFileSync(join(root, '.github', 'ghx.json'), '{}\n');

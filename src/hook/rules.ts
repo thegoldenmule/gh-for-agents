@@ -6,9 +6,12 @@
 // A raw gh write that ghx wraps is denied in every mode, wherever -R/--repo sits (04 final review):
 // permissions.deny prefix rules cannot match `gh -R o/r pr merge 1`. GHX_HOOK_MODE governs the rest.
 // All of that enforcement applies only in a repo with .github/ghx.json (04 "enforcement scope"); elsewhere
-// the hook only moves `ghx ci wait` to the background.
+// the hook only moves `ghx ci wait` to the background. A gh call that names another repo (-R, a URL, a
+// literal gh api repos/o/r path) is judged by that repo, not the cwd: unless it is one of the checkout's
+// own remotes, it is out of scope too (src/hook/foreign.ts).
 import type { Clock } from '../core/clock.ts';
 import { decide, firstPositional, normalizeGhArgv, takeRepoFlag, WRAPPED_WRITES } from '../passthrough/policy.ts';
+import { isForeign, localRepoSlugs } from './foreign.ts';
 import { logHookEvent } from './log.ts';
 import REPLACES from './replaces.generated.json' with { type: 'json' };
 import { ghxConfigured } from './repo.ts';
@@ -226,16 +229,25 @@ const background = (input: Record<string, unknown>): HookDecision => ({
   rule: 'ci-wait-background',
 });
 
+export interface HookOptions {
+  /**
+   * Is a repo a gh invocation names explicitly (-R, a URL, `gh api repos/o/r/…`; lowercase owner/name)
+   * this checkout's own? A named repo that is not is foreign: enforcement skips it (src/hook/foreign.ts).
+   * Default: every named repo is this one.
+   */
+  sameRepo?: (slug: string) => boolean;
+}
+
 /**
  * The hook's reply to one PreToolUse event, or null for no output. `enforce` is whether the event's
  * repo opted into ghx (.github/ghx.json): without it, only the `ghx ci wait` rewrite applies.
  */
-export function decideHook(event: unknown, mode: HookMode, enforce = true): HookOutput | null {
-  return decideHookRule(event, mode, enforce).out;
+export function decideHook(event: unknown, mode: HookMode, enforce = true, opts: HookOptions = {}): HookOutput | null {
+  return decideHookRule(event, mode, enforce, opts).out;
 }
 
 /** decideHook plus the rule that fired. */
-export function decideHookRule(event: unknown, mode: HookMode, enforce = true): HookDecision {
+export function decideHookRule(event: unknown, mode: HookMode, enforce = true, opts: HookOptions = {}): HookDecision {
   if (!isObject(event)) return none;
   const tool = event.tool_name;
   const input = event.tool_input;
@@ -250,7 +262,9 @@ export function decideHookRule(event: unknown, mode: HookMode, enforce = true): 
   }
 
   const scan = scanShell(command);
-  const invocations = scan.invocations.map(normalized);
+  // A gh call aimed at another repo is judged by that repo, which never opted into ghx here.
+  const sameRepo = opts.sameRepo ?? (() => true);
+  const invocations = scan.invocations.map(normalized).filter((inv) => !isGh(inv) || !isForeign(inv, sameRepo));
   const gh = invocations.filter(isGh);
   const compound = compoundReason(gh);
   // Wrapped writes first and in every mode, so neither the rewrite nor GHX_HOOK_MODE=off lets one through.
@@ -297,7 +311,12 @@ export function runHook(stdin: string, env: Readonly<Record<string, string | und
     const event: unknown = JSON.parse(stdin);
     const mode = hookMode(env);
     const enforce = isObject(event) && ghxConfigured(event.cwd);
-    const decision = decideHookRule(event, mode, enforce);
+    let slugs: Set<string> | undefined;
+    const sameRepo = (slug: string): boolean => {
+      slugs ??= localRepoSlugs(isObject(event) ? event.cwd : undefined);
+      return slugs.has(slug);
+    };
+    const decision = decideHookRule(event, mode, enforce, { sameRepo });
     const logPath = env.GHX_HOOK_LOG;
     if (logPath) logHookEvent(logPath, event, decision, { mode, enforce, clock });
     return decision.out === null ? null : JSON.stringify(decision.out);
