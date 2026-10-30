@@ -127,7 +127,7 @@ async function merge(i: Flags, t: TargetSummary, ctx: StreamContext) {
 
 export default defineStreamCommand({
   name: ['pr', 'land'],
-  summary: 'Wait until a PR is mergeable, then merge it pinned to that head; one JSON outcome',
+  summary: 'Wait until mergeable, then merge pinned to that head (run like ci wait)',
   description:
     'ci wait --until mergeable, then pr merge, in one call. The wait binds one head (--expect-head, or the ' +
     'local HEAD when the cwd is on the PR branch and pushed) and stops with exit 12 if the head moves; the ' +
