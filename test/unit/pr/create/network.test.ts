@@ -39,10 +39,15 @@ function data(p: Partial<CreateNetworkData> = {}): CreateNetworkData {
 }
 
 test('a clean PR has no issues and no warnings', () => {
-  assert.deepEqual(createNetworkRules(input(), config, data()), { issues: [], warnings: [], alsoTouched: [] });
+  assert.deepEqual(createNetworkRules(input(), config, data()), {
+    issues: [],
+    warnings: [],
+    alsoTouched: [],
+    components: ['reactor'],
+  });
 });
 
-test('components.undeclared_touched names the component and its files', () => {
+test('a touched component the input left out is added, with COMPONENTS_ADDED naming its files', () => {
   const files = [
     'packages/reactor/a.ts',
     'libs/common/x.ts',
@@ -51,18 +56,31 @@ test('components.undeclared_touched names the component and its files', () => {
     'libs/common/w.ts',
   ];
   const r = createNetworkRules(input(), config, data({ changedFiles: files }));
-  assert.deepEqual(r.issues, [
+  assert.deepEqual(r.issues, []);
+  assert.deepEqual(r.components, ['reactor', 'shared']);
+  assert.deepEqual(r.warnings, [
     {
-      path: 'components',
-      code: 'components.undeclared_touched',
+      code: 'COMPONENTS_ADDED',
       message:
-        "the PR changes shared (libs/common/x.ts, libs/common/y.ts, libs/common/z.ts, +1 more); add 'shared' to components",
+        'Added shared (libs/common/x.ts, libs/common/y.ts, libs/common/z.ts, +1 more) to components: the PR changes it.',
     },
   ]);
-  assert.deepEqual(
-    createNetworkRules(input({ components: ['reactor', 'shared'] }), config, data({ changedFiles: files })).issues,
-    [],
+  const declared = createNetworkRules(
+    input({ components: ['reactor', 'shared'] }),
+    config,
+    data({ changedFiles: files }),
   );
+  assert.deepEqual([declared.issues, declared.warnings, declared.components], [[], [], ['reactor', 'shared']]);
+});
+
+test('an empty components list is derived whole from the diff', () => {
+  const r = createNetworkRules(
+    input({ components: [] }),
+    config,
+    data({ changedFiles: ['libs/common/x.ts', 'packages/reactor/a.ts'] }),
+  );
+  assert.deepEqual(r.components, ['reactor', 'shared']);
+  assert.deepEqual(r.issues, []);
 });
 
 test('paths that match no component are ignored', () => {
@@ -180,22 +198,25 @@ test('wide, list full: the other touched components are alsoTouched, in config o
   assert.deepEqual(r.warnings, [
     {
       code: 'COMPONENTS_ALSO_TOUCHED',
-      message: 'The PR also touches 2 components beyond the 5 declared; recorded as alsoTouched: f, g.',
+      message: 'The PR also touches 2 components beyond the 5 in components; recorded as alsoTouched: f, g.',
     },
   ]);
 });
 
-test('wide, list not full: one undeclared_touched issue with the count and the first three names', () => {
-  const r = createNetworkRules(input({ components: ['a', 'b'] }), wide, data({ changedFiles: wideFiles }));
-  assert.deepEqual(r.alsoTouched, []);
-  assert.deepEqual(r.issues, [
-    {
-      path: 'components',
-      code: 'components.undeclared_touched',
-      message:
-        'the PR touches 7 components, more than components can list (5); declare the 5 primary ones and ghx records the rest as alsoTouched (undeclared: c, d, e, +2 more)',
-    },
-  ]);
+test('wide, list not full: filled to 5 by most files changed, the rest alsoTouched', () => {
+  const files = [...wideFiles, 'f/y.ts', 'f/z.ts', 'e/y.ts'];
+  const r = createNetworkRules(
+    input({ components: ['a', 'b'], risk: 'high', riskNote: 'x' }),
+    wide,
+    data({ changedFiles: files }),
+  );
+  assert.deepEqual(r.issues, []);
+  assert.deepEqual(r.components, ['a', 'b', 'f', 'e', 'c']);
+  assert.deepEqual(r.alsoTouched, ['d', 'g']);
+  assert.deepEqual(
+    r.warnings.map((w) => w.code),
+    ['COMPONENTS_ADDED', 'COMPONENTS_ALSO_TOUCHED'],
+  );
 });
 
 test('risk.below_component_floor also covers alsoTouched', () => {
@@ -224,7 +245,7 @@ test('touching 5 or fewer: a full list padded with an unrelated component still 
     r.issues.map((i) => i.code),
     ['components.undeclared_touched'],
   );
-  assert.match(r.issues[0]?.message ?? '', /add 'e' to components/);
+  assert.match(r.issues[0]?.message ?? '', /components is full \(5\); replace one it does not change \(f\) with 'e'/);
   assert.deepEqual(
     r.warnings.map((w) => w.code),
     ['COMPONENTS_UNUSED'],

@@ -168,15 +168,15 @@ test('the merged object is re-validated with the full createRules: medium risk n
   assert.deepEqual(editSequence(s.gh), ['config', 'snapshot']);
 });
 
-test('the network checks run on the merged object: an undeclared touched component', async () => {
+test('the network checks run on the merged object: a touched component is added to the block', async () => {
   const s = editScene({ files: ['src/banner.ts', 'docs/retry.md'] });
   const r = await run(s.gh, { description: NEW_DESCRIPTION });
-  assert.equal(r.exitCode, EXIT.USAGE, r.stdout);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
   assert.deepEqual(
-    r.json.error.details.issues.map((i: { code: string }) => i.code),
-    ['components.undeclared_touched'],
+    r.json.warnings.map((w: { code: string }) => w.code),
+    ['COMPONENTS_ADDED'],
   );
-  s.gh.expectNoMutations();
+  assert.deepEqual(blockOf(String(s.patched[0]?.body)).components, ['app', 'docs']);
 });
 
 test('arrays replace: the patch testing list is the new list', async () => {

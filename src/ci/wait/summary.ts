@@ -48,6 +48,7 @@ export interface CommandShape {
   compareMain: boolean;
   stream: boolean;
   foreground?: boolean | undefined;
+  expectHead?: string | undefined;
   /** -R, when the repo came from the flag. */
   repo?: string | undefined;
 }
@@ -62,6 +63,7 @@ export function identicalCommand(c: CommandShape): string {
   if (!c.diagnose) parts.push('--no-diagnose');
   if (!c.compareMain) parts.push('--no-compare-main');
   if (c.stream) parts.push('--stream');
+  if (c.expectHead) parts.push('--expect-head', c.expectHead);
   if (c.foreground) parts.push('--foreground');
   if (c.repo) parts.push('-R', c.repo);
   return parts.join(' ');

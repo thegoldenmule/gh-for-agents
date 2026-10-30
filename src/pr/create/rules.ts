@@ -7,9 +7,9 @@
 // Issues use core's IssueDetail shape, so `VALIDATION` details look the same as zod's (src/cli/args.ts).
 import type { GhxConfig } from '../../config/schema.ts';
 import { GhxError, type IssueDetail } from '../../core/errors.ts';
-import { suggest } from '../../core/suggest.ts';
-import { riskRank } from '../../schemas/pr.ts';
+import { RISK_ORDER, riskRank } from '../../schemas/pr.ts';
 import { matchesGlob } from '../../util/glob.ts';
+import { componentList, suggestComponent } from './components.ts';
 import { MAX_COMPONENTS, type PrCreateInput } from './schema.ts';
 
 export const TITLE_MAX_CODE_POINTS = 72;
@@ -30,6 +30,12 @@ export interface CreateRuleContext {
 /** The fields createRules reads: a create input, or an edit's merged block plus base and head. */
 export type CreateRulesInput = Omit<PrCreateInput, 'draft'> & { draft?: boolean | undefined };
 
+/**
+ * The fields that parsed, when others did not (02 §2.1 one pass): each rule group runs on the fields it
+ * reads and is skipped while one of them is missing, so a structural issue never hides a rule issue.
+ */
+export type PartialRulesInput = Partial<CreateRulesInput>;
+
 export interface Warning {
   code: string;
   message: string;
@@ -43,9 +49,10 @@ const issue = (path: string, code: string, message: string): IssueDetail => ({ p
 const TITLE_LOOSE = /^([^\s():!]+)(?:\(([^()]*)\))?(!)?: (\S.*)$/;
 const SCOPE = /^[a-z0-9][a-z0-9-]*$/;
 
-function titleRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDetail[] {
+function titleRules(input: PartialRulesInput, ctx: CreateRuleContext): IssueDetail[] {
   const out: IssueDetail[] = [];
   const { title } = input;
+  if (title === undefined) return out;
   const { types, scopeRequired } = ctx.config.title;
   const norm = title.trim().replace(/\s+/g, ' ');
   const m = TITLE_LOOSE.exec(norm);
@@ -83,16 +90,15 @@ function titleRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDetai
           out.push(issue('title', 'title.scope_missing', 'this repo requires a scope: type(component): summary'));
         }
       } else if (!Object.hasOwn(ctx.config.components, scope)) {
-        const known = Object.keys(ctx.config.components);
         const d = issue(
           'title',
           'title.scope_not_component',
-          `scope '${scope}' is not a component in .github/ghx.json (${known.join(', ')})`,
+          `scope '${scope}' is not a component in .github/ghx.json; the scope must be a component name (${componentList(ctx.config.components)}), or drop the scope`,
         );
-        const s = suggest(scope, known)[0];
+        const s = suggestComponent(scope, ctx.config.components)[0];
         if (s !== undefined) d.suggestion = s;
         out.push(d);
-      } else if (!input.components.includes(scope)) {
+      } else if (input.components !== undefined && !input.components.includes(scope)) {
         out.push(issue('title', 'title.scope_not_declared', `scope '${scope}' must also be listed in components`));
       }
       if (type === 'revert' && input.refs?.reverts === undefined) {
@@ -188,9 +194,10 @@ export function stripFooter(
   };
 }
 
-function descriptionRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDetail[] {
+function descriptionRules(input: PartialRulesInput, ctx: CreateRuleContext): IssueDetail[] {
   const out: IssueDetail[] = [];
   const d = input.description;
+  if (d === undefined) return out;
   const lines = d.split(/\r\n|\r|\n/);
   if (lines.length > DESCRIPTION_MAX_LINES) {
     out.push(
@@ -217,19 +224,23 @@ function descriptionRules(input: CreateRulesInput, ctx: CreateRuleContext): Issu
     );
   }
 
+  // One issue for the whole body: a Summary / Test plan template trips this on most of its lines.
+  const hits: { line: number; name: string }[] = [];
   lines.forEach((line, i) => {
-    const t = line.trimStart();
-    const hit = STRUCTURE.find((s) => s.re.test(t));
-    if (hit) {
-      out.push(
-        issue(
-          'description',
-          'description.markdown_structure',
-          `line ${i + 1} has ${hit.name}; write plain sentences (ghx renders the trailer and test summary)`,
-        ),
-      );
-    }
+    const hit = STRUCTURE.find((s) => s.re.test(line.trimStart()));
+    if (hit) hits.push({ line: i + 1, name: hit.name });
   });
+  if (hits.length > 0) {
+    const names = [...new Set(hits.map((h) => h.name))].join(', ');
+    const where = hits.length === 1 ? `line ${hits[0]?.line}` : `lines ${hits.map((h) => h.line).join(', ')}`;
+    out.push(
+      issue(
+        'description',
+        'description.markdown_structure',
+        `${where} ${hits.length === 1 ? 'has' : 'have'} Markdown structure (${names}); write plain sentences (ghx renders the trailer and test summary)`,
+      ),
+    );
+  }
 
   const footer = ctx.config.render.footer?.trim();
   const markers = footer ? [footer, ...FOOTER_MARKERS] : FOOTER_MARKERS;
@@ -295,7 +306,26 @@ export function unclosedQuote(command: string): "'" | '"' | null {
   return scanShell(command).openQuote;
 }
 
-function scanShell(command: string): { operators: string[]; openQuote: "'" | '"' | null } {
+/**
+ * `a && b && c` as `['a', 'b', 'c']`, when `&&` outside quotes is the only shell operator and every part
+ * is non-empty; null otherwise. Each part runs only if the one before passed, so as separate testing
+ * items they record the same runs.
+ */
+export function splitChain(command: string): string[] | null {
+  const { operators, openQuote, andAt } = scanShell(command);
+  if (openQuote !== null || operators.length !== 1 || operators[0] !== '&&') return null;
+  const parts: string[] = [];
+  let from = 0;
+  for (const at of andAt) {
+    parts.push(command.slice(from, at).trim());
+    from = at + 2;
+  }
+  parts.push(command.slice(from).trim());
+  return parts.every((p) => p !== '') ? parts : null;
+}
+
+function scanShell(command: string): { operators: string[]; openQuote: "'" | '"' | null; andAt: number[] } {
+  const andAt: number[] = [];
   const found = new Set<string>();
   let quote: "'" | '"' | null = null;
   for (let i = 0; i < command.length; i++) {
@@ -316,15 +346,22 @@ function scanShell(command: string): { operators: string[]; openQuote: "'" | '"'
     } else if (c === "'" || c === '"') quote = c;
     else if (c === '|' || c === '&') {
       found.add(next === c ? c + c : c);
+      if (c === '&' && next === c) andAt.push(i);
       if (next === c) i++;
     } else if (c === ';' || c === '>' || c === '<') found.add(c);
   }
-  return { operators: [...found], openQuote: quote };
+  return { operators: [...found], openQuote: quote, andAt };
 }
 
-function testingRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDetail[] {
+function testingRules(
+  input: PartialRulesInput,
+  ctx: CreateRuleContext,
+  at: readonly number[] | undefined,
+): IssueDetail[] {
   const out: IssueDetail[] = [];
-  if (ctx.config.create.requirePassingTest && !input.testing.some((t) => t.result === 'pass')) {
+  if (input.testing === undefined) return out;
+  // min_pass reads the whole list, so it waits until every item parsed (`at` is set when some did not).
+  if (at === undefined && ctx.config.create.requirePassingTest && !input.testing.some((t) => t.result === 'pass')) {
     out.push(
       issue(
         'testing',
@@ -333,15 +370,26 @@ function testingRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDet
       ),
     );
   }
-  input.testing.forEach((t, i) => {
-    const at = `testing[${i}]`;
+  input.testing.forEach((t, j) => {
+    const i = at?.[j] ?? j;
+    const at_ = `testing[${i}]`;
     if (t.kind === 'manual') {
       if (t.steps === undefined || t.steps.length === 0) {
-        out.push(issue(`${at}.steps`, 'testing.steps_required', 'a manual test needs 1–5 steps a reader can follow'));
+        out.push(
+          issue(
+            `${at_}.steps`,
+            'testing.steps_required',
+            'a manual test needs steps: 1–5 lines a reader can follow, e.g. ["Open /settings", "Toggle dark mode"]',
+          ),
+        );
       }
     } else if (t.command === undefined) {
       out.push(
-        issue(`${at}.command`, 'testing.command_required', `a ${t.kind} test needs the command that runs it, from cwd`),
+        issue(
+          `${at_}.command`,
+          'testing.command_required',
+          `a ${t.kind} test needs the command that runs it, from cwd (e.g. "pnpm test"); use kind 'manual' with steps otherwise`,
+        ),
       );
     }
     if (t.command !== undefined) {
@@ -349,7 +397,7 @@ function testingRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDet
       if (paths.length > 0) {
         out.push(
           issue(
-            `${at}.command`,
+            `${at_}.command`,
             'testing.not_rerunnable',
             `${paths.map((p) => `'${p}'`).join(', ')} only exists on this machine; use a repo-relative path and cwd`,
           ),
@@ -359,7 +407,7 @@ function testingRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDet
       if (open !== null) {
         out.push(
           issue(
-            `${at}.command`,
+            `${at_}.command`,
             'testing.compound_command',
             `unbalanced quote (${open}): everything after it is hidden from the operator check; quote or escape it (\\${open})`,
           ),
@@ -369,7 +417,7 @@ function testingRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDet
       if (open === null && ops.length > 0) {
         out.push(
           issue(
-            `${at}.command`,
+            `${at_}.command`,
             'testing.compound_command',
             `unquoted ${ops.map((o) => `'${o}'`).join(', ')}; record the plain command (no pipes, chains or redirects) and put the directory in cwd`,
           ),
@@ -377,13 +425,15 @@ function testingRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDet
       }
     }
     if (t.result !== 'pass' && t.notes === undefined) {
-      out.push(issue(`${at}.notes`, 'testing.notes_required', `result '${t.result}' needs notes saying why`));
+      out.push(issue(`${at_}.notes`, 'testing.notes_required', `result '${t.result}' needs notes saying why`));
     }
   });
   return out;
 }
 
 // ── risk, revert, components, base, refs ─────────────────────────────────
+const RISK_NAMES: readonly string[] = RISK_ORDER;
+
 /** The highest minRisk rank among `names` (-1 when none sets one) and the components that set it. */
 function riskFloor(
   names: readonly string[],
@@ -404,29 +454,31 @@ function riskFloor(
   return { floor, setters };
 }
 
-function riskRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDetail[] {
+function riskRules(input: PartialRulesInput, ctx: CreateRuleContext): IssueDetail[] {
   const out: IssueDetail[] = [];
+  if (input.risk === undefined) return out;
   if ((input.risk === 'medium' || input.risk === 'high') && input.riskNote === undefined) {
     out.push(
       issue('riskNote', 'risk.note_required', `risk '${input.risk}' needs riskNote: what could break, for whom`),
     );
   }
-  const { floor, setters } = riskFloor(input.components, ctx.config.components);
+  const { floor, setters } = riskFloor(input.components ?? [], ctx.config.components);
   if (floor > riskRank(input.risk)) {
     out.push(
       issue(
         'risk',
         'risk.below_component_floor',
-        `risk '${input.risk}' is below the floor set by ${setters.join(', ')} in .github/ghx.json`,
+        `risk '${input.risk}' is below the floor set by ${setters.join(', ')} in .github/ghx.json; use risk '${RISK_NAMES[floor]}' or higher`,
       ),
     );
   }
   return out;
 }
 
-function revertRules(input: CreateRulesInput): IssueDetail[] {
+function revertRules(input: PartialRulesInput): IssueDetail[] {
   const out: IssueDetail[] = [];
   const p = input.revertPolicy;
+  if (p === undefined) return out;
   if ((p === 'revert-with-followup' || p === 'forward-fix-only') && input.revertNote === undefined) {
     out.push(
       issue(
@@ -446,21 +498,24 @@ function revertRules(input: CreateRulesInput): IssueDetail[] {
   return out;
 }
 
-function componentRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDetail[] {
+function componentRules(input: PartialRulesInput, ctx: CreateRuleContext): IssueDetail[] {
   const out: IssueDetail[] = [];
-  const known = Object.keys(ctx.config.components);
   const seen = new Set<string>();
-  input.components.forEach((name, i) => {
+  input.components?.forEach((name, i) => {
     const at = `components[${i}]`;
     if (seen.has(name)) out.push(issue(at, 'components.duplicate', `'${name}' is listed twice`));
     seen.add(name);
     if (!Object.hasOwn(ctx.config.components, name)) {
       // What z.enum(config components) would report (02 §1.5); checked here because spec.input has no config.
       const d: IssueDetail = {
-        ...issue(at, 'invalid_value', `unknown component '${name}'; .github/ghx.json declares ${known.join(', ')}`),
+        ...issue(
+          at,
+          'invalid_value',
+          `unknown component '${name}'; .github/ghx.json declares ${componentList(ctx.config.components)}`,
+        ),
         received: name,
       };
-      const s = suggest(name, known)[0];
+      const s = suggestComponent(name, ctx.config.components)[0];
       if (s !== undefined) d.suggestion = s;
       out.push(d);
     }
@@ -468,9 +523,9 @@ function componentRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueD
   return out;
 }
 
-function branchRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDetail[] {
+function branchRules(input: PartialRulesInput, ctx: CreateRuleContext): IssueDetail[] {
   const out: IssueDetail[] = [];
-  if (input.base === input.head) {
+  if (input.base !== undefined && input.base === input.head) {
     out.push(issue('base', 'base.equals_head', `base and head are both '${input.base}'`));
   }
   if (input.refs?.stackedOn !== undefined && ctx.defaultBranch !== undefined && input.base === ctx.defaultBranch) {
@@ -487,10 +542,22 @@ function branchRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDeta
 
 /** Every offline rule of 02 §2.1, in table order. An empty array means valid. */
 export function createRules(input: CreateRulesInput, ctx: CreateRuleContext): IssueDetail[] {
+  return partialRules(input, ctx);
+}
+
+/**
+ * createRules on the fields that parsed (PartialRulesInput). `testingAt[j]` is the original index of
+ * `input.testing[j]` when only some testing items parsed; issue paths use the original index.
+ */
+export function partialRules(
+  input: PartialRulesInput,
+  ctx: CreateRuleContext,
+  testingAt?: readonly number[],
+): IssueDetail[] {
   return [
     ...titleRules(input, ctx),
     ...descriptionRules(input, ctx),
-    ...testingRules(input, ctx),
+    ...testingRules(input, ctx, testingAt),
     ...riskRules(input, ctx),
     ...revertRules(input),
     ...componentRules(input, ctx),
@@ -513,12 +580,19 @@ export interface CreateNetworkData {
 export interface NetworkRulesResult {
   issues: IssueDetail[];
   warnings: Warning[];
-  /** Touched components past a full `components` list, in config order (06); the block's `alsoTouched`. */
+  /** Touched components past a full `components` list (06); the block's `alsoTouched`. */
   alsoTouched: string[];
+  /** `components` with every touched component the input left out added, up to 5 (COMPONENTS_ADDED). */
+  components: string[];
 }
 
+/** The fields the network rules read. `risk` is absent while it failed to parse (the floor check waits). */
+export type NetworkRulesInput = Pick<CreateRulesInput, 'base' | 'refs' | 'revertWith' | 'components'> & {
+  risk?: CreateRulesInput['risk'] | undefined;
+};
+
 /** Every PR or issue ref in the input with its issue path, for the existence lookup. */
-export function collectRefs(input: Pick<CreateRulesInput, 'refs' | 'revertWith'>): { path: string; ref: string }[] {
+export function collectRefs(input: Pick<PartialRulesInput, 'refs' | 'revertWith'>): { path: string; ref: string }[] {
   const out: { path: string; ref: string }[] = [];
   const r = input.refs;
   const one = (key: 'stackedOn' | 'splitFrom' | 'reverts') => {
@@ -562,10 +636,11 @@ export function touchedComponents(
 
 /** risk.below_component_floor for the components only ghx recorded: they are not in input.components. */
 export function alsoTouchedFloor(
-  input: CreateRulesInput,
+  input: Pick<NetworkRulesInput, 'risk'>,
   config: Pick<CreateRulesConfig, 'components'>,
   names: readonly string[],
 ): IssueDetail[] {
+  if (input.risk === undefined) return [];
   const { floor, setters } = riskFloor(names, config.components);
   if (floor <= riskRank(input.risk)) return [];
   return [
@@ -582,17 +657,20 @@ const firstThree = (names: readonly string[]): string =>
   names.slice(0, 3).join(', ') + (names.length > 3 ? `, +${names.length - 3} more` : '');
 
 /**
- * components.undeclared_touched, risk.below_component_floor for alsoTouched, refs.stack_mismatch,
- * refs.not_found; warnings COMPONENTS_UNUSED / _UNCHECKED / _ALSO_TOUCHED.
+ * Components from the diff: a touched component the input left out is added (COMPONENTS_ADDED), the most
+ * changed files first, up to 5; past that the rest is recorded as alsoTouched (06, COMPONENTS_ALSO_TOUCHED)
+ * and its risk floor still applies. Also refs.stack_mismatch, refs.not_found and COMPONENTS_UNUSED /
+ * COMPONENTS_UNCHECKED.
  */
 export function createNetworkRules(
-  input: CreateRulesInput,
+  input: NetworkRulesInput,
   config: Pick<CreateRulesConfig, 'components'>,
   data: CreateNetworkData,
 ): NetworkRulesResult {
   const issues: IssueDetail[] = [];
   const warnings: Warning[] = [];
   let alsoTouched: string[] = [];
+  let components = [...input.components];
 
   if (data.changedFiles === null) {
     warnings.push({
@@ -602,37 +680,45 @@ export function createNetworkRules(
     });
   } else {
     const touched = touchedComponents(data.changedFiles, config.components);
-    const undeclared = [...touched.keys()].filter((n) => !input.components.includes(n));
-    // 06: a diff that touches more components than the list holds fills the list; ghx records the rest.
-    const wide = touched.size > MAX_COMPONENTS;
-    if (undeclared.length > 0 && wide && input.components.length >= MAX_COMPONENTS) {
-      alsoTouched = undeclared;
-      warnings.push({
-        code: 'COMPONENTS_ALSO_TOUCHED',
-        message: `The PR also touches ${undeclared.length} component${undeclared.length === 1 ? '' : 's'} beyond the ${input.components.length} declared; recorded as alsoTouched: ${firstThree(undeclared)}.`,
-      });
-      issues.push(...alsoTouchedFloor(input, config, undeclared));
-    } else if (undeclared.length > 0 && wide) {
-      issues.push(
-        issue(
-          'components',
-          'components.undeclared_touched',
-          `the PR touches ${touched.size} components, more than components can list (${MAX_COMPONENTS}); declare the ${MAX_COMPONENTS} primary ones and ghx records the rest as alsoTouched (undeclared: ${firstThree(undeclared)})`,
-        ),
+    const names = [...touched.keys()];
+    const undeclared = names
+      .filter((n) => !components.includes(n))
+      .sort(
+        (x, y) => (touched.get(y)?.length ?? 0) - (touched.get(x)?.length ?? 0) || names.indexOf(x) - names.indexOf(y),
       );
-    } else {
-      for (const name of undeclared) {
-        const files = touched.get(name) ?? [];
+    const room = Math.max(0, MAX_COMPONENTS - components.length);
+    const added = undeclared.slice(0, room);
+    const left = names.filter((n) => undeclared.includes(n) && !added.includes(n));
+    // 06: alsoTouched is for a diff wider than the list can hold. A list padded with components the PR
+    // does not change must make room instead; ghx does not drop what the input declared.
+    if (touched.size > MAX_COMPONENTS) alsoTouched = left;
+    else {
+      const unchanged = components.filter((n) => !touched.has(n));
+      for (const name of left) {
         issues.push(
           issue(
             'components',
             'components.undeclared_touched',
-            `the PR changes ${name} (${firstThree(files)}); add '${name}' to components`,
+            `the PR changes ${name} (${firstThree(touched.get(name) ?? [])}) but components is full (${MAX_COMPONENTS}); replace ${unchanged.length > 0 ? `one it does not change (${unchanged.join(', ')})` : 'one'} with '${name}'`,
           ),
         );
       }
     }
-    const unused = input.components.filter((n) => config.components[n]?.paths !== undefined && !touched.has(n));
+    if (added.length > 0) {
+      components = [...components, ...added];
+      warnings.push({
+        code: 'COMPONENTS_ADDED',
+        message: `Added ${added.map((n) => `${n} (${firstThree(touched.get(n) ?? [])})`).join(', ')} to components: the PR changes ${added.length === 1 ? 'it' : 'them'}.`,
+      });
+    }
+    if (alsoTouched.length > 0) {
+      warnings.push({
+        code: 'COMPONENTS_ALSO_TOUCHED',
+        message: `The PR also touches ${alsoTouched.length} component${alsoTouched.length === 1 ? '' : 's'} beyond the ${components.length} in components; recorded as alsoTouched: ${firstThree(alsoTouched)}.`,
+      });
+      issues.push(...alsoTouchedFloor(input, config, alsoTouched));
+    }
+    const unused = components.filter((n) => config.components[n]?.paths !== undefined && !touched.has(n));
     if (unused.length > 0) {
       warnings.push({
         code: 'COMPONENTS_UNUSED',
@@ -666,18 +752,33 @@ export function createNetworkRules(
   for (const { path, ref } of collectRefs(input)) {
     if (missing.has(ref)) issues.push(issue(path, 'refs.not_found', `${ref} does not exist`));
   }
-  return { issues, warnings, alsoTouched };
+  return { issues, warnings, alsoTouched, components };
 }
 
 /** The `VALIDATION` error for a non-empty issue list, shaped like validateInput's (src/cli/args.ts). */
-export function validationError(issues: readonly IssueDetail[]): GhxError {
+/**
+ * The `VALIDATION` error for a non-empty issue list, shaped like validateInput's (src/cli/args.ts).
+ * `blocked` is a state failure the same run hit (HEAD_NOT_PUSHED, …), reported beside the issues; `more`
+ * ends the hint (where to find a valid input).
+ */
+export function validationError(
+  issues: readonly IssueDetail[],
+  blocked: GhxError | null = null,
+  more?: string,
+): GhxError {
   const first = issues.find((i) => i.suggestion !== undefined) ?? issues[0];
+  const rest = issues.length > 1 ? ` (+${issues.length - 1} more in details.issues)` : '';
   const hint = first
-    ? `${first.path || 'input'}: ${first.message}${first.suggestion ? ` (did you mean '${first.suggestion}'?)` : ''}`
-    : undefined;
+    ? `${first.path || 'input'}: ${first.message}${first.suggestion ? ` (did you mean '${first.suggestion}'?)` : ''}${rest}${more ? `. ${more}` : ''}`
+    : more;
   return new GhxError('VALIDATION', `${issues.length} input issue${issues.length === 1 ? '' : 's'}.`, {
-    hint,
-    details: { issues: [...issues] },
+    ...(hint !== undefined ? { hint } : {}),
+    details: {
+      issues: [...issues],
+      ...(blocked !== null
+        ? { blocked: { code: blocked.code, message: blocked.message, ...(blocked.hint ? { hint: blocked.hint } : {}) } }
+        : {}),
+    },
   });
 }
 

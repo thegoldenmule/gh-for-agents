@@ -279,6 +279,7 @@ export async function planEdit(env: EditEnv): Promise<EditPlan> {
   });
   issues.push(...net.issues);
   warnings.push(...net.warnings);
+  input = { ...input, components: net.components };
   // 06: derived again from the diff; when the diff is unknown, the block's record stands.
   let alsoTouched = net.alsoTouched;
   if (files.files === null) {

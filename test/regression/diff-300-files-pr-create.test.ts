@@ -10,19 +10,21 @@ import { runInProcess } from '../helpers/harness.ts';
 
 const capped = Array.from({ length: 300 }, (_, i) => `src/f${i}.ts`);
 
-test('R15 (pr create): 300 compare files + matching cwd → local git diff; an undeclared component is caught', async () => {
+test('R15 (pr create): 300 compare files + matching cwd → local git diff; an undeclared component is added', async () => {
   const s = scene({ remoteConfig: false, files: capped });
   const git = gitCheckout('octo/demo', {
     toplevel: localCheckout(),
     diffs: { [`${BASE_OID}...${HEAD_OID}`]: [...capped, 'docs/guide.md'] },
   });
-  const r = await runInProcess(['pr', 'create', '--input', '-'], { gh: s.gh, git, stdin: JSON.stringify(INPUT) });
-  assert.equal(r.exitCode, EXIT.USAGE, r.stdout);
-  assert.deepEqual(
-    r.json.error.details.issues.map((i: { code: string }) => i.code),
-    ['components.undeclared_touched'],
-  );
-  assert.match(r.json.error.details.issues[0].message, /docs/);
+  const r = await runInProcess(['pr', 'create', '--input', '-', '--dry-run'], {
+    gh: s.gh,
+    git,
+    stdin: JSON.stringify(INPUT),
+  });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  const added = r.json.warnings.find((w: { code: string }) => w.code === 'COMPONENTS_ADDED');
+  assert.match(added?.message ?? '', /Added docs \(docs\/guide\.md\)/);
+  assert.match(r.json.preview.body, /Components: app, docs/);
 });
 
 test('R15 (pr create): 300 compare files and no checkout → COMPONENTS_UNCHECKED, the PR is still created', async () => {

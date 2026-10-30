@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { BASELINE_NAMES_QUERY } from '../../src/ci/wait/fetch.ts';
 import { FALLBACK_PR_QUERY, SUITES_QUERY } from '../../src/ci/wait/poller.ts';
 import { isMutating } from '../../src/gh/guard.ts';
+import type { Git } from '../../src/git/index.ts';
 import type { ProcessRunner, ProcRequest, ProcResult } from '../../src/proc/runner.ts';
 import { type FakeClock, flush } from '../helpers/fake-clock.ts';
 import { fakeGit } from '../helpers/fake-git.ts';
@@ -49,6 +50,8 @@ export interface SimPr {
   state: 'open' | 'closed';
   merged?: boolean;
   head: string;
+  /** The head branch name (REST head.ref). Default 'feat/x'. */
+  headRef?: string;
   base?: string;
   /** REST `mergeable`: false = conflicts with the base. Default null (not computed). */
   mergeable?: boolean | null;
@@ -324,7 +327,7 @@ export class GitHubSim {
         mergeable: pr.mergeable ?? null,
         merged: pr.merged === true,
         merged_at: pr.merged ? this.iso(0) : null,
-        head: { sha: pr.head },
+        head: { sha: pr.head, ref: pr.headRef ?? 'feat/x' },
         base: { ref: pr.base ?? 'main', repo: { default_branch: 'main' } },
       });
     }
@@ -712,13 +715,15 @@ export function startWait(
     shutdown?: HarnessOptions['shutdown'];
     /** Replaces the sim's runner (e.g. a recording wrapper around it). */
     proc?: ProcessRunner;
+    /** The local checkout (default: none). */
+    git?: Git;
   } = {},
 ) {
   const artifacts = o.artifacts ?? mkdtempSync(join(scratchDir(), 'wait-'));
   let done = false;
   const p = runInProcess(['ci', 'wait', ...argv], {
     proc: o.proc ?? sim.runner(),
-    git: fakeGit({}),
+    git: o.git ?? fakeGit({}),
     clock: sim.clock,
     env: { GHX_ARTIFACT_DIR: artifacts, CLAUDE_CODE_SESSION_ATTENDED: '1', ...o.env },
     ...(o.shutdown ? { shutdown: o.shutdown } : {}),

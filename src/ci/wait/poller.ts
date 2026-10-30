@@ -29,7 +29,8 @@ const PullRest = z.object({
   mergeable: z.boolean().nullish(),
   merged: z.boolean().nullish(),
   merged_at: z.string().nullish(),
-  head: z.object({ sha: z.string() }),
+  /** ref: optional, so a body cached (ETag) before it was kept still parses. */
+  head: z.object({ sha: z.string(), ref: z.string().optional() }),
   base: z.object({ ref: z.string(), repo: z.object({ default_branch: z.string() }).nullish() }),
 });
 
@@ -214,6 +215,11 @@ export interface PullInfo {
   number: number;
   state: 'OPEN' | 'CLOSED' | 'MERGED';
   headSha: string;
+  /**
+   * The head branch name: REST only (the GraphQL fallback reads the shared CI snapshot query, which has
+   * none), so the --expect-head local default needs the REST mode.
+   */
+  headRef?: string | null;
   baseRef: string;
   /** The repo default branch, when the response carried it. */
   defaultBranch: string | null;
@@ -308,6 +314,7 @@ function pullInfo(p: z.infer<typeof PullRest>): PullInfo {
     number: p.number,
     state: p.state.toLowerCase() === 'open' ? 'OPEN' : merged ? 'MERGED' : 'CLOSED',
     headSha: p.head.sha,
+    headRef: p.head.ref ?? null,
     baseRef: p.base.ref,
     defaultBranch: p.base.repo?.default_branch ?? null,
     mergeable: p.mergeable === false ? 'CONFLICTING' : p.mergeable === true ? 'MERGEABLE' : 'UNKNOWN',

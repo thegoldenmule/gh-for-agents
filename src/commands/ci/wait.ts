@@ -9,6 +9,7 @@ import { createMergeGate } from '../../ci/wait/mergeable.ts';
 import { defineStreamCommand } from '../../core/command.ts';
 import type { ExitCode } from '../../core/exit.ts';
 import { WaitEvent, WaitSummary } from '../../schemas/ci.ts';
+import { ShaInput } from '../../schemas/common.ts';
 
 /** 02 §11.0, verbatim but for the internal §6.1 citation (M12 asserts the same string in the agent docs). */
 export const PROTOCOL =
@@ -48,6 +49,9 @@ const Input = z.strictObject({
     .default(true)
     .describe('Compare failures with the default branch; --no-compare-main skips it'),
   stream: z.boolean().default(false).describe('Print every event as NDJSON (for humans; agents use the default)'),
+  expectHead: ShaInput.optional().describe(
+    'One PR: judge CI only once its head is this SHA or has moved past it (default: the local HEAD when the cwd is on the PR branch and pushed)',
+  ),
   foreground: z
     .boolean()
     .default(false)
@@ -99,6 +103,10 @@ export default defineStreamCommand({
   examples: [
     { argv: 'ghx ci wait 3301 -R powerhouse-inc/powerhouse', note: 'Run with run_in_background: true' },
     { argv: 'ghx ci wait owner/repo#12 --until settled', note: 'Wait for every check, not the first failure' },
+    {
+      argv: 'ghx ci wait owner/repo#12 --expect-head 9f2c4e1',
+      note: 'After a push: judge CI on 9f2c4e1, not the old head',
+    },
     { argv: 'ghx ci wait owner/repo#12 --until mergeable', note: 'Settled CI, then the merge CI gate' },
     { argv: 'ghx ci wait branch:main@9f2c4e1 -R owner/repo', note: 'CI for one commit on a branch' },
     {

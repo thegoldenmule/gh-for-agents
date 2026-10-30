@@ -8,38 +8,144 @@ import type { ResolvedRepo } from '../../gh/repo.ts';
 import { repoSlug, sameRepo } from '../../gh/types.ts';
 import { newId } from '../../meta/ids.ts';
 import { renderPrBody, toPrBlock } from '../../render/pr-body.ts';
+import { normalizeComponents, normalizeInput, structureIssues } from './check.ts';
 import type { PrCreateOutput, PrCreatePreview } from './output.ts';
-import { changedFiles, type Preflight, PUSH_PERMISSIONS, runPreflight } from './preflight.ts';
-import { collectRefs, createNetworkRules, createRules, stripFooter } from './rules.ts';
+import { changedFiles, defaultBranchOf, type Preflight, PUSH_PERMISSIONS, runPreflight } from './preflight.ts';
+import {
+  collectRefs,
+  createNetworkRules,
+  createRules,
+  type NetworkRulesInput,
+  partialRules,
+  validationError,
+} from './rules.ts';
 import { PrCreateInput } from './schema.ts';
 import { prRef, type Submitted } from './submit.ts';
 
+/** The fields of a PR create input, as spec.input and normalizeInput know them. */
+export const PR_FIELDS: readonly string[] = Object.keys(PrCreateInput.shape);
+
+/** Where a VALIDATION hint sends the caller for a valid input. */
+export const EXAMPLE_HINT = 'ghx pr create --example prints a valid input for this repo';
+
+/** Required in the input. components, base and head are too, but ghx fills them when it can. */
+const CREATE_REQUIRED = ['title', 'description', 'testing', 'risk', 'revertPolicy', 'base', 'head'];
+
 /**
- * Structure (zod) then every createRules issue, without the network. `input` is null when zod failed. A
- * harness footer at the end of the description is stripped first (stripFooter), with a warning.
+ * --batch items: the normalisation, structure (zod) and every createRules issue, without the network.
+ * `input` is null when zod failed.
  */
 export function offlineIssues(
   raw: unknown,
   config: GhxConfig,
 ): { input: PrCreateInput | null; issues: IssueDetail[]; warnings: Warning[] } {
-  const warnings: Warning[] = [];
-  let value = raw;
-  if (typeof raw === 'object' && raw !== null && 'description' in raw && typeof raw.description === 'string') {
-    const stripped = stripFooter(raw.description, config);
-    if (stripped.warning !== null) {
-      value = { ...raw, description: stripped.description };
-      warnings.push(stripped.warning);
-    }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    const r = PrCreateInput.safeParse(raw);
+    return { input: null, issues: r.success ? [] : mapZodIssues(r.error), warnings: [] };
   }
-  const r = PrCreateInput.safeParse(value);
+  const n = normalizeInput(raw as Record<string, unknown>, config, PR_FIELDS);
+  const warnings = [...n.warnings, ...normalizeComponents(n.value, config, { addScope: true })];
+  const r = PrCreateInput.safeParse(n.value);
   if (!r.success) {
     return {
       input: null,
-      issues: mapZodIssues(r.error, { schema: PrCreateInput, input: value, suggest: (w, c) => suggest(w, c) }),
+      issues: [
+        ...n.issues,
+        ...mapZodIssues(r.error, { schema: PrCreateInput, input: n.value, suggest: (w, c) => suggest(w, c) }),
+      ],
       warnings,
     };
   }
-  return { input: r.data, issues: createRules(r.data, { config }), warnings };
+  return { input: r.data, issues: [...n.issues, ...createRules(r.data, { config })], warnings };
+}
+
+/**
+ * A single `pr create` input, checked in one pass (02 §2.1): normalisation, the defaults for head and base,
+ * structure, the network reads (whenever base and head are known, even with other issues), the derived
+ * components, then every rule. Warnings go to ctx.warn as they arise; all issues throw as one VALIDATION.
+ * A state failure (HEAD_NOT_PUSHED, …) throws on its own when the input is otherwise valid, and rides in
+ * VALIDATION's details.blocked when it is not.
+ */
+export async function checkCreate(
+  raw: Record<string, unknown>,
+  env: PlanEnv,
+): Promise<{ plan: CreatePlan; input: PrCreateInput }> {
+  const { ctx, config } = env;
+  const n = normalizeInput(raw, config, PR_FIELDS);
+  const value = n.value;
+  for (const w of [...n.warnings, ...normalizeComponents(value, config, { addScope: true })]) ctx.warn(w);
+  const issues: IssueDetail[] = [...n.issues];
+
+  if (value.head === undefined && isLocalTarget(env.repo)) {
+    const branch = await ctx.git.currentBranch();
+    if (branch !== undefined && branch !== '') {
+      value.head = branch;
+      ctx.warn({ code: 'HEAD_DEFAULTED', message: `head is the current branch, '${branch}'.` });
+    }
+  }
+  if (value.base === undefined) {
+    const branch = await defaultBranchOf(ctx.gh, env.repo.repo);
+    if (branch !== null) {
+      value.base = branch;
+      ctx.warn({ code: 'BASE_DEFAULTED', message: `base is the default branch, '${branch}'.` });
+    }
+  }
+
+  const s = structureIssues(value, PrCreateInput, CREATE_REQUIRED);
+  issues.push(...s.issues);
+  const p = s.parsed;
+  let plan: CreatePlan<PlanInput> | null = null;
+  let blocked: GhxError | null = null;
+  if (p.base !== undefined && p.head !== undefined) {
+    try {
+      plan = await planCreate(
+        {
+          base: p.base,
+          head: p.head,
+          components: p.components ?? [],
+          ...(p.refs !== undefined ? { refs: p.refs } : {}),
+          ...(p.revertWith !== undefined ? { revertWith: p.revertWith } : {}),
+          ...(p.draft !== undefined ? { draft: p.draft } : {}),
+          ...(p.risk !== undefined ? { risk: p.risk } : {}),
+        },
+        env,
+      );
+    } catch (e) {
+      if (!(e instanceof GhxError)) throw e;
+      blocked = e;
+    }
+  }
+
+  const merged = {
+    ...p,
+    ...(plan !== null ? { components: plan.input.components } : {}),
+    ...(plan?.input.refs !== undefined ? { refs: plan.input.refs } : {}),
+  };
+  if (
+    (merged.components === undefined || merged.components.length === 0) &&
+    !('components' in value && s.issues.some((i) => i.path.startsWith('components')))
+  ) {
+    const why = plan === null ? 'ghx could not read the diff to derive it' : 'the diff touches no component with paths';
+    issues.push({
+      path: 'components',
+      code: 'invalid_type',
+      expected: 'array',
+      received: 'undefined',
+      message: `missing required field 'components': component names from .github/ghx.json (${why}); e.g. ["${Object.keys(config.components)[0] ?? 'app'}"]`,
+    });
+  }
+  issues.push(...partialRules(merged, { config }, s.testingAt));
+  if (plan !== null) {
+    issues.push(...plan.issues);
+    for (const w of plan.warnings) ctx.warn(w);
+  }
+  if (issues.length > 0) throw validationError(issues, blocked, EXAMPLE_HINT);
+  if (blocked !== null) throw blocked;
+  const full = PrCreateInput.safeParse(merged);
+  if (!full.success || plan === null) {
+    throw validationError(full.success ? [] : mapZodIssues(full.error, { schema: PrCreateInput, input: merged }));
+  }
+  return { plan: { ...plan, input: full.data, warnings: [] }, input: full.data };
 }
 
 export interface PlanEnv {
@@ -50,9 +156,12 @@ export interface PlanEnv {
   batchHeads?: ReadonlyMap<string, number>;
 }
 
-export interface CreatePlan {
-  /** The input with refs.stackedOn filled from the stack when it was absent. */
-  input: PrCreateInput;
+/** The fields planCreate reads: base, head, components, refs, revertWith, draft and (for its floor) risk. */
+export type PlanInput = NetworkRulesInput & { head: string; draft?: boolean | undefined };
+
+export interface CreatePlan<T extends PlanInput = PrCreateInput> {
+  /** The input with components derived from the diff and refs.stackedOn filled from the stack. */
+  input: T;
   preflight: Preflight;
   draft: boolean;
   draftDerived: boolean;
@@ -74,7 +183,7 @@ export function isLocalTarget(repo: ResolvedRepo): boolean {
 const short = (sha: string): string => sha.slice(0, 7);
 
 /** The reads and checks for one input. State failures throw; VALIDATION issues are returned. */
-export async function planCreate(input: PrCreateInput, env: PlanEnv): Promise<CreatePlan> {
+export async function planCreate<T extends PlanInput>(input: T, env: PlanEnv): Promise<CreatePlan<T>> {
   const { ctx, config } = env;
   const repo = env.repo.repo;
   const slug = repoSlug(repo);
@@ -140,10 +249,15 @@ export async function planCreate(input: PrCreateInput, env: PlanEnv): Promise<Cr
   // whose head is the base, or a batch item not created yet.
   const stacked = input.base !== pf.defaultBranch;
   const stackedOnItem = env.batchHeads?.get(input.base) ?? null;
-  const issues: IssueDetail[] = createRules(input, { config, defaultBranch: pf.defaultBranch }).filter(
-    (i) => i.code === 'refs.stacked_on_default_base',
-  );
-  let checked = input;
+  const issues: IssueDetail[] = [];
+  if (input.refs?.stackedOn !== undefined && input.base === pf.defaultBranch) {
+    issues.push({
+      path: 'refs.stackedOn',
+      code: 'refs.stacked_on_default_base',
+      message: `a PR based on the default branch '${pf.defaultBranch}' is not stacked; drop stackedOn or set base to the parent's head`,
+    });
+  }
+  let checked: T = input;
   if (stackedOnItem !== null && input.refs?.stackedOn !== undefined) {
     issues.push({
       path: 'refs.stackedOn',
@@ -163,9 +277,9 @@ export async function planCreate(input: PrCreateInput, env: PlanEnv): Promise<Cr
   issues.push(...net.issues);
   warnings.push(...net.warnings);
 
-  let filled = checked;
+  let filled: T = { ...checked, components: net.components };
   if (stacked && checked.refs?.stackedOn === undefined) {
-    if (baseParent !== null) filled = { ...checked, refs: { ...(checked.refs ?? {}), stackedOn: baseParent } };
+    if (baseParent !== null) filled = { ...filled, refs: { ...(checked.refs ?? {}), stackedOn: baseParent } };
     else if (stackedOnItem === null) {
       warnings.push({
         code: 'BASE_NOT_A_PR',

@@ -268,3 +268,19 @@ export async function openPrOnHead(
   );
   return n ? { number: n.number, state: n.state, url: n.url, body: n.body } : null;
 }
+
+export const DEFAULT_BRANCH_QUERY =
+  'query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name}}}';
+
+const DefaultBranchData = z.object({
+  repository: z.object({ defaultBranchRef: z.object({ name: z.string() }).nullable() }).nullable(),
+});
+
+/** The repo's default branch, for a create input without `base`; null for an empty repo. */
+export async function defaultBranchOf(gh: Gh, repo: RepoRef): Promise<string | null> {
+  const data = await gh.graphql(DEFAULT_BRANCH_QUERY, { owner: repo.owner, name: repo.name }, DefaultBranchData, {
+    repo,
+    notFound: 'REPO_NOT_FOUND',
+  });
+  return data.repository?.defaultBranchRef?.name ?? null;
+}

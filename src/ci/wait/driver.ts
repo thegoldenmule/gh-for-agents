@@ -92,6 +92,12 @@ export const UNATTENDED_RETURN_MS = 25 * 60_000;
 export const FOREGROUND_RETURN_MS = 9 * 60_000;
 /** How far past FOREGROUND_RETURN_MS the last tick's diagnosis may run. */
 export const FOREGROUND_TICK_MARGIN_MS = 15_000;
+/** An explicit --expect-head the PR never reaches (nor passes) within this ends `superseded` (exit 12). */
+export const EXPECT_HEAD_WAIT_MS = 5 * 60_000;
+/** The local-HEAD default gives up sooner: it warns and binds the PR's head as it is. */
+export const EXPECT_HEAD_DEFAULT_WAIT_MS = 2 * 60_000;
+/** How often the PR is re-read while its head is not the expected one yet. */
+export const EXPECT_HEAD_POLL_MS = 10_000;
 /** How often a wait that follows another one (same target, repo and machine) looks for its answer. */
 export const FOLLOW_POLL_MS = 5_000;
 /** Consecutive failed ticks after which a mid-wait gh failure is fatal (error line, exit 7). */
@@ -114,6 +120,13 @@ export interface WaitOptions {
   stream: boolean;
   /** Self-return `pending` after FOREGROUND_RETURN_MS (a foreground call under the Bash tool's cap). */
   foreground?: boolean | undefined;
+  /**
+   * One PR target: judge CI only once the PR's head is this SHA (7–40 hex) or has moved past it (it is
+   * among the PR's commits). Closes the race where a wait started right after a push sees the old head.
+   * Default: the local HEAD, when the cwd is a checkout of the target repo on the PR's head branch and
+   * HEAD equals its upstream (it was pushed).
+   */
+  expectHead?: string | undefined;
 }
 
 /** M6.6: given a settled CI outcome, the merge gate's final word, or null to keep polling. */
@@ -195,6 +208,14 @@ interface Run {
   lease: Lease | null;
   /** Another wait holds the lease: this one follows it (no polls) from `since` (epoch ms). */
   following: { since: number; pid: number } | null;
+  /**
+   * --expect-head (or its local default) until the PR's head reaches or passes it; null once it has (a
+   * later head change follows the head policy). `since` is clock.monotonic(); `checked` are heads whose
+   * PR commits were read without the expected SHA among them.
+   */
+  expect: { sha: string; explicit: boolean; since: number; checked: Set<string> } | null;
+  /** The local-HEAD default for --expect-head was looked for (once per wait). */
+  defaultLooked: boolean;
 }
 
 export async function* runWait(
@@ -263,6 +284,14 @@ export async function* runWait(
         },
       );
     }
+  }
+  if (o.expectHead !== undefined && (parsed.length !== 1 || parsed[0]?.kind !== 'pr')) {
+    throw new GhxError('VALIDATION', '--expect-head takes exactly one PR target.', {
+      hint: 'Wait on one PR: ghx ci wait <pr> --expect-head <sha>. A branch target pins its commit as branch:<name>@<sha>.',
+      details: {
+        issues: [{ path: 'expectHead', code: 'invalid', message: 'needs exactly one PR target' }],
+      },
+    });
   }
   const runs: Run[] = [];
   let flagRepo: string | undefined;
@@ -343,6 +372,11 @@ export async function* runWait(
       pull: null,
       lease: null,
       following: null,
+      expect:
+        o.expectHead === undefined
+          ? null
+          : { sha: o.expectHead.toLowerCase(), explicit: true, since: clock.monotonic(), checked: new Set() },
+      defaultLooked: o.expectHead !== undefined,
     });
   }
 
@@ -720,6 +754,90 @@ export async function* runWait(
     }
   }
 
+  /**
+   * The local-HEAD default for --expect-head: HEAD, when the cwd is a checkout of the target repo, on the
+   * PR's head branch, and HEAD is its upstream (pushed). Anything unknown: no default.
+   */
+  async function localHeadDefault(r: Run, pull: PullInfo): Promise<string | null> {
+    try {
+      const cwdRepo = r.resolved.cwdRepo;
+      if (!cwdRepo || repoSlug(cwdRepo).toLowerCase() !== repoSlug(r.repo).toLowerCase() || !pull.headRef) return null;
+      const branch = await ctx.git.currentBranch();
+      if (branch !== pull.headRef) return null;
+      const local = await ctx.git.revParse('HEAD');
+      const upstream = (await ctx.git.revParse('@{u}')) ?? (await ctx.git.revParse(`refs/remotes/origin/${branch}`));
+      return local !== undefined && local === upstream ? local.toLowerCase() : null;
+    } catch (e) {
+      rethrowControlFlow(e);
+      return null;
+    }
+  }
+
+  /**
+   * Before binding a PR: has its head reached the expected SHA, or moved past it (the SHA is among the PR's
+   * commits)? false: not yet; keep re-reading the PR (or give up: an explicit expectation ends superseded,
+   * the default warns and binds the head as it is).
+   */
+  async function expectedHeadReached(r: Run, res: TickResult): Promise<boolean> {
+    const pull = res.pull;
+    if (!pull || pull.state !== 'OPEN') return true;
+    if (!r.defaultLooked) {
+      r.defaultLooked = true;
+      const sha = await localHeadDefault(r, pull);
+      if (sha !== null) r.expect = { sha, explicit: false, since: clock.monotonic(), checked: new Set() };
+    }
+    const x = r.expect;
+    const head = pull.headSha.toLowerCase();
+    if (x === null || head.startsWith(x.sha)) {
+      r.expect = null;
+      return true;
+    }
+    if (!x.checked.has(head)) {
+      let commits: string[] = [];
+      try {
+        commits = (await fetchPrCommits({ gh: ctx.gh, repo: r.repo, number: pull.number })).map((c) => c.toLowerCase());
+      } catch (e) {
+        rethrowControlFlow(e);
+      }
+      if (commits.some((c) => c.startsWith(x.sha))) {
+        warn({
+          code: 'EXPECT_HEAD_PASSED',
+          message: `${r.label}: the head moved past ${x.sha.slice(0, 7)} to ${head.slice(0, 7)}; waiting on ${head.slice(0, 7)}.`,
+        });
+        r.expect = null;
+        return true;
+      }
+      x.checked.add(head);
+    }
+    const waited = clock.monotonic() - x.since;
+    if (waited < (x.explicit ? EXPECT_HEAD_WAIT_MS : EXPECT_HEAD_DEFAULT_WAIT_MS)) {
+      r.nextAt = clock.monotonic() + (attended ? EXPECT_HEAD_POLL_MS : Math.max(EXPECT_HEAD_POLL_MS, 30_000));
+      return false;
+    }
+    r.expect = null;
+    if (!x.explicit) {
+      warn({
+        code: 'EXPECT_HEAD_DEFAULT_SKIPPED',
+        message:
+          `${r.label}: the PR head is still ${head.slice(0, 7)}, not the local HEAD ${x.sha.slice(0, 7)} ` +
+          `(pushed ${Math.round(waited / 1000)} s ago or more); waiting on ${head.slice(0, 7)}. Pass --expect-head to insist.`,
+      });
+      return true;
+    }
+    r.summary = {
+      ...unbound(r, 'superseded', 'expect-head-not-seen'),
+      headSha: pull.headSha,
+      next: [`ghx pr status ${r.label}`],
+    };
+    warn({
+      code: 'EXPECT_HEAD_NOT_SEEN',
+      message:
+        `${r.label}: its head is ${head.slice(0, 7)}, and ${x.sha.slice(0, 7)} is neither the head nor among its ` +
+        `commits after ${Math.round(waited / 60_000)} min. Was it pushed to the PR's branch? Check: ghx pr status ${r.label}.`,
+    });
+    return false;
+  }
+
   /** One tick for one target. */
   async function* tick(r: Run): AsyncGenerator<WaitEventOut> {
     const pinned = r.target.kind === 'branch' ? r.target.sha : null;
@@ -755,6 +873,7 @@ export async function* runWait(
     if (res.pull) r.pull = res.pull;
     // A run target's run still going: more jobs (or a rerun's new attempt) may come.
     const open = res.run != null && res.run.status !== 'completed';
+    if (r.st === null && r.target.kind === 'pr' && !(await expectedHeadReached(r, res))) return;
     if (r.st === null) {
       r.st = await bind(r, res.sha, res);
       res = { ...res, nodes: markRequired(res.nodes, requiredSet(r)) };
@@ -965,6 +1084,8 @@ export async function* runWait(
     if ((t.check ?? []).join('\n') !== [...globs].sort().join('\n')) return false;
     if (o.compareMain && t.compareMain !== true) return false;
     if (t.until !== o.until && !(o.until === 'first-failure' && t.until === 'settled')) return false;
+    if (o.expectHead !== undefined && !t.summary.headSha?.toLowerCase().startsWith(o.expectHead.toLowerCase()))
+      return false;
     return t.outcome !== 'superseded' || r.policy === 'stop';
   };
 

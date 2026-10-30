@@ -149,14 +149,23 @@ test('a network failure on a later item stops the batch before the first POST', 
 });
 
 test('network VALIDATION issues of every item are collected before any POST', async () => {
-  const s = scene({ branches: OIDS, files: ['src/a.ts', 'docs/a.md'] });
-  const r = await runInProcess(ARGV, { gh: s.gh, stdin: batch([item('1'), item('2')]) });
+  const s = scene({ branches: OIDS, missingAliases: ['r0'] });
+  const refs = { refs: { closes: ['#999'] } };
+  const r = await runInProcess(ARGV, { gh: s.gh, stdin: batch([item('1', refs), item('2', refs)]) });
   assert.equal(r.exitCode, EXIT.USAGE, r.stdout);
   assert.deepEqual(
-    r.json.error.details.issues.map((i: { path: string }) => i.path),
-    ['items[0].components', 'items[1].components'],
+    r.json.error.details.issues.map((i: { path: string; code: string }) => `${i.path} ${i.code}`),
+    ['items[0].refs.closes[0] refs.not_found', 'items[1].refs.closes[0] refs.not_found'],
   );
   s.gh.expectNoMutations();
+});
+
+test('batch items get the touched components the input left out, with COMPONENTS_ADDED', async () => {
+  const s = scene({ branches: OIDS, files: ['src/a.ts', 'docs/a.md'] });
+  const r = await runInProcess(ARGV, { gh: s.gh, stdin: batch([item('1'), item('2')]) });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.ok(r.json.warnings.some((w: { code: string }) => w.code === 'COMPONENTS_ADDED'));
+  assert.match(String(s.posted[0]?.body), /Components: app, docs/);
 });
 
 test('a mid-batch failure is PARTIAL_FAILURE (exit 7) with created, failed and notAttempted', async () => {

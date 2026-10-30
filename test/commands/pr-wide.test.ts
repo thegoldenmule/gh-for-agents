@@ -48,18 +48,14 @@ test('pr create: 5 declared of 7 touched records the other 2 as alsoTouched, wit
   assert.deepEqual(block.alsoTouched, ['core', 'ui']);
 });
 
-test('pr create: fewer than 5 declared on a wide diff is one components.undeclared_touched issue', async () => {
+test('pr create: fewer than 5 declared on a wide diff are filled to 5, the rest alsoTouched', async () => {
   const s = scene({ config: WIDE_CONFIG, files: FILES });
   const r = await create(s.gh, { ...INPUT, components: ['app', 'docs'] });
-  assert.equal(r.exitCode, EXIT.USAGE, r.stdout);
-  const issues = r.json.error.details.issues as { code: string; message: string }[];
-  assert.deepEqual(
-    issues.map((i) => i.code),
-    ['components.undeclared_touched'],
-  );
-  assert.match(issues[0]?.message ?? '', /touches 7 components, more than components can list \(5\)/);
-  assert.match(issues[0]?.message ?? '', /undeclared: reactor, api, cli, \+2 more\)$/);
-  s.gh.expectNoMutations();
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(codes(r), ['COMPONENTS_ADDED', 'COMPONENTS_ALSO_TOUCHED']);
+  const block = blockOf(String(s.posted[0]?.body));
+  assert.deepEqual(block.components, PRIMARY);
+  assert.deepEqual(block.alsoTouched, ['core', 'ui']);
 });
 
 test('pr edit: adopting a wide PR without a block, with draft:false, writes alsoTouched and marks it ready', async () => {

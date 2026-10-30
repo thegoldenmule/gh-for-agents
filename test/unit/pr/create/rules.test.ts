@@ -183,12 +183,10 @@ describe('description', () => {
     }
   });
 
-  test('description.markdown_structure reports each offending line', () => {
+  test('description.markdown_structure is one issue naming every offending line', () => {
     const got = createRules(make({ description: '- a\n- b' }), CTX);
-    assert.deepEqual(
-      got.map((i) => i.message.slice(0, 6)),
-      ['line 1', 'line 2'],
-    );
+    assert.equal(got.length, 1);
+    assert.match(got[0]?.message ?? '', /^lines 1, 2 have Markdown structure \(a list marker\)/);
   });
 
   test('description.footer', () => {
@@ -481,7 +479,7 @@ test('validationError / assertNoIssues give VALIDATION with all issues', () => {
       assert.deepEqual(e.details?.issues, issues);
       assert.equal(
         e.hint,
-        "title: scope 'reactr' is not a component in .github/ghx.json (reactor, shared, x, auth, release) (did you mean 'reactor'?)",
+        "title: scope 'reactr' is not a component in .github/ghx.json; the scope must be a component name (reactor, shared, x, auth, release), or drop the scope (did you mean 'reactor'?) (+1 more in details.issues)",
       );
       return true;
     },
