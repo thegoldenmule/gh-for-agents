@@ -67,3 +67,22 @@ test('gh pr flags ghx has no home for say so; other commands keep the edit-dista
   const status = await runInProcess(['pr', 'status', '1', '--title', 'x']);
   assert.match(status.json.error.hint, /^Run 'ghx pr status --help'/, 'pr status has no JSON fields');
 });
+
+test('group help: ghx ci --help, ghx pr -h, a bare ghx ci and ghx help pr list the commands with summaries', async () => {
+  for (const argv of [['ci', '--help'], ['ci'], ['help', 'ci']]) {
+    const r = await runInProcess(argv);
+    assert.equal(r.exitCode, EXIT.OK, r.stdout);
+    assert.equal(r.json.name, 'ci');
+    assert.deepEqual(Object.keys(r.json.commands), ['ci rerun', 'ci retrigger', 'ci wait', 'ci why']);
+    assert.match(r.json.commands['ci why'], /^read: Why CI is red/);
+    assert.equal(r.calls.length, 0);
+  }
+  const pr = await runInProcess(['pr', '-h']);
+  assert.equal(pr.exitCode, EXIT.OK, pr.stdout);
+  assert.ok(pr.json.commands['pr status'] && pr.json.commands['pr create']);
+  assert.ok(!('ci wait' in pr.json.commands));
+  const none = await runInProcess(['nope', '--help']);
+  assert.equal(none.json.error.code, 'USAGE_UNKNOWN_COMMAND', 'not a group: still unknown');
+  const sub = await runInProcess(['ci', 'nope', '--help']);
+  assert.equal(sub.json.error.code, 'USAGE_UNKNOWN_COMMAND', 'an unknown command in a group: still unknown');
+});

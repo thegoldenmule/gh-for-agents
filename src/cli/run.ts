@@ -15,7 +15,7 @@ import {
 import { suggest } from '../core/suggest.ts';
 import { ALLOWED_NAMES, API_USAGE } from '../passthrough/policy.ts';
 import { deriveInterface, parseCommandArgv } from './args.ts';
-import { commandHelp, globalHelp } from './help.ts';
+import { commandHelp, globalHelp, groupHelp } from './help.ts';
 import type { Registry } from './registry.ts';
 import { allSchemas, commandSchema, SCHEMA_TARGETS, schemaIndex } from './schema.ts';
 import { onUnknown as defaultOnUnknown, type UnknownContext, type UnknownResult } from './unknown.ts';
@@ -64,6 +64,14 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<Ru
       const targetWords = first === 'help' ? leadingWords(argv.slice(1)) : [];
       if (targetWords.length > 0) {
         const hit = await deps.registry.resolve(targetWords);
+        const group =
+          !hit && targetWords.length === 1
+            ? groupHelp(targetWords[0] as string, await deps.registry.list())
+            : undefined;
+        if (group) {
+          await emitDocument(deps.stdout, group, out);
+          return done(ExitCode.OK);
+        }
         if (!hit) return done(await refuseUnknown(targetWords, deps, out));
         await emitDocument(deps.stdout, commandHelp(hit.spec), out);
         return done(ExitCode.OK);
@@ -123,6 +131,15 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<Ru
     const hit = words.length > 0 ? await deps.registry.resolve(words) : undefined;
     // `ghx api --help`: gh's own help cannot pass the GET check, so it gets passthrough help (02 §10).
     if (!hit && words[0] === 'api' && wantsHelp(argv)) return done(await refuseUnknown(['api'], deps, out));
+    // `ghx ci --help` or a bare `ghx ci`: the group's commands.
+    if (!hit && words.length === 1 && (argv.length === 1 || wantsHelp(argv))) {
+      const group = groupHelp(words[0] as string, await deps.registry.list());
+      if (group) {
+        out = outputOptions(parseCommandArgv(argv.slice(1), undefined, undefined).globals, deps, 'help');
+        await emitDocument(deps.stdout, group, out);
+        return done(ExitCode.OK);
+      }
+    }
     if (!hit) {
       const handler = deps.onUnknown ?? defaultOnUnknown;
       const r = await handler(argv, { names: await deps.registry.names() });

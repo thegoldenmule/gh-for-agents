@@ -49,6 +49,22 @@ export function globalHelp(specs: readonly AnyCommandSpec[], version: string): R
   };
 }
 
+/**
+ * `ghx ci --help`, `ghx pr`, `ghx help pr`: the group's commands with one-line summaries, or undefined
+ * when no command starts with `group`.
+ */
+export function groupHelp(group: string, specs: readonly AnyCommandSpec[]): Record<string, unknown> | undefined {
+  const members = specs.filter((s) => s.name.length > 1 && s.name[0] === group);
+  if (members.length === 0) return undefined;
+  return {
+    name: group,
+    summary: `The ghx ${group} commands.`,
+    usage: `ghx ${group} <command> [positionals] [--flags]`,
+    commands: Object.fromEntries(members.map((s) => [commandName(s), `${s.kind}: ${s.summary}`])),
+    next: `ghx ${group} <command> --help | --schema`,
+  };
+}
+
 export function commandHelp(spec: AnyCommandSpec): Record<string, unknown> {
   const d = deriveInterface(spec);
   const name = commandName(spec);
