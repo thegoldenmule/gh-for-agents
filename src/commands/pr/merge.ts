@@ -48,7 +48,7 @@ export default defineCommand({
     'headSha',
     'mergeCommit',
     'mergedAt',
-    'plan.blockers[].code',
+    'plan.blockers.code',
     'next',
   ],
   replaces: ['gh pr merge', 'gh pr merge --match-head-commit', 'gh api -X PUT repos/{owner}/{repo}/pulls/{n}/merge'],

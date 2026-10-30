@@ -49,6 +49,7 @@ export default defineCommand({
     snippet: z.boolean().default(true).describe('Remove the CLAUDE.md block; --no-snippet leaves it'),
   }),
   output: InstallOutput,
+  brief: ['scope', 'dryRun', 'changed', 'files.path', 'files.action', 'binLink.action', 'next'],
   examples: [
     { argv: 'ghx uninstall --dry-run', note: 'Show the diffs first' },
     { argv: 'ghx uninstall --bin-dir ~/.local/bin' },

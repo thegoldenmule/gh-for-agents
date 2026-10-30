@@ -83,6 +83,7 @@ export default defineCommand({
   kind: 'write',
   input: Input,
   output: Output,
+  brief: ['ref', 'events.id', 'events.to', 'events.threadResolved'],
   positionals: ['pr', 'ids'],
   needs: { repo: 'inferred', config: 'optional' },
   examples: [

@@ -75,6 +75,7 @@ export default defineCommand({
   kind: 'write',
   input: Input,
   output: Output,
+  brief: ['ref', 'id', 'url', 'verdict', 'postedAs', 'verdictDowngraded', 'findings.id', 'findings.inline'],
   positionals: ['pr'],
   needs: { repo: 'inferred', config: 'none' },
   jsonInput: 'required',

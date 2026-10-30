@@ -284,9 +284,17 @@ test('fieldProjection: none, --brief, the --brief ∪ --fields union, and --brie
     merge: { ready: false },
     warnings: doc.warnings,
   });
-  const e = thrown(() => fieldProjection(waitSpec, { brief: true }));
-  assert.equal(e.code, 'USAGE_UNKNOWN_FLAG');
-  assert.deepEqual(e.details, { flag: '--brief', suggestions: ['--fields'] });
+  // No preset: the whole output (or only --fields), with a warning instead of an error.
+  const none = fieldProjection(waitSpec, { brief: true });
+  assert.equal(none.project, undefined);
+  assert.deepEqual(
+    none.warnings.map((w) => w.code),
+    ['BRIEF_NO_PRESET'],
+  );
+  assert.match(none.warnings[0]?.message ?? '', /no --brief preset, so the output is printed in full/);
+  const withFields = fieldProjection(waitSpec, { brief: true, fields: ['outcome'] });
+  assert.ok(withFields.project);
+  assert.match(withFields.warnings[0]?.message ?? '', /so only --fields applies/);
 });
 
 test('every shipped brief preset resolves against its command output schema', async () => {
@@ -295,6 +303,14 @@ test('every shipped brief preset resolves against its command output schema', as
   for (const s of withBrief) {
     assert.ok((s.brief?.length ?? 0) > 0, `${commandName(s)}: an empty brief`);
     checkFields(s, parseFields(s.brief ?? []));
+  }
+  // Every read and the main writes have one; the rest print in full with BRIEF_NO_PRESET.
+  const named = new Set(withBrief.map(commandName));
+  for (const n of ['pr status', 'pr feedback', 'pr merge', 'pr comment', 'pr review', 'pr resolve', 'ci why']) {
+    assert.ok(named.has(n), `${n}: no brief preset`);
+  }
+  for (const n of ['ci rerun', 'ci retrigger', 'doctor', 'init', 'install', 'uninstall']) {
+    assert.ok(named.has(n), `${n}: no brief preset`);
   }
 });
 

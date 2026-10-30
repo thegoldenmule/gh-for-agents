@@ -87,6 +87,7 @@ export default defineCommand({
       .describe('From npx: install ghx globally first (default); --no-global refuses instead'),
   }),
   output: InstallOutput,
+  brief: ['scope', 'dryRun', 'changed', 'files.path', 'files.action', 'binLink.action', 'binLink.onPath', 'next'],
   examples: [
     { argv: 'ghx install --dry-run', note: 'Show the diffs first' },
     { argv: 'ghx install --bin-dir ~/.local/bin' },

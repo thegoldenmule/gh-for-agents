@@ -101,11 +101,21 @@ test('error documents are never projected; the dry-run envelope only by its own 
   assert.equal(real.json.error.code, 'VALIDATION', 'preview is a dry-run path only');
 });
 
-test('--brief on a command without a preset is USAGE_UNKNOWN_FLAG', async () => {
+test('--brief on a command without a preset prints the whole output with BRIEF_NO_PRESET', async () => {
   const r = await runInProcess(['t', 'write', '--brief'], { commands });
-  assert.equal(r.exitCode, 2);
-  assert.equal(r.json.error.code, 'USAGE_UNKNOWN_FLAG');
-  assert.match(r.json.error.hint, /no brief preset; pick fields with --fields/);
+  assert.equal(r.exitCode, 0, r.stdout);
+  assert.deepEqual(r.json.merged, true);
+  assert.deepEqual(r.json.number, 1);
+  assert.deepEqual(
+    r.json.warnings.map((w: { code: string }) => w.code),
+    ['BRIEF_NO_PRESET'],
+  );
+  assert.match(r.json.warnings[0].message, /pick fields with --fields/i);
+  const d = await runInProcess(['t', 'write', '--brief', '--dry-run'], { commands });
+  assert.equal(d.json.dryRun, true);
+  assert.equal(d.json.warnings[0].code, 'BRIEF_NO_PRESET', 'the dry-run envelope carries it too');
+  const f = await runInProcess(['t', 'write', '--brief', '--fields', 'number'], { commands });
+  assert.deepEqual(f.json, { number: 1, warnings: f.json.warnings });
 });
 
 test('the projection runs before the byte bound: a trimmed document fits, a large one spills projected', async () => {

@@ -82,6 +82,7 @@ export default defineCommand({
   kind: 'write',
   input: Input,
   output: Output,
+  brief: ['ref', 'id', 'kind', 'url', 'closed', 'precondition.status'],
   positionals: ['pr'],
   needs: { repo: 'inferred', config: 'none' },
   jsonInput: 'required',

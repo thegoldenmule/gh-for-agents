@@ -48,7 +48,7 @@ The grammar is `ghx <noun> <verb> [selector…] [flags]`, where noun ∈ `pr`, `
 | `--timeout <dur>` | all | 01's deadline with per-command default and max. `ci wait` has its own rules (§11.1) |
 | `--schema`, `--pretty`, `--max-bytes` | all | As defined in 01 |
 | `--fields <paths>` | every JSON-emitting command, passthrough reads included (§10) | Keep only these leaves of the output, nesting intact. Comma-separated dot paths, repeatable; a path through an array maps over its elements, so `merge.blockers.code` and `merge.blockers[].code` are the same path (`[]` is optional, and the unquoted form is safe in zsh, which globs `[]`): `--fields state,head.sha,ci.counts,merge.blockers.code`. Projection rule below |
-| `--brief` | commands that declare a preset (`pr status`, `pr create`, `pr merge`, `pr feedback`, `ci wait`, `ci why`, `ci rerun`) | The command's preset `--fields` list, shown as `brief` in `--help` and `--schema`. Elsewhere, passthrough included, it is `USAGE_UNKNOWN_FLAG`. With `--fields` it selects the union |
+| `--brief` | all | The command's preset `--fields` list, shown as `brief` in `--help` and `--schema` (every read and write command but `version`, `pr edit` and passthrough has one). A command without a preset prints its whole output (or only `--fields`) with the warning `BRIEF_NO_PRESET`, never an error. With `--fields` it selects the union |
 
 There is no `--json`, `--jq`, `--web`, `--watch` or pager. Every output has a fixed, typed schema (§3.1, §9.9); `--fields` and `--brief` cut it down, they never reshape it.
 

@@ -95,6 +95,7 @@ export default defineCommand({
   needs: { repo: 'optional', config: 'optional' },
   input: z.strictObject({}),
   output: Output,
+  brief: ['ok', 'checks', 'config.status'],
   examples: [{ argv: 'ghx doctor' }, { argv: 'ghx doctor --repo owner/name' }],
   exitCode: (o) => {
     if (!o.gh.ok || !o.auth.ok || !o.git.ok) return ExitCode.ENV;

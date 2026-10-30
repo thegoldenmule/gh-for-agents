@@ -78,6 +78,7 @@ export default defineCommand({
   input: Input,
   positionals: ['pr'],
   output: Output,
+  brief: ['ref', 'headSha', 'newRuns.app', 'newRuns.status', 'next'],
   needs: { repo: 'inferred', config: 'none' },
   timeout: { defaultMs: 180_000, maxMs: 600_000 },
   replaces: ['gh pr close <n> && gh pr reopen <n>'],

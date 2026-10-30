@@ -423,25 +423,26 @@ const projector = (paths: readonly FieldPath[]): ((doc: unknown) => unknown) => 
  * the union. Throws VALIDATION on a path that resolves nowhere.
  */
 export function fieldProjection(spec: AnyCommandSpec, o: FieldOptions): Projection {
-  const none: Projection = { project: undefined, dryRun: undefined, warnings: [] };
+  const warnings: Warning[] = [];
   const values: string[] = [];
   if (o.brief) {
-    if (!spec.brief || spec.brief.length === 0) {
-      throw new GhxError('USAGE_UNKNOWN_FLAG', `'ghx ${commandName(spec)}' has no flag '--brief'.`, {
-        hint: `This command has no brief preset; pick fields with --fields. ${seeFields(spec)}`,
-        details: { flag: '--brief', suggestions: ['--fields'] },
-      });
-    }
-    values.push(spec.brief.join(','));
+    // A command without a preset prints in full: --brief asks for less, never for an error.
+    if (!spec.brief || spec.brief.length === 0) warnings.push(noPreset(spec, o.fields !== undefined));
+    else values.push(spec.brief.join(','));
   }
   if (o.fields !== undefined) values.push(...o.fields);
-  if (values.length === 0) return none;
+  if (values.length === 0) return { project: undefined, dryRun: undefined, warnings };
   const checked = checkFields(spec, parseFields(values), { dryRun: o.dryRun });
   const own = checked.dryRun.some((p) => DRY_RUN_KEYS.some((k) => k === p.segments[0]?.key));
   return {
     // Only `error` paths: a failure prints the whole envelope anyway, and a success prints in full.
     project: checked.output.length > 0 ? projector(checked.output) : undefined,
     dryRun: own ? projector([...checked.dryRun, ...parseFields(['dryRun'])]) : undefined,
-    warnings: [],
+    warnings,
   };
 }
+
+const noPreset = (spec: AnyCommandSpec, withFields: boolean): Warning => ({
+  code: 'BRIEF_NO_PRESET',
+  message: `ghx ${commandName(spec)} has no --brief preset, so ${withFields ? 'only --fields applies' : 'the output is printed in full'}. Pick fields with --fields. ${seeFields(spec)}`,
+});

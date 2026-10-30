@@ -57,7 +57,9 @@ interface BaseSpec<I extends z.ZodObject> {
   examples?: readonly CommandExample[];
   /**
    * The --brief preset: --fields paths (src/core/fields.ts) an agent reads after this command, checked
-   * against the output schema by test/unit/core/fields.test.ts. Without it, --brief is refused.
+   * against the output schema by test/unit/core/fields.test.ts. Written without `[]` (it is optional),
+   * so what help shows is safe to type unquoted. Without it, --brief prints the whole output with the
+   * warning BRIEF_NO_PRESET.
    */
   brief?: readonly string[];
   /** Where a --fields or --brief error sends the caller for the field list. Default: `See ghx <name> --schema.` */

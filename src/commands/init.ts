@@ -24,6 +24,7 @@ export default defineCommand({
     config: z.record(z.string(), z.unknown()),
     inferredFrom: z.enum(['flags', 'workspaces', 'directories']),
   }),
+  brief: ['path', 'written', 'inferredFrom', 'config.components'],
   examples: [{ argv: 'ghx init --dry-run' }, { argv: 'ghx init --component reactor --component codegen' }],
   async run(input, ctx) {
     // Without git there is no toplevel to find; say so rather than "not a checkout".

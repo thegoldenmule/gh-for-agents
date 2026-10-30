@@ -62,13 +62,14 @@ test('a path outside the envelope is VALIDATION before gh runs, and the hint exp
   assert.deepEqual(gh.calls, []);
 });
 
-test('--brief on a passthrough is USAGE_UNKNOWN_FLAG (no preset) before gh runs', async () => {
+test('--brief on a passthrough (no preset) prints the envelope whole with BRIEF_NO_PRESET; gh never sees it', async () => {
   const gh = fake();
   const r = await runInProcess([...ARGV, '--brief'], { gh });
-  assert.equal(r.exitCode, EXIT.USAGE, r.stdout);
-  assert.equal(r.json.error.code, 'USAGE_UNKNOWN_FLAG');
-  assert.match(r.json.error.hint, /no brief preset; pick fields with --fields\. Passthrough has no --schema/);
-  assert.deepEqual(gh.calls, []);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.passthrough.json.length, 4);
+  assert.equal(r.json.warnings[0].code, 'BRIEF_NO_PRESET');
+  assert.match(r.json.warnings[0].message, /Pick fields with --fields\. Passthrough has no --schema/);
+  assert.ok(!(gh.calls[0]?.argv ?? []).includes('--brief'));
 });
 
 test('ghx api takes --fields too', async () => {
