@@ -168,3 +168,40 @@ test('a lock whose holder pid is gone is broken and reported', async () => {
   s.save('pr-7', state(clock));
   assert.deepEqual(stale, [999_999]);
 });
+
+test('lease: one holder per key; a second take sees it; refresh and release only while it is this one', async () => {
+  const { clock, s } = await store();
+  const first = s.lease('pr-7', clock.now() + 60_000);
+  assert.ok(!('holder' in first));
+  const second = s.lease('pr-7', clock.now() + 60_000);
+  assert.ok('holder' in second);
+  assert.equal(second.holder.pid, process.pid);
+  assert.ok(!('holder' in s.lease('pr-8', clock.now() + 60_000)), 'another key is another lease');
+  assert.equal(first.refresh(clock.now() + 120_000), true);
+  const lp = join(s.dir, 'pr-7.lease');
+  assert.equal(JSON.parse(readFileSync(lp, 'utf8')).until, clock.now() + 120_000);
+  first.release();
+  first.release();
+  assert.equal(existsSync(lp), false);
+  assert.equal(first.refresh(clock.now() + 1), false, 'a released lease cannot be refreshed');
+  const third = s.lease('pr-7', clock.now() + 60_000);
+  assert.ok(!('holder' in third), 'free again');
+});
+
+test('lease: past its until or a dead holder is broken (onStale lease: true); a lost lease reports it', async () => {
+  const stale: unknown[] = [];
+  const { clock, s } = await store({ onStale: (x) => stale.push(x) });
+  const old = s.lease('pr-7', clock.now() + 1_000);
+  assert.ok(!('holder' in old));
+  await clock.advance(2_000);
+  const taker = s.lease('pr-7', clock.now() + 60_000);
+  assert.ok(!('holder' in taker), 'past its until: taken over');
+  assert.deepEqual([...stale], [{ pid: process.pid, reason: 'old', lease: true }]);
+  assert.equal(old.refresh(clock.now() + 60_000), false, 'the old holder learns it lost the lease');
+  old.release();
+  assert.ok(existsSync(join(s.dir, 'pr-7.lease')), "releasing a lost lease leaves the new holder's");
+  const dead = await store({ pid: 999_999, alive: (p) => p !== 999_999, onStale: (x) => stale.push(x) });
+  assert.ok(!('holder' in dead.s.lease('pr-9', dead.clock.now() + 60_000)));
+  assert.ok(!('holder' in dead.s.lease('pr-9', dead.clock.now() + 60_000)), 'its holder pid is dead');
+  assert.deepEqual(stale.at(-1), { pid: 999_999, reason: 'gone', lease: true });
+});

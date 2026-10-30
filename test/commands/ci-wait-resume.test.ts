@@ -216,7 +216,7 @@ test('state saved for a PR that settled days ago resumes: expiry counts from the
   assert.equal(second.json.resumed, true);
 });
 
-test('concurrent runs of one target each poll on their own and both finish (04: the lock covers one load or save)', async () => {
+test('concurrent runs of one target both finish: the second follows the first (ci-wait-attach.test.ts)', async () => {
   const { clock, sim, a, b } = world();
   set(sim, 5 * MIN, [
     { ...a, status: 'completed', conclusion: 'success', completedAt: 5 * MIN },
@@ -229,6 +229,7 @@ test('concurrent runs of one target each poll on their own and both finish (04: 
   assert.equal(r1.exitCode, EXIT.OK);
   assert.equal(r2.exitCode, EXIT.OK);
   assert.ok(r1.json.results[0].elapsedSec >= 5 * 60 && r2.json.results[0].elapsedSec >= 5 * 60);
+  assert.ok(r2.json.warnings.some((w: { code: string }) => w.code === 'WAIT_ATTACHED'));
 });
 
 test('an interrupt during the ETA read leaves the workflow to be sampled again on resume', async () => {

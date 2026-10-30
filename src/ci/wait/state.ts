@@ -3,7 +3,11 @@
 // per-target index naming the latest bound SHA, so a re-run can send its first poll with the stored
 // ETags before it knows the head. A corrupt file is a miss (WAIT_STATE_DISCARDED); state expires 24 h
 // after the later of its last save and the completion of every check of its SHA. A per-target lock covers only one load or save (04, wave 4
-// review): concurrent waits poll on their own, and only one key is ever held, so there is no lock order.
+// review), and only one key is ever held, so there is no lock order.
+// One wait per target: a per-target lease (`<key>.lease`) names the process polling it. A second wait on
+// the same target, repo and machine finds it held and follows instead of polling: it reads the leader's
+// saved state until a terminal answer to its own question appears, or takes the lease over once the
+// leader is gone (it exited, its pid is dead, or it is past the `until` it promised to be back by).
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -25,6 +29,8 @@ export const LOCK_POLL_MS = 5;
 export const LOCK_WAIT_MS = 2_000;
 /** A lock older than this (by its own timestamp) is stale even if its pid is alive: the pid was reused. */
 export const LOCK_STALE_MS = 30_000;
+/** A lease holder promises to refresh it by `until` (its next wake plus this grace), or it is stale. */
+export const LEASE_GRACE_MS = 2 * 60_000;
 
 const MachineStateSchema = z.object({
   target: z.string(),
@@ -137,7 +143,27 @@ export interface WaitStore {
   save(key: string, state: WaitState, alsoIndex?: string): void;
   /** Run `fn` holding the target's lock (load and save take it themselves). */
   withLock<T>(key: string, fn: () => T): T;
+  /**
+   * Take the target's lease, promising to refresh it by `until` (epoch ms): the lease, or the live holder.
+   * A stale lease (dead pid, past its `until`, unreadable) is broken first (onStale).
+   */
+  lease(key: string, until: number): Lease | { holder: LeaseHolder };
 }
+
+export interface LeaseHolder {
+  pid: number;
+  at: number;
+  until: number;
+}
+
+export interface Lease {
+  /** Promise the next refresh by `until`; false when the lease was lost (broken as stale by another wait). */
+  refresh(until: number): boolean;
+  /** Give it up (only while it is still this one). Idempotent. */
+  release(): void;
+}
+
+const LeaseFile = z.object({ pid: z.number().int(), at: z.number(), until: z.number(), nonce: z.string() });
 
 const LockFile = z.object({ pid: z.number().int(), at: z.number(), nonce: z.string() });
 
@@ -188,8 +214,11 @@ export async function createWaitStore(o: {
   /** The holder pid written to lock files (tests pass another to simulate a dead holder). */
   pid?: number;
   alive?: (pid: number) => boolean;
-  /** A lock was broken: its holder is gone, it is older than LOCK_STALE_MS, or the wait bound passed. */
-  onStale?: (o: { pid: number | null; reason: 'gone' | 'old' | 'timeout' | 'unreadable' }) => void;
+  /**
+   * A lock was broken: its holder is gone, it is older than LOCK_STALE_MS, or the wait bound passed. Or a
+   * lease (`lease: true`): its holder is gone, or it is past its `until` ('old').
+   */
+  onStale?: (o: { pid: number | null; reason: 'gone' | 'old' | 'timeout' | 'unreadable'; lease?: boolean }) => void;
   /** Default LOCK_WAIT_MS (tests shorten it). */
   lockWaitMs?: number;
 }): Promise<WaitStore> {
@@ -262,8 +291,59 @@ export async function createWaitStore(o: {
       removeIf(path, nonce);
     }
   };
+  const leasePath = (key: string) => join(dir, `${safeKey(key)}.lease`);
+  const leaseHolder = (path: string) => {
+    const r = readJson(path);
+    if (!r.ok) return r.missing ? undefined : null;
+    const p = LeaseFile.safeParse(r.value);
+    return p.success ? p.data : null;
+  };
+  const lease = (key: string, until: number): Lease | { holder: LeaseHolder } => {
+    const path = leasePath(key);
+    for (;;) {
+      const nonce = secureHex(8);
+      const tmp = `${path}.${nonce}.tmp`;
+      writeFileSync(tmp, JSON.stringify({ pid, at: o.clock.now(), until, nonce }));
+      try {
+        linkSync(tmp, path);
+        return heldLease(path, nonce);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      } finally {
+        rmSync(tmp, { force: true });
+      }
+      const h = leaseHolder(path);
+      if (h === undefined) continue;
+      const reason = h === null ? 'unreadable' : !alive(h.pid) ? 'gone' : o.clock.now() > h.until ? 'old' : null;
+      if (reason === null && h !== null) return { holder: { pid: h.pid, at: h.at, until: h.until } };
+      o.onStale?.({ pid: h?.pid ?? null, reason: reason ?? 'unreadable', lease: true });
+      // Remove it only while it is still the stale one (another wait may have broken and retaken it).
+      const again = leaseHolder(path);
+      if (again !== undefined && (again === null ? h === null : again.nonce === h?.nonce))
+        rmSync(path, { force: true });
+    }
+  };
+  const heldLease = (path: string, nonce: string): Lease => {
+    let held = true;
+    const mine = () => held && leaseHolder(path)?.nonce === nonce;
+    return {
+      refresh(until) {
+        if (!mine()) {
+          held = false;
+          return false;
+        }
+        writeAtomic(path, { pid, at: o.clock.now(), until, nonce });
+        return true;
+      },
+      release() {
+        if (mine()) rmSync(path, { force: true });
+        held = false;
+      },
+    };
+  };
   return {
     dir,
+    lease,
     latest(key) {
       const r = readJson(indexPath(key));
       if (!r.ok) return undefined;

@@ -66,7 +66,7 @@ import {
 } from './machine.ts';
 import { createPoller, type Poller, type PullInfo, TickFailed, type TickResult } from './poller.ts';
 import { detectStalls, settledAt, stallConfig } from './stall.ts';
-import { createWaitStore, type WaitState, type WaitStore } from './state.ts';
+import { createWaitStore, LEASE_GRACE_MS, type Lease, type WaitState, type WaitStore } from './state.ts';
 import { aggregate, type CommandShape, compactTarget, fitDocument, identicalCommand, nextFor } from './summary.ts';
 import {
   boundKey,
@@ -92,6 +92,8 @@ export const UNATTENDED_RETURN_MS = 25 * 60_000;
 export const FOREGROUND_RETURN_MS = 9 * 60_000;
 /** How far past FOREGROUND_RETURN_MS the last tick's diagnosis may run. */
 export const FOREGROUND_TICK_MARGIN_MS = 15_000;
+/** How often a wait that follows another one (same target, repo and machine) looks for its answer. */
+export const FOLLOW_POLL_MS = 5_000;
 /** Consecutive failed ticks after which a mid-wait gh failure is fatal (error line, exit 7). */
 export const MAX_TICK_FAILURES = 5;
 /** Room kept for the runner's `warnings` array when fitting the summary into maxBytes. */
@@ -189,6 +191,10 @@ interface Run {
   jobs: Map<number, ActionsJob[]>;
   /** PR targets: the PR as last read (its mergeable state explains a no-checks). */
   pull: PullInfo | null;
+  /** The target's lease while this process polls it (one wait per target; state.ts). */
+  lease: Lease | null;
+  /** Another wait holds the lease: this one follows it (no polls) from `since` (epoch ms). */
+  following: { since: number; pid: number } | null;
 }
 
 export async function* runWait(
@@ -277,11 +283,18 @@ export async function* runWait(
       artifacts: ctx.artifacts,
       repo,
       clock,
-      onStale: ({ pid, reason }) =>
-        warn({
-          code: 'WAIT_STATE_DISCARDED',
-          message: `${label}: broke a ${reason === 'timeout' ? 'held' : 'stale'} wait-state lock${pid === null ? '' : ` (pid ${pid}${reason === 'gone' ? ' is gone' : ''})`}.`,
-        }),
+      onStale: ({ pid, reason, lease }) =>
+        warn(
+          lease
+            ? {
+                code: 'WAIT_TAKEN_OVER',
+                message: `${label}: took over from a wait that ${reason === 'gone' ? 'is gone' : reason === 'old' ? 'stopped refreshing its lease' : 'left an unreadable lease'}${pid === null ? '' : ` (pid ${pid})`}.`,
+              }
+            : {
+                code: 'WAIT_STATE_DISCARDED',
+                message: `${label}: broke a ${reason === 'timeout' ? 'held' : 'stale'} wait-state lock${pid === null ? '' : ` (pid ${pid}${reason === 'gone' ? ' is gone' : ''})`}.`,
+              },
+        ),
     });
     // The latest binding's ETags make the first poll a 304 when nothing changed. Its state is not
     // resumed here: the first tick reads the current head, and bind() loads the state for that SHA.
@@ -328,6 +341,8 @@ export async function* runWait(
       restarts: 0,
       jobs: new Map(),
       pull: null,
+      lease: null,
+      following: null,
     });
   }
 
@@ -456,6 +471,9 @@ export async function* runWait(
       compareMain: o.compareMain,
     };
     save(r);
+    // Saved, then released: a follower finds the answer before it could take the lease over.
+    r.lease?.release();
+    r.lease = null;
   };
 
   /** A fresh binding: the expected set (required, config, baseline), read once and stored. */
@@ -919,6 +937,71 @@ export async function* runWait(
     return ref.path;
   };
 
+  /** The lease's promise: back by this target's next tick, plus the grace. */
+  const leaseUntil = (r: Run) => clock.now() + Math.max(0, r.nextAt - clock.monotonic()) + LEASE_GRACE_MS;
+
+  /** Lead the target (take its lease), or follow the wait that holds it. */
+  const leadOrFollow = (r: Run): void => {
+    const got = r.store.lease(targetKey(r.target), leaseUntil(r));
+    if (!('holder' in got)) {
+      r.lease = got;
+      return;
+    }
+    r.following = { since: clock.now(), pid: got.holder.pid };
+    r.nextAt = clock.monotonic() + FOLLOW_POLL_MS;
+    warn({
+      code: 'WAIT_ATTACHED',
+      message:
+        `${r.label}: another ghx ci wait (pid ${got.holder.pid}) is already polling it on this machine; ` +
+        'following it instead of polling. Its answer, when it answers this question, is returned here.',
+    });
+  };
+
+  /**
+   * A terminal another wait stored answers this one's question: the same --until (or a settled answer for
+   * first-failure), --check and main comparison, and not a superseded stop this wait would have restarted.
+   */
+  const answers = (r: Run, t: NonNullable<WaitState['terminal']>): boolean => {
+    if ((t.check ?? []).join('\n') !== [...globs].sort().join('\n')) return false;
+    if (o.compareMain && t.compareMain !== true) return false;
+    if (t.until !== o.until && !(o.until === 'first-failure' && t.until === 'settled')) return false;
+    return t.outcome !== 'superseded' || r.policy === 'stop';
+  };
+
+  /** Adopt the answer the leader saved since this wait began following, if it answers this question. */
+  const adopt = (r: Run, since: number): boolean => {
+    const key = targetKey(r.target);
+    const sha = r.store.latest(key);
+    if (sha === undefined) return false;
+    const loaded = r.store.load(boundKey(r.target, sha), sha);
+    if (loaded.kind !== 'hit') return false;
+    const t = loaded.state.terminal;
+    if (t === null || loaded.state.savedAt < since || !answers(r, t)) return false;
+    r.st = loaded.state;
+    r.summary = t.summary;
+    r.following = null;
+    return true;
+  };
+
+  /** One look for a follower: the leader's answer, else the lease once the leader is gone. */
+  const follow = (r: Run): void => {
+    const since = (r.following as NonNullable<Run['following']>).since;
+    if (adopt(r, since)) return;
+    const got = r.store.lease(targetKey(r.target), clock.now() + LEASE_GRACE_MS);
+    if ('holder' in got) {
+      r.nextAt = clock.monotonic() + FOLLOW_POLL_MS;
+      return;
+    }
+    // The leader saved an answer and exited between the two looks.
+    if (adopt(r, since)) {
+      got.release();
+      return;
+    }
+    r.lease = got;
+    r.following = null;
+    r.nextAt = clock.monotonic();
+  };
+
   const result = async (interruptedBy?: string): Promise<WaitSummary> => {
     // --any returned because another target finished, not because this session self-returned.
     const anySatisfied = o.any && runs.some((r) => r.summary !== null);
@@ -936,7 +1019,8 @@ export async function* runWait(
         r.summary = summarise(r, outcome, reason, r.lastDecision);
         save(r);
       } else {
-        r.summary = unbound(r, outcome, `${reason}; no SHA bound yet`);
+        const why = r.following ? `following pid ${r.following.pid}` : 'no SHA bound yet';
+        r.summary = unbound(r, outcome, `${reason}; ${why}`);
       }
     }
     const results = runs.map((r) => r.summary as TargetSummary);
@@ -971,10 +1055,15 @@ export async function* runWait(
     return fitDocument(build(await writeDiagnosisFile(results, true)), maxBytes, ctx.project).doc;
   };
 
+  for (const r of runs) leadOrFollow(r);
   try {
     for (;;) {
       for (const r of active()) {
         if (r.nextAt > clock.monotonic()) continue;
+        if (r.following) {
+          follow(r);
+          if (r.following || r.summary !== null) continue;
+        }
         yield* tick(r);
         // A re-bind wants an immediate tick on the new head.
         while (r.summary === null && r.st === null && r.nextAt <= clock.monotonic()) yield* tick(r);
@@ -983,6 +1072,7 @@ export async function* runWait(
       if (open.length === 0 || (o.any && open.length < runs.length)) break;
       if (clock.monotonic() >= returnAt) break;
       const wake = Math.min(returnAt, ...open.map((r) => r.nextAt));
+      for (const r of open) if (r.lease && !r.lease.refresh(leaseUntil(r))) r.lease = null;
       await clock.sleep(Math.max(0, wake - clock.monotonic()), ctx.signal);
     }
     return await result();
@@ -992,6 +1082,9 @@ export async function* runWait(
     if (!isAbort(e) || runs.every((r) => !r.bound)) throw e;
     const details = (e as GhxError).details as { signal?: string } | null | undefined;
     return await result(isGhxError(e, 'INTERRUPTED') ? (details?.signal ?? 'SIGTERM') : 'SIGTERM');
+  } finally {
+    // After result() saved the state: a follower takes over from where this wait stopped.
+    for (const r of runs) r.lease?.release();
   }
 }
 
