@@ -1,6 +1,8 @@
 // --fields and --brief (02 §1.1): keep only selected leaves of a command's output document.
 //
-// A path is dot-separated keys; `key[]` maps over an array. Projection rule (the contract): if the
+// A path is dot-separated keys. A path through an array maps over its elements, so `ci.failing.name`
+// and `ci.failing[].name` are the same path; `[]` is optional (and unquoted, zsh globs it, so the
+// hints never write it). Projection rule (the contract): if the
 // document has a top-level `results` array, paths resolve against each element and the other
 // top-level keys are kept; otherwise they resolve against the document. `warnings` is always kept,
 // and so is what names a results[] element and its failure (RESULT_KEEP): a failed PR in pr status
@@ -13,7 +15,7 @@ import { suggest } from './suggest.ts';
 
 export interface FieldSegment {
   key: string;
-  /** `key[]`: map over the array at `key`. */
+  /** Written `key[]`. Arrays are mapped over either way; this only lets a `[]` on a non-array be refused. */
   each: boolean;
 }
 
@@ -25,7 +27,6 @@ export interface FieldPath {
 /** The selected paths merged into a tree; a leaf keeps its whole subtree. */
 export interface FieldNode {
   leaf: boolean;
-  each: boolean;
   children: Map<string, FieldNode>;
 }
 
@@ -64,7 +65,7 @@ export function parseFields(values: readonly string[]): FieldPath[] {
     if (segments.length === raw.split('.').length) out.push({ raw, segments });
   }
   if (issues.length > 0) {
-    throw fieldsError(issues, `${issues[0]?.message}: write dot paths with [] over arrays, e.g. ci.failing[].name`);
+    throw fieldsError(issues, `${issues[0]?.message}: write dot paths, e.g. ci.failing.name (arrays are mapped over)`);
   }
   if (out.length === 0) {
     throw fieldsError(
@@ -76,17 +77,16 @@ export function parseFields(values: readonly string[]): FieldPath[] {
 }
 
 export function fieldTree(paths: readonly FieldPath[]): FieldNode {
-  const root: FieldNode = { leaf: false, each: false, children: new Map() };
+  const root: FieldNode = { leaf: false, children: new Map() };
   for (const p of paths) {
     let node = root;
     p.segments.forEach((s, i) => {
       let child = node.children.get(s.key);
       if (!child) {
-        child = { leaf: false, each: false, children: new Map() };
+        child = { leaf: false, children: new Map() };
         node.children.set(s.key, child);
       }
-      if (s.each) child.each = true;
-      // `ci.failing` and `ci.failing[].name` together: the whole array wins.
+      // `ci.failing` and `ci.failing.name` together: the whole array wins.
       if (i === p.segments.length - 1) child.leaf = true;
       node = child;
     });
@@ -112,8 +112,10 @@ function projectObject(obj: Record<string, unknown>, node: FieldNode, keep: read
 
 function projectValue(v: unknown, node: FieldNode): unknown {
   if (node.leaf) return v;
+  // A path through an array maps over it (nested arrays too), with or without `[]`: an open schema
+  // (passthrough.json) cannot say what is an array, so the document decides.
+  if (Array.isArray(v)) return v.map((e) => projectValue(e, node));
   // null mid-path stays null (meta.rev on a PR without a block is meta: null).
-  if (Array.isArray(v)) return node.each ? v.map((e) => (isRecord(e) ? projectObject(e, node) : e)) : v;
   return isRecord(v) ? projectObject(v, node) : v;
 }
 
@@ -168,21 +170,24 @@ const isObject = (n: Js): boolean => hasType(n, 'object') || n.properties !== un
 const isArray = (n: Js): boolean => hasType(n, 'array');
 const keysOf = (ns: readonly Js[]): string[] => [...new Set(ns.flatMap((n) => Object.keys(n.properties ?? {})))];
 
+/** The nodes with every array (nested ones too) replaced by its items: a key after an array maps over it. */
+function throughArrays(nodes: readonly Js[], defs: Record<string, Js>): Js[] {
+  let out = [...nodes];
+  for (let depth = 0; depth < 8 && out.some(isArray); depth++) {
+    out = out.flatMap((n) => (isArray(n) ? branches(n.items ?? {}, defs) : [n]));
+  }
+  return out;
+}
+
 /** Why `p` does not resolve against `roots`, or undefined when it does. */
 function pathProblem(p: FieldPath, roots: readonly Js[], defs: Record<string, Js>): string | undefined {
   let nodes = roots.flatMap((r) => branches(r, defs));
   let at = '';
-  for (const [i, s] of p.segments.entries()) {
+  for (const s of p.segments) {
+    nodes = throughArrays(nodes, defs);
     if (nodes.some(isOpen)) return undefined;
     const objects = nodes.filter(isObject);
-    if (objects.length === 0) {
-      return nodes.some(isArray)
-        ? `'${at}' is an array: write '${at}[].${p.segments
-            .slice(i)
-            .map((x) => `${x.key}${x.each ? '[]' : ''}`)
-            .join('.')}'`
-        : `'${at}' has no fields`;
-    }
+    if (objects.length === 0) return `'${at}' has no fields`;
     const next = objects.flatMap((o) => {
       const prop = o.properties?.[s.key];
       if (prop) return [prop];
@@ -197,15 +202,8 @@ function pathProblem(p: FieldPath, roots: readonly Js[], defs: Record<string, Js
     }
     at = at === '' ? s.key : `${at}.${s.key}`;
     const resolved = next.flatMap((n) => branches(n, defs));
-    if (s.each) {
-      if (resolved.some(isOpen)) return undefined;
-      const arrays = resolved.filter(isArray);
-      if (arrays.length === 0) return `'${at}' is not an array: drop the []`;
-      nodes = arrays.map((a) => a.items ?? {});
-      at = `${at}[]`;
-    } else {
-      nodes = resolved;
-    }
+    if (s.each && !resolved.some(isOpen) && !resolved.some(isArray)) return `'${at}' is not an array: drop the []`;
+    nodes = resolved;
   }
   return undefined;
 }
@@ -249,7 +247,7 @@ export function checkFields(spec: AnyCommandSpec, paths: readonly FieldPath[]): 
     if (problem && perResult && p.segments[0]?.key === 'results') {
       const rest = p.segments
         .slice(1)
-        .map((x) => `${x.key}${x.each ? '[]' : ''}`)
+        .map((x) => x.key)
         .join('.');
       problem = `paths resolve against each results[] element: write '${rest || '…'}'`;
     }

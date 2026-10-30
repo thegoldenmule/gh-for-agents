@@ -20,7 +20,8 @@ export const GLOBAL_FLAGS = [
   {
     flag: '--fields',
     type: 'string',
-    description: 'Keep only these output paths: state,ci.counts,merge.blockers[].code',
+    description:
+      'Keep only these output paths: state,ci.counts,merge.blockers.code (a path through an array maps over it; [] is optional)',
   },
   { flag: '--brief', type: 'boolean', description: "The command's preset --fields" },
   { flag: '--verbose', type: 'boolean', description: 'NDJSON diagnostics on stderr' },
@@ -168,7 +169,7 @@ function unknownFlagError(
     hint = `${use}${alias.note !== undefined ? `; ${alias.note}` : ''}.`;
   } else if (flag === '--json' || flag === '--jq' || flag === '-q' || flag === '--template') {
     const cmd = commandName ? `ghx ${commandName}` : 'ghx <command>';
-    hint = `Output is a fixed schema; --fields a.b,c[].d${hasBrief ? ' or --brief' : ''} keeps the parts you need ('${cmd} --schema' lists them).`;
+    hint = `Output is a fixed schema; --fields a.b,c.d${hasBrief ? ' or --brief' : ''} keeps the parts you need ('${cmd} --schema' lists them).`;
   } else if (suggestions.length > 0) {
     hint = `Did you mean ${suggestions.join(' or ')}?`;
   } else {

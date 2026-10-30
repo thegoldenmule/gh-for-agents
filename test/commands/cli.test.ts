@@ -109,10 +109,10 @@ test('unknown flag gets a suggestion; --json gets the schema hint', async () => 
   const j = await runInProcess(['version', '--json']);
   assert.equal(
     j.json.error.hint,
-    "Output is a fixed schema; --fields a.b,c[].d keeps the parts you need ('ghx version --schema' lists them).",
+    "Output is a fixed schema; --fields a.b,c.d keeps the parts you need ('ghx version --schema' lists them).",
   );
   const brief = await runInProcess(['pr', 'status', '1', '--jq', '.state']);
-  assert.match(brief.json.error.hint, /^Output is a fixed schema; --fields a\.b,c\[\]\.d or --brief keeps the parts/);
+  assert.match(brief.json.error.hint, /^Output is a fixed schema; --fields a\.b,c\.d or --brief keeps the parts/);
   assert.match(brief.json.error.hint, /'ghx pr status --schema' lists them/);
 });
 

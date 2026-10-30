@@ -194,9 +194,32 @@ test('checkFields names the valid top-level keys and suggests a near miss', () =
   assert.match(nested.hint ?? '', /'stat' is not a field of 'ci'.*did you mean 'state'/);
 });
 
-test('checkFields says how to fix a path through an array, [] on a non-array, and a scalar parent', () => {
-  const through = thrown(() => checkFields(statusSpec, parseFields(['merge.blockers.code'])));
-  assert.match(through.hint ?? '', /write 'merge\.blockers\[\]\.code'/);
+test('[] is optional: a path through an array maps over it, checked and projected the same', () => {
+  checkFields(statusSpec, parseFields(['merge.blockers.code,ci.failing.name,ci.failing[].url']));
+  assert.deepEqual(project(doc, 'merge.blockers.code'), project(doc, 'merge.blockers[].code'));
+  assert.deepEqual(project(doc, 'merge.blockers.code', 'ci.failing.name'), {
+    merge: { blockers: [{ code: 'CI_RED' }, { code: 'REVIEW' }] },
+    ci: { failing: [{ name: 'lint' }] },
+    warnings: doc.warnings,
+  });
+  // An open schema (passthrough.json) cannot say what is an array: the document decides, nested too.
+  const open = { passthrough: { json: { jobs: [{ name: 'a', id: 1 }, [{ name: 'b', id: 2 }]], total: 2 } } };
+  assert.deepEqual(project(open, 'passthrough.json.jobs.name'), {
+    passthrough: { json: { jobs: [{ name: 'a' }, [{ name: 'b' }]] } },
+  });
+  const bad = thrown(() => checkFields(statusSpec, parseFields(['merge.blockers.cod'])));
+  assert.match(bad.hint ?? '', /'cod' is not a field of 'merge\.blockers'.*did you mean 'code'/);
+});
+
+test('hints never write [] (unquoted, zsh globs it)', () => {
+  const syntax = thrown(() => parseFields(['a..b']));
+  assert.doesNotMatch(syntax.hint ?? '', /\[\]/);
+  assert.match(syntax.hint ?? '', /ci\.failing\.name/);
+  const e = thrown(() => checkFields(waitSpec, parseFields(['results[].ci[].stat'])));
+  assert.match(e.hint ?? '', /write 'ci\.stat'/);
+});
+
+test('checkFields says how to fix [] on a non-array and a scalar parent', () => {
   const notArray = thrown(() => checkFields(statusSpec, parseFields(['head[].sha'])));
   assert.match(notArray.hint ?? '', /not an array: drop the \[\]/);
   const scalar = thrown(() => checkFields(statusSpec, parseFields(['state.x'])));
