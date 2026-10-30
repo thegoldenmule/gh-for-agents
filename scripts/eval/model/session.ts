@@ -3,7 +3,7 @@
 // the path says what each file is (records.ts fileKind). Files are processed in path order and records in
 // file order; timestamps are values only, never structure.
 import { type CommandCli, classifyCommand, type Glue } from '../classify/command.ts';
-import { classifyResult, type ErrorKind, type GhxOutcome, type Refusal } from '../classify/errors.ts';
+import { classifyResult, type ErrorKind, type Failure, type GhxOutcome, type Refusal } from '../classify/errors.ts';
 import { commandIntent, type Intent } from '../classify/intent.ts';
 import {
   type AssistantGroup,
@@ -269,6 +269,12 @@ export interface ToolCallRow {
   ghx_error_codes: string[];
   ghx_outcome: GhxOutcome | null;
   refusal: Refusal | null;
+  /** Whose failure it is (classify/errors.ts Failure): mistake, outcome or denial; null when it did not fail. */
+  failure: Failure | null;
+  /** The ghx error code, `exit:N`, an error kind, or `gh:…`/`glue:…` for a text match; null when it did not fail. */
+  failure_reason: string | null;
+  /** A gh/ghx invocation passed --dry-run. */
+  dry_run: boolean;
   tool_denial_kind: string | null;
   result_chars: number;
   result_bytes: number;
@@ -1098,6 +1104,7 @@ function toolCallRow(
     cli: cls?.cli ?? null,
     background,
     notifExit,
+    subcommands: cls?.invocations.map((i) => `${i.cli} ${i.subcommand}`.trimEnd()) ?? [],
   });
   const tur = r?.toolUseResult;
   const spawned =
@@ -1140,6 +1147,9 @@ function toolCallRow(
     ghx_error_codes: res.ghxErrorCodes,
     ghx_outcome: res.ghxOutcome,
     refusal: res.refusal,
+    failure: res.failure,
+    failure_reason: res.failureReason,
+    dry_run: cls?.invocations.some((i) => i.args.includes('--dry-run')) ?? false,
     tool_denial_kind: r?.denialKind ?? null,
     result_chars: codePointLength(text),
     result_bytes: Buffer.byteLength(text, 'utf8'),

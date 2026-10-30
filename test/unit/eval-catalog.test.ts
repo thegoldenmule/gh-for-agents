@@ -4,11 +4,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import type { Intent } from '../../scripts/eval/classify/intent.ts';
 import {
   CATALOG,
   CONSTANTS,
   computeMetrics,
   costNorm,
+  firstTry,
   isRewrite,
   type MetricContext,
   PROTOTYPE_IDS,
@@ -59,6 +61,9 @@ const tool = (p: Partial<ToolCallRow>): ToolCallRow =>
     result_ts: null,
     error_kind: null,
     refusal: null,
+    failure: null,
+    dry_run: false,
+    agent_id: null,
     result_chars: 0,
     notif_count: 0,
     notif_wake_call_indexes: [],
@@ -150,6 +155,56 @@ test('cost_norm replaces the base context with 50k and keeps the unit’s own gr
   // 0.2 + 0.8 × 50k/100k, then 0.1 + 0.1 + 1.0 × (120k − 100k + 50k)/120k.
   close(costNorm(span), 0.2 + 0.4 + 0.2 + 70 / 120);
   close(costNorm([api({ context_tokens: 10_000, cost_usd: 1, cost_output_usd: 0 })]), 5, 'a small base scales up');
+});
+
+test('failures: mistakes + outcomes + denials = errors; a dry-run mistake is also a mistake', () => {
+  const calls = [
+    tool({ tool_use_id: 'a', error_kind: 'command', failure: 'mistake', dry_run: true }),
+    tool({ tool_use_id: 'b', error_kind: 'command', failure: 'mistake' }),
+    tool({ tool_use_id: 'c', error_kind: 'command', failure: 'outcome' }),
+    tool({ tool_use_id: 'd', error_kind: 'hook_block', failure: 'denial' }),
+    tool({ tool_use_id: 'e' }),
+  ];
+  const m = computeMetrics(unit('episode'), ctxOf(calls, []));
+  assert.deepEqual([m.errors, m.mistakes, m.dry_run_mistakes, m.outcomes, m.denials], [4, 2, 1, 1, 1]);
+  assert.equal(m.errors, (m.mistakes as number) + (m.outcomes as number) + (m.denials as number));
+});
+
+test('first_try: an atom looks at its calls up to the first one of its intent; a roll-up at all of them', () => {
+  const t = (id: string, intent: Intent, failure: ToolCallRow['failure'] = null, p: Partial<ToolCallRow> = {}) =>
+    tool({ tool_use_id: id, intent, intents: [intent], failure, ...p });
+  const create = { kind: 'episode', intent: 'create' } as const;
+  assert.equal(firstTry(create, [t('a', 'create', 'mistake', { dry_run: true }), t('b', 'create')]), 0, 'dry-run');
+  assert.equal(firstTry(create, [t('a', 'create'), t('b', 'create', 'mistake')]), 1, 'later misses do not count');
+  assert.equal(firstTry(create, [t('a', 'create', 'outcome')]), 1, 'an outcome is not a miss');
+  assert.equal(firstTry(create, [t('a', 'create', 'denial')]), 0, 'a denial is');
+  assert.equal(
+    firstTry(create, [t('h', 'meta', 'mistake', { meta_only: true }), t('a', 'create')]),
+    1,
+    'meta calls are not the task',
+  );
+  const status = { kind: 'episode', intent: 'status' } as const;
+  assert.equal(
+    firstTry(status, [t('v', 'other_read', 'mistake'), t('s', 'status')]),
+    0,
+    'ghx pr view (unknown command) before the pr status that worked',
+  );
+  assert.equal(firstTry({ kind: 'wait', intent: 'main_ci' }, [t('w', 'wait', 'outcome')]), 1, 'main_ci is a wait');
+  assert.equal(firstTry(create, [t('h', 'meta', null, { meta_only: true })]), null);
+  const life = { kind: 'pr_lifecycle', intent: null } as const;
+  assert.equal(firstTry(life, [t('a', 'create'), t('b', 'merge', 'mistake')]), 0);
+  assert.equal(firstTry(life, [t('a', 'create'), t('b', 'wait', 'outcome')]), 1);
+});
+
+test('subagent_share: the share of round trips made in subagent files', () => {
+  const calls = [
+    tool({ tool_use_id: 'a', message_id: 'm1' }),
+    tool({ tool_use_id: 'b', message_id: 's1', agent_id: 'x' }),
+    tool({ tool_use_id: 'c', message_id: 's1', agent_id: 'x', cli: null, command: null, name: 'Read' }),
+    tool({ tool_use_id: 'd', message_id: 's2', agent_id: 'x' }),
+  ];
+  close(computeMetrics(unit('pr_lifecycle'), ctxOf(calls, [])).subagent_share, 2 / 3);
+  assert.equal(computeMetrics(unit('pr_lifecycle'), ctxOf([], [])).subagent_share, null);
 });
 
 test('cache rewrites: context over 5000 and more than half of it written', () => {

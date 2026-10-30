@@ -4,12 +4,13 @@
 // wakeups and rounds. Changing a definition or a constant bumps METRIC_VERSION.
 
 import { classifyCommand } from '../classify/command.ts';
+import type { Intent } from '../classify/intent.ts';
 import { PRICE_TABLE_VERSION, priceOf } from '../model/pricing.ts';
 import type { ApiCallRow, ToolCallRow } from '../model/session.ts';
 import { CHARS_PER_TOKEN, RECOVERY_MIN_SHARE, RESULT_OVERHEAD, resultTokenEstimate } from '../model/usage.ts';
 import type { MetricDef, Unit, UnitKind } from '../units/types.ts';
 
-export const METRIC_VERSION = '1.1.0';
+export const METRIC_VERSION = '2.0.0';
 
 /** Every constant a metric or a unit boundary depends on (plan 07 Determinism item 4). Emitted in report.json. */
 export const CONSTANTS = {
@@ -41,6 +42,15 @@ export const CONSTANTS = {
 
 const ALL: UnitKind[] = ['episode', 'wait', 'pr_cycle', 'pr_lifecycle', 'session'];
 const PRS: UnitKind[] = ['pr_cycle', 'pr_lifecycle'];
+const SPANNING: UnitKind[] = ['pr_lifecycle', 'session'];
+
+/** What each failure class holds (classify/errors.ts Failure), in the mistakes metric's description. */
+const FAILURES =
+  ' Since 2.0.0 every failed GitHub call is one of three: a mistake (the agent’s: usage, unknown command, flag ' +
+  'or JSON field, input validation on a real call or a --dry-run, glue that breaks on the output, the wrong ' +
+  'directory), an outcome (the world’s: ci wait exits 12–14, ghx state, GitHub, environment and timeout errors, ' +
+  'gh pr checks exits 1 and 8, kills, and non-zero exits no error message explains, such as a trailing grep) ' +
+  'or a denial (a hook, the permission system, the harness or ghx policy).';
 
 /** Appended to the metrics whose values the 1.1.0 wake rule moves between waits and episodes. */
 const AFTER_WAKE =
@@ -287,9 +297,56 @@ export const CATALOG: MetricDef[] = [
     'calls',
     'robust',
     ALL,
-    'GitHub calls that failed: a non-zero exit, a ghx error body (even behind a pipe), a hook block or a denial. ' +
-      'ghx exits 10, 11 and 15 are outcomes, not errors.',
+    'GitHub calls that failed for any reason: a non-zero exit, a ghx error body (even behind a pipe), a hook ' +
+      'block or a denial. ghx exits 10, 11 and 15 report CI state and are not failures. errors = mistakes + ' +
+      'outcomes + denials (defined under mistakes); mistakes is the headline.',
     'count of GitHub calls with error_kind ≠ null',
+  ),
+  def(
+    'mistakes',
+    'calls',
+    'robust',
+    ALL,
+    `GitHub calls that failed by the agent’s mistake. The headline failure count.${FAILURES}`,
+    "count of GitHub calls with failure = 'mistake'",
+  ),
+  def(
+    'dry_run_mistakes',
+    'calls',
+    'robust',
+    ALL,
+    'Mistakes on a --dry-run: validation working as designed (nothing reached GitHub), but still a first-try ' +
+      'miss. Included in mistakes.',
+    "count of GitHub calls with --dry-run and failure = 'mistake'",
+  ),
+  def(
+    'outcomes',
+    'calls',
+    'robust',
+    ALL,
+    'GitHub calls that failed on the world’s state, not the agent’s command (see mistakes).',
+    "count of GitHub calls with failure = 'outcome'",
+  ),
+  def(
+    'denials',
+    'calls',
+    'robust',
+    ALL,
+    'GitHub calls a hook, the permission system, the harness or ghx policy refused (see mistakes).',
+    "count of GitHub calls with failure = 'denial'",
+  ),
+  def(
+    'first_try',
+    'ratio',
+    'robust',
+    ALL,
+    'Hit rate: 1 when the task went right the first time, else 0; a cell’s mean is the share of tasks. For an ' +
+      'episode or wait, every non-meta GitHub call up to and including the first one of the unit’s intent ran ' +
+      'without a mistake or a denial (for create and edit, the first create or edit call, --dry-run or real; an ' +
+      'unknown command tried first counts). For a PR cycle, lifecycle or session, no GitHub call in it made a ' +
+      'mistake or was denied. Outcomes are not misses. Null when the unit has no non-meta GitHub call.',
+    'atoms: 0 if a call before or at the first call of the intent has failure ∈ {mistake, denial}, else 1; ' +
+      'roll-ups: 0 if any GitHub call has failure ∈ {mistake, denial}, else 1',
   ),
   def(
     'refusals',
@@ -366,6 +423,15 @@ export const CATALOG: MetricDef[] = [
     'pr_cycle: 1; pr_lifecycle: number of its cycles',
   ),
   def('units', 'units', 'robust', [...PRS, 'session'], 'Episodes and waits the unit is built from.', 'len(children)'),
+  def(
+    'subagent_share',
+    'ratio',
+    'robust',
+    SPANNING,
+    'Where the work ran: the share of the unit’s round trips made in subagents. A lifecycle is filed under main ' +
+      'when any of its work ran in the main thread, so this says how much of a main lifecycle subagents did.',
+    'round trips whose tool calls ran in a subagent file / round_trips; null when round_trips = 0',
+  ),
   def('api_calls', 'calls', 'robust', ['session'], 'API calls in the session (main + subagents).', 'unique message.id'),
   def(
     'gh_share_calls',
@@ -483,6 +549,38 @@ export function costNorm(span: readonly ApiCallRow[]): number {
   return s;
 }
 
+const ATOMS: readonly UnitKind[] = ['episode', 'wait'];
+const miss = (t: ToolCallRow): boolean => t.failure === 'mistake' || t.failure === 'denial';
+
+/** The call-level intent a unit's intent stands for ('main_ci' units are waits on the main branch). */
+export function callIntent(unitIntent: string): Intent {
+  return (unitIntent === MAIN_CI ? 'wait' : unitIntent) as Intent;
+}
+/** The unit intent of waits on the default branch's CI (after a merge): no PR's work. */
+export const MAIN_CI = 'main_ci';
+
+/** first_try (see CATALOG): 1, 0, or null when the unit has no non-meta GitHub call. */
+export function firstTry(unit: Pick<Unit, 'kind' | 'intent'>, gh: readonly ToolCallRow[]): number | null {
+  const work = gh.filter((t) => !t.meta_only && t.intent !== 'meta');
+  if (work.length === 0) return null;
+  if (!ATOMS.includes(unit.kind)) return work.some(miss) ? 0 : 1;
+  if (unit.intent === null || unit.intent === 'meta') return null;
+  const intent = callIntent(unit.intent);
+  for (const t of work) {
+    if (miss(t)) return 0;
+    if (t.intents.includes(intent)) return 1;
+  }
+  return 1;
+}
+
+/** subagent_share: round trips made in subagent files over all of the unit's round trips. */
+function subagentShare(calls: readonly ToolCallRow[]): number | null {
+  const all = new Set(calls.map((t) => t.message_id));
+  if (all.size === 0) return null;
+  const sub = new Set(calls.filter((t) => t.agent_id !== null).map((t) => t.message_id));
+  return sub.size / all.size;
+}
+
 const seconds = (a: string | null, b: string | null): number | null =>
   a && b ? Math.max(0, (Date.parse(b) - Date.parse(a)) / 1000) : null;
 
@@ -567,6 +665,11 @@ export function computeMetrics(unit: Unit, ctx: MetricContext): Record<string, n
     wall_s: seconds(unit.start_ts, unit.end_ts),
     blocked_s: blocked,
     errors: gh.filter((t) => t.error_kind !== null).length,
+    mistakes: gh.filter((t) => t.failure === 'mistake').length,
+    dry_run_mistakes: gh.filter((t) => t.failure === 'mistake' && t.dry_run).length,
+    outcomes: gh.filter((t) => t.failure === 'outcome').length,
+    denials: gh.filter((t) => t.failure === 'denial').length,
+    first_try: firstTry(unit, gh),
     refusals: gh.filter((t) => t.refusal !== null).length,
     pipes: gh.filter((t) => t.glue?.pipe === true).length,
     jq: gh.filter((t) => t.glue?.jq === true).length,
@@ -578,6 +681,7 @@ export function computeMetrics(unit: Unit, ctx: MetricContext): Record<string, n
     wakeups: ctx.wakeups,
     rounds: ctx.rounds ?? null,
     units: ctx.children ?? null,
+    subagent_share: subagentShare(calls),
     api_calls: ctx.session?.api_calls ?? null,
     gh_share_calls: ctx.session ? (ctx.session.api_calls > 0 ? span.length / ctx.session.api_calls : null) : null,
     gh_share_cost: ctx.session ? (ctx.session.cost > 0 ? spanCost / ctx.session.cost : null) : null,

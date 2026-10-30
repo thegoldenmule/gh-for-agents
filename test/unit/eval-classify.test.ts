@@ -214,3 +214,87 @@ test('errors: ghx outcomes (10, 11, 15) are not errors; error bodies are, piped 
   assert.equal(mixed.errorKind, 'command', 'exit 10 is an outcome only for a pure ghx call');
   assert.equal(result({ cli: 'gh', isError: true, text: 'Exit code 10' }).errorKind, 'command');
 });
+
+test('failures: ghx codes by their exit class, gh by its own messages, unexplained exits are not mistakes', () => {
+  const f = (r: Partial<ResultInput>) => {
+    const x = result(r);
+    return [x.failure, x.failureReason];
+  };
+  const body = (code: string) => `{"error":{"code":"${code}","message":"m","hint":null,"details":null}}`;
+  const ghx = (text: string, exit = 0) =>
+    f({ cli: 'ghx', isError: exit !== 0, text: exit ? `Exit code ${exit}\n${text}` : text });
+  assert.deepEqual(ghx(body('VALIDATION'), 2), ['mistake', 'VALIDATION']);
+  assert.deepEqual(ghx(body('USAGE_UNKNOWN_COMMAND')), ['mistake', 'USAGE_UNKNOWN_COMMAND'], 'piped to exit 0');
+  assert.deepEqual(ghx(body('PR_NOT_FOUND'), 5), ['mistake', 'PR_NOT_FOUND']);
+  assert.deepEqual(ghx(body('RUN_IN_PROGRESS'), 9), ['outcome', 'RUN_IN_PROGRESS']);
+  assert.deepEqual(ghx(body('CONFIG_MISSING'), 3), ['outcome', 'CONFIG_MISSING']);
+  assert.deepEqual(ghx(body('DIFF_TOO_LARGE'), 7), ['outcome', 'DIFF_TOO_LARGE']);
+  assert.deepEqual(ghx(body('MERGE_BLOCKED'), 6), ['outcome', 'MERGE_BLOCKED'], 'the PR blocks it, not the agent');
+  assert.deepEqual(ghx(body('PASSTHROUGH_WRITE_REFUSED'), 6), ['denial', 'PASSTHROUGH_WRITE_REFUSED']);
+  assert.deepEqual(ghx(body('RETIRED_CODE'), 6), ['denial', 'RETIRED_CODE'], 'an unknown code falls back to its exit');
+  // ci wait in the background: the exit comes from the notification.
+  const bg = (exit: number) =>
+    f({ cli: 'ghx', background: true, notifExit: exit, text: 'Command running in background with ID: b1' });
+  for (const exit of [12, 13, 14]) assert.deepEqual(bg(exit), ['outcome', `exit:${exit}`]);
+  assert.deepEqual(bg(2), ['mistake', 'exit:2'], 'ghx ci wait main: a bad selector');
+  assert.deepEqual(bg(10), [null, null], 'red CI is not a failure at all');
+  // raw gh: its usage and lookup messages are mistakes; its state messages and pr checks exits are outcomes.
+  const gh = (text: string, subcommands: string[] = ['gh pr view']) =>
+    f({ cli: 'gh', isError: true, text: `Exit code 1\n${text}`, subcommands });
+  assert.deepEqual(gh('unknown flag: --foo\n\nUsage:  gh pr view'), ['mistake', 'gh:unknown_flag']);
+  assert.deepEqual(gh('unknown command "show" for "gh pr"'), ['mistake', 'gh:unknown_command']);
+  assert.deepEqual(gh('Unknown JSON field: "checks"\nAvailable fields:'), ['mistake', 'gh:unknown_field']);
+  assert.deepEqual(
+    gh('GraphQL: Could not resolve to a PullRequest with the number of 99999. (repository.pullRequest)'),
+    ['mistake', 'gh:not_found'],
+  );
+  assert.deepEqual(gh('X Pull request acme/widgets#12 is not mergeable: the base branch policy prohibits the merge.'), [
+    'outcome',
+    'gh:state',
+  ]);
+  assert.deepEqual(
+    f({ cli: 'gh', isError: true, text: 'Exit code 8\nbuild\tpending', subcommands: ['gh pr checks'] }),
+    ['outcome', 'exit:8'],
+    'checks pending',
+  );
+  assert.deepEqual(
+    gh('2026-10-05T21:23:21Z [reactor] module not found: x\n##[error]Process completed with exit code 1.', [
+      'gh run view',
+    ]),
+    ['outcome', 'exit:1'],
+    'a CI log that says "not found" is the log, not gh; the exit is the trailing grep',
+  );
+  assert.deepEqual(gh('Traceback (most recent call last):\n  File "<string>", line 1\nKeyError: \'x\''), [
+    'mistake',
+    'glue:python',
+  ]);
+  assert.deepEqual(
+    ghx('(eval):1: no matches found: passthrough.json.jobs[].id', 1),
+    ['mistake', 'glue:shell'],
+    'an unquoted --fields glob',
+  );
+  assert.deepEqual(gh('', ['gh run watch']), ['outcome', 'exit:1']);
+  assert.deepEqual(f({ cli: 'gh', isError: true, text: 'Exit code 143\n' }), ['outcome', 'exit:143'], 'killed');
+  // errors without an exit code
+  assert.deepEqual(
+    f({ cli: 'gh', isError: true, text: 'PreToolUse:Bash hook error: ghx replaces `gh pr checks 1`.' }),
+    ['denial', 'hook_block'],
+  );
+  assert.deepEqual(
+    f({
+      cli: 'gh',
+      isError: true,
+      text: 'Permission for this action was denied by the Claude Code auto mode classifier.',
+    }),
+    ['denial', 'permission_denied'],
+  );
+  assert.deepEqual(
+    f({ cli: 'gh', isError: true, text: '<tool_use_error>Blocked: sleep 60 followed by: gh pr checks 1' }),
+    ['denial', 'harness_block'],
+  );
+  assert.deepEqual(f({ cli: 'gh', isError: true, text: '<tool_use_error>InputValidationError: x</tool_use_error>' }), [
+    'mistake',
+    'input_validation',
+  ]);
+  assert.deepEqual(f({ cli: 'gh' }), [null, null], 'a call that did not fail has no failure class');
+});
