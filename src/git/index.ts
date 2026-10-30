@@ -22,6 +22,24 @@ export interface Git {
   diffNames(from: string, to: string): Promise<string[] | undefined>;
   /** `git check-ignore -q -- <path>`: true ignored, false not, undefined when git cannot answer. */
   isIgnored(path: string): Promise<boolean | undefined>;
+  /** The last `limit` non-merge commits' subjects and changed paths, newest first; undefined without history. */
+  history?(limit: number): Promise<GitCommit[] | undefined>;
+}
+
+export interface GitCommit {
+  subject: string;
+  files: string[];
+}
+
+/** Parse `git log --format=%x1e%s --name-only`: one record per commit, its subject, then its paths. */
+export function parseHistory(stdout: string): GitCommit[] {
+  return stdout
+    .split('\x1e')
+    .filter((r) => r.trim() !== '')
+    .map((r) => {
+      const [subject = '', ...rest] = r.split('\n');
+      return { subject: subject.trim(), files: rest.map((f) => f.trim()).filter((f) => f !== '') };
+    });
 }
 
 export interface GitDeps {
@@ -90,6 +108,19 @@ export function createGit(deps: GitDeps): Git {
     isIgnored: async (path) => {
       const r = await run(['check-ignore', '-q', '--', path]);
       return r.code === 0 ? true : r.code === 1 ? false : undefined;
+    },
+    history: async (limit) => {
+      const r = await run([
+        '-c',
+        'core.quotePath=false',
+        'log',
+        `-n${limit}`,
+        '--no-merges',
+        '--no-color',
+        '--format=%x1e%s',
+        '--name-only',
+      ]);
+      return r.ok ? parseHistory(r.out) : undefined;
     },
   };
 }

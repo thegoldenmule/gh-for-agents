@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createGit, parseRemoteConfig } from '../../../src/git/index.ts';
+import { createGit, parseHistory, parseRemoteConfig } from '../../../src/git/index.ts';
 import { FakeProc } from '../../helpers/fake-proc.ts';
 
 test('parseRemoteConfig collects url and gh-resolved per remote', () => {
@@ -49,4 +49,20 @@ test('createGit runs git through the runner, memoizes, and handles missing git',
   const g2 = createGit({ proc: missing.runner(), cwd: '/', env: {}, signal: new AbortController().signal });
   assert.equal(await g2.available(), false);
   assert.equal(await g2.toplevel(), undefined);
+});
+
+test('history: git log subjects and paths, one record per commit; undefined when git fails', async () => {
+  const out = '\x1efeat(cli): a\n\nsrc/a.ts\nsrc/b.ts\n\x1efix: b\n\n\x1edocs(x): c\n\ndocs/c.md\n';
+  assert.deepEqual(parseHistory(out), [
+    { subject: 'feat(cli): a', files: ['src/a.ts', 'src/b.ts'] },
+    { subject: 'fix: b', files: [] },
+    { subject: 'docs(x): c', files: ['docs/c.md'] },
+  ]);
+  const ok = new FakeProc().on({ cmd: 'git', args: ['-c', 'core.quotePath=false', 'log'] }, { stdout: out });
+  const git = createGit({ proc: ok.runner(), cwd: '/w', env: {}, signal: new AbortController().signal });
+  assert.equal((await git.history?.(5))?.length, 3);
+  assert.ok(ok.calls[0]?.args.includes('-n5'));
+  const empty = new FakeProc().on({ cmd: 'git' }, { exitCode: 128, stderr: 'fatal: no commits' });
+  const g2 = createGit({ proc: empty.runner(), cwd: '/w', env: {}, signal: new AbortController().signal });
+  assert.equal(await g2.history?.(5), undefined);
 });

@@ -7,11 +7,16 @@ import { buildStarter } from '../config/starter.ts';
 import { defineCommand } from '../core/command.ts';
 import { GhxError } from '../core/errors.ts';
 
+/** Commits read for scope names: enough to see a repo's habits, bounded for big histories. */
+const HISTORY_LIMIT = 2000;
+
 export default defineCommand({
   name: ['init'],
   summary: 'Write a starter .github/ghx.json (components inferred from the workspace).',
   description:
-    'Components come from --component (repeatable), else package.json workspaces / pnpm-workspace.yaml, else top-level directories. Refuses to overwrite without --force; --dry-run returns the config without writing.',
+    'Components come from --component (repeatable), else package.json workspaces / pnpm-workspace.yaml, else top-level directories. ' +
+    'They take the names the git log uses as commit scopes (type(scope): …) where a directory or package name matches, with the other names as aliases; ' +
+    'a nested package stays part of its parent unless the log scopes it. Refuses to overwrite without --force; --dry-run returns the config without writing.',
   kind: 'write',
   needs: { repo: 'none', config: 'none' },
   input: z.strictObject({
@@ -46,7 +51,9 @@ export default defineCommand({
     }
     let starter: Awaited<ReturnType<typeof buildStarter>>;
     try {
-      starter = await buildStarter(toplevel, input.component ?? []);
+      const flags = input.component ?? [];
+      const history = flags.length > 0 ? [] : ((await ctx.git.history?.(HISTORY_LIMIT)) ?? []);
+      starter = await buildStarter(toplevel, flags, history);
     } catch (e) {
       if (e instanceof z.ZodError) {
         throw new GhxError('VALIDATION', 'The component names do not form a valid config.', {

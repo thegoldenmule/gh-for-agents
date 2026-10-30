@@ -1,5 +1,5 @@
 // A small in-memory Git (03 §4.2) so cwd/repo cases need no real repository.
-import type { Git, GitRemote } from '../../src/git/index.ts';
+import type { Git, GitCommit, GitRemote } from '../../src/git/index.ts';
 
 export interface FakeGitState {
   available?: boolean;
@@ -11,6 +11,8 @@ export interface FakeGitState {
   diffs?: Record<string, string[]>;
   /** Paths `isIgnored` reports as ignored; every other path is not ignored. */
   ignored?: string[];
+  /** `history` answers these, newest first (at most `limit`); absent answers undefined. */
+  history?: GitCommit[];
 }
 
 export function fakeGit(s: FakeGitState = {}): Git {
@@ -22,6 +24,7 @@ export function fakeGit(s: FakeGitState = {}): Git {
     revParse: async (ref) => s.refs?.[ref],
     diffNames: async (from, to) => s.diffs?.[`${from}...${to}`],
     isIgnored: async (path) => s.ignored?.includes(path) ?? false,
+    history: async (limit) => s.history?.slice(0, limit),
   };
 }
 

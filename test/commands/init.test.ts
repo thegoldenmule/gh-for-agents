@@ -148,3 +148,80 @@ test('helpers: pnpm yaml line parse and component tokens', () => {
   assert.equal(componentToken('lodash.merge'), 'lodash-merge');
   assert.equal(componentToken('--'), 'root');
 });
+
+// A powerhouse-shaped workspace: basename clashes (switchboard), a package named differently from its dir
+// (reactor-monitor-app), a nested package, and a git log whose scopes name them.
+const historyRepo = () =>
+  repo(`hist-${Math.random().toString(36).slice(2)}`, {
+    'package.json': '{"name":"root","private":true,"workspaces":["apps/*","packages/*","test/*","packages/*/sub"]}',
+    'apps/switchboard/package.json': '{"name":"@ph/switchboard"}',
+    'test/switchboard/package.json': '{"name":"@ph/switchboard-e2e"}',
+    'apps/reactor-monitor/package.json': '{"name":"@ph/reactor-monitor-app"}',
+    'packages/reactor-monitor/package.json': '{"name":"@ph/reactor-monitor"}',
+    'packages/codegen/package.json': '{"name":"@ph/codegen"}',
+    'packages/codegen/sub/package.json': '{"name":"@ph/codegen-templates"}',
+    'packages/shared/package.json': '{"name":"@ph/shared"}',
+    'packages/shared/sub/package.json': '{"name":"@ph/analytics"}',
+  });
+
+const commit = (subject: string, ...files: string[]) => ({ subject, files });
+const HISTORY = [
+  commit('feat(switchboard): a', 'apps/switchboard/a.ts'),
+  commit('fix(switchboard): b', 'apps/switchboard/b.ts'),
+  commit('test(switchboard): c', 'test/switchboard/c.ts'),
+  commit('feat(reactor-monitor-app): d', 'apps/reactor-monitor/d.ts'),
+  commit('fix(reactor-monitor): e', 'packages/reactor-monitor/e.ts'),
+  commit('feat(codegen,shared): f', 'packages/codegen/f.ts', 'packages/shared/f.ts'),
+  commit('feat(analytics): g', 'packages/shared/sub/g.ts'),
+  commit('Merge branch main', 'x'),
+];
+
+test('with git history, components take the log scopes; clashes go by use; nested packages fold in', async () => {
+  const dir = historyRepo();
+  const r = await runInProcess(['init', '--dry-run'], { git: fakeGit({ toplevel: dir, history: HISTORY }) });
+  assert.equal(r.exitCode, 0, r.stdout);
+  assert.deepEqual(r.json.config.components, {
+    'reactor-monitor-app': { paths: ['apps/reactor-monitor/**'] },
+    switchboard: { paths: ['apps/switchboard/**'] },
+    codegen: { paths: ['packages/codegen/**'] },
+    'reactor-monitor': { paths: ['packages/reactor-monitor/**'] },
+    shared: { paths: ['packages/shared/**'] },
+    analytics: { paths: ['packages/shared/sub/**'] },
+    'test-switchboard': { paths: ['test/switchboard/**'] },
+  });
+});
+
+test('a package name the log uses names the component; its basename becomes an alias when the log uses it too', async () => {
+  const dir = repo(`alias-${Math.random().toString(36).slice(2)}`, {
+    'package.json': '{"workspaces":["apps/*"]}',
+    'apps/monitor/package.json': '{"name":"@ph/reactor-monitor-app"}',
+  });
+  const history = [
+    commit('feat(reactor-monitor-app): a'),
+    commit('fix(reactor-monitor-app): b'),
+    commit('fix(monitor): c'),
+  ];
+  const r = await runInProcess(['init', '--dry-run'], { git: fakeGit({ toplevel: dir, history }) });
+  assert.deepEqual(r.json.config.components, {
+    'reactor-monitor-app': { paths: ['apps/monitor/**'], aliases: ['monitor'] },
+  });
+});
+
+test('without history (or with --component) the basename rules stand, nested packages included', async () => {
+  const dir = historyRepo();
+  const r = await runInProcess(['init', '--dry-run'], { git: fakeGit({ toplevel: dir }) });
+  assert.deepEqual(Object.keys(r.json.config.components).sort(), [
+    'apps-reactor-monitor',
+    'apps-switchboard',
+    'codegen',
+    'packages-codegen-sub',
+    'packages-reactor-monitor',
+    'packages-shared-sub',
+    'shared',
+    'test-switchboard',
+  ]);
+  const flags = await runInProcess(['init', '--dry-run', '--component', 'one'], {
+    git: fakeGit({ toplevel: dir, history: HISTORY }),
+  });
+  assert.deepEqual(flags.json.config.components, { one: {} });
+});
