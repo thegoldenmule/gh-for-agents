@@ -16,6 +16,12 @@
       "main": {
         "n_before": 6,
         "n_after": 8,
+        "first_try": {
+          "before": 1,
+          "after": 1,
+          "p": 1,
+          "verdict": "same"
+        },
         "before": 0.026926,
         "after": 0.027472,
         "p": 0.846284,
@@ -24,6 +30,12 @@
       "subagent": {
         "n_before": 1,
         "n_after": 0,
+        "first_try": {
+          "before": 1,
+          "after": null,
+          "p": null,
+          "verdict": "too few"
+        },
         "before": 0.028348,
         "after": null,
         "p": null,
@@ -38,6 +50,26 @@
     "Wait for CI",
     "Whole PR, create to merge"
   ],
+  "failures": {
+    "before": {
+      "commands": 29,
+      "mistakes": 0,
+      "dry_run_mistakes": 0,
+      "outcomes": 0,
+      "denials": 0
+    },
+    "after": {
+      "commands": 30,
+      "mistakes": 1,
+      "dry_run_mistakes": 0,
+      "outcomes": 0,
+      "denials": 0
+    }
+  },
+  "main_lifecycle_subagent_share": {
+    "before": 0,
+    "after": 0
+  },
   "problems": {
     "total": 0,
     "shown": []

@@ -1,12 +1,18 @@
 ghx vs raw gh on this machine
 Before ghx: 3 sessions · After ghx: 3 sessions (acme, Opus 5.5)
 
-Median cost per task   Main thread, before → after    Subagents, before → after
-Check PR/CI status     $0.027 → $0.027  same          too few
+Main thread          First try, before → after    Median cost, before → after
+Check PR/CI status   100% → 100%  same            $0.027 → $0.027  same
+
 Too few tasks to compare: Diagnose a CI failure; Create a PR; Merge a PR; Wait for CI; Whole PR,
   create to merge.
-cost = API spend for one task, as if it started from a 50k-token context.
+first try = the first attempt at the task worked: no agent mistake and nothing denied, up to and
+  including its first command of that kind (a dry run counts). Red CI or a busy run is not a miss.
+cost = API spend for one task, as if each agent in it started from a 50k-token context.
 better/worse = a clear difference; same = no clear change; too few = under 5 tasks on a side.
+
+Failed GitHub commands, raw gh → ghx: agent mistakes 0.0% → 3.3% of commands (0 → 1, of them on a
+  dry run 0 → 0); CI or PR state 0 → 0; refused by a hook, permission or the harness 0 → 0.
 
 Biggest problems with ghx: none stand out clearly in this data.
 Caveats: ghx data here is 3 sessions; across every repo, two sessions hold 82% of all ghx tasks, and

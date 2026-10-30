@@ -1,7 +1,8 @@
 // The one-screen summary (`pnpm eval --summary`) from report.json only: is ghx helping or hurting, and where.
 // Like render(), summarize() and renderSummary() read nothing but their argument, so the numbers always match
 // the full report. Plain words only: the verdicts come from the report's own Mann-Whitney tests, and a side
-// with fewer than min_n tasks says "too few" instead of a number.
+// with fewer than min_n tasks says "too few" instead of a number. The hit rate (first_try) leads, then cost;
+// one block per context, because main threads and subagents are never pooled.
 import type { Context } from '../units/types.ts';
 import type { Cell, Comparison, ComparisonMetric, Report, View } from './json.ts';
 
@@ -25,6 +26,23 @@ export function verdict(nBefore: number, nAfter: number, m: ComparisonMetric | u
   return m.delta > 0 ? 'worse' : 'better';
 }
 
+/**
+ * The same for a rate where higher is better (first try): the direction comes from the two shares, because the
+ * median of a 0/1 value says little. Same when the test is not clear or the shares are equal.
+ */
+export function rateVerdict(
+  nBefore: number,
+  nAfter: number,
+  before: number | null,
+  after: number | null,
+  m: ComparisonMetric | undefined,
+  minN: number,
+): Verdict {
+  if (nBefore < minN || nAfter < minN || !m?.test || before === null || after === null) return 'too few';
+  if (m.test.p >= ALPHA || before === after) return 'same';
+  return after > before ? 'better' : 'worse';
+}
+
 /** Tasks in table order: intents by name, then the whole PR. Intents not listed follow, by name; meta never shows. */
 const TASKS: readonly { id: string; label: string }[] = [
   { id: 'diagnose', label: 'Diagnose a CI failure' },
@@ -33,6 +51,7 @@ const TASKS: readonly { id: string; label: string }[] = [
   { id: 'merge', label: 'Merge a PR' },
   { id: 'rerun', label: 'Rerun CI' },
   { id: 'wait', label: 'Wait for CI' },
+  { id: 'main_ci', label: 'Wait for main after a merge' },
   { id: 'status', label: 'Check PR/CI status' },
   { id: 'feedback', label: 'Read review feedback' },
   { id: 'reply', label: 'Reply to a review' },
@@ -42,18 +61,39 @@ const TASKS: readonly { id: string; label: string }[] = [
 const LIFECYCLE = { id: 'pr_lifecycle', label: 'Whole PR, create to merge' };
 const HIDDEN = new Set(['meta']);
 const CONTEXT_LABEL: Record<Context, string> = { main: 'main thread', subagent: 'subagents' };
+const CONTEXT_TITLE: Record<Context, string> = { main: 'Main thread', subagent: 'Subagents' };
 
 // ---------------------------------------------------------------------------------------------- types
+
+export interface Rate {
+  /** Share of tasks that went right the first time (first_try's mean); null when the side has none. */
+  before: number | null;
+  after: number | null;
+  p: number | null;
+  verdict: Verdict;
+}
 
 export interface Side {
   /** Tasks before and after ghx (0 when a side has none). */
   n_before: number;
   n_after: number;
+  /** The hit rate: the main column. */
+  first_try: Rate;
   /** Median cost per task; null when the side has no tasks. */
   before: number | null;
   after: number | null;
   p: number | null;
   verdict: Verdict;
+}
+
+/** Failed GitHub commands by whose they were, summed over every task in the compared repo and model. */
+export interface FailureCounts {
+  commands: number;
+  mistakes: number;
+  /** Mistakes on a --dry-run: validation doing its job, still a first-try miss. Part of mistakes. */
+  dry_run_mistakes: number;
+  outcomes: number;
+  denials: number;
 }
 
 export interface Row {
@@ -66,8 +106,8 @@ export interface Row {
 export interface Problem {
   task: string;
   context: Context;
-  /** Share of tasks with at least one failed GitHub command, when the ghx side is clearly higher. */
-  failed?: { before: number; after: number };
+  /** Share of tasks with at least one agent mistake, when the ghx side is clearly higher. */
+  mistakes?: { before: number; after: number };
   /** Median API round trips, when the ghx side is clearly higher. */
   round_trips?: { before: number; after: number };
   /** Median cost, when the ghx side is clearly higher. */
@@ -91,6 +131,13 @@ export interface Summary {
   rows: Row[];
   /** Rows left out because every side had too few tasks. */
   too_few: string[];
+  /** Failed GitHub commands before and after ghx, by class; null when a side has no tasks. */
+  failures: { before: FailureCounts; after: FailureCounts } | null;
+  /**
+   * Whole PRs filed under the main thread: the mean share of their round trips that ran in subagents, before
+   * and after ghx. Null when neither side has any.
+   */
+  main_lifecycle_subagent_share: { before: number | null; after: number | null } | null;
   problems: { total: number; shown: Problem[] };
   caveats: string[];
   /** Other repo/model pairs with at least one before/after comparison with enough tasks. */
@@ -178,9 +225,25 @@ function sideOf(
   const b = v.cells.get(key(view, kind, category, context, v.pick, AFTER));
   const c = v.comparisons.get(`${key(view, kind, category, context, v.pick, BEFORE)}→${AFTER}`);
   const m = c?.metrics.cost_norm;
+  const fa = a?.metrics.first_try?.mean ?? null;
+  const fb = b?.metrics.first_try?.mean ?? null;
+  const ft = c?.metrics.first_try;
   const side: Side = {
     n_before: a?.n ?? 0,
     n_after: b?.n ?? 0,
+    first_try: {
+      before: fa,
+      after: fb,
+      p: ft?.test?.p ?? null,
+      verdict: rateVerdict(
+        a?.metrics.first_try?.n ?? 0,
+        b?.metrics.first_try?.n ?? 0,
+        fa,
+        fb,
+        ft,
+        v.report.stats.min_n,
+      ),
+    },
     before: a?.metrics.cost_norm?.median ?? null,
     after: b?.metrics.cost_norm?.median ?? null,
     p: m?.test?.p ?? null,
@@ -191,36 +254,38 @@ function sideOf(
 
 const clear = (m: ComparisonMetric | undefined): boolean => !!m?.test && m.test.p < ALPHA;
 
-/** The ghx side's clear regressions for one task and context: failed commands, round trips, cost. */
+/** The ghx side's clear regressions for one task and context: agent mistakes, round trips, cost. */
 function problemOf(v: Ctx, task: { id: string; label: string }, view: View, kind: string, context: Context) {
   const { a, b, c } = sideOf(v, view, kind, task.id, context);
   if (!a || !b || !c?.eligible) return null;
   const p: Omit<Problem, 'text'> = { task: task.id, context };
-  const fa = a.metrics.errors?.nonzero;
-  const fb = b.metrics.errors?.nonzero;
-  if (clear(c.metrics.errors) && fa !== undefined && fb !== undefined && fb > fa) p.failed = { before: fa, after: fb };
+  const fa = a.metrics.mistakes?.nonzero;
+  const fb = b.metrics.mistakes?.nonzero;
+  if (clear(c.metrics.mistakes) && fa !== undefined && fb !== undefined && fb > fa) {
+    p.mistakes = { before: fa, after: fb };
+  }
   const rt = c.metrics.round_trips;
   if (clear(rt) && rt && rt.delta > 0) p.round_trips = { before: rt.a, after: rt.b };
   const cost = c.metrics.cost_norm;
   if (verdict(c.n_a, c.n_b, cost, v.report.stats.min_n) === 'worse' && cost) {
     p.cost = { before: cost.a, after: cost.b };
   }
-  if (!p.failed && !p.round_trips && !p.cost) return null;
+  if (!p.mistakes && !p.round_trips && !p.cost) return null;
   return { ...p, text: problemText(task.label, p) };
 }
 
-const count = (p: Omit<Problem, 'text'>): number => (p.failed ? 1 : 0) + (p.round_trips ? 1 : 0) + (p.cost ? 1 : 0);
+const count = (p: Omit<Problem, 'text'>): number => (p.mistakes ? 1 : 0) + (p.round_trips ? 1 : 0) + (p.cost ? 1 : 0);
 const rise = (x: { before: number; after: number } | undefined, ratio = false): number =>
   !x ? 0 : ratio ? (x.before > 0 ? x.after / x.before : Number.POSITIVE_INFINITY) : x.after - x.before;
 
-/** Most clear regressions first, then the biggest rise in failed tasks, cost, round trips; then table order. */
+/** Most clear regressions first, then the biggest rise in tasks with a mistake, cost, round trips; then table order. */
 function rankProblems(list: Problem[]): Problem[] {
   return list
     .map((p, i) => ({ p, i }))
     .sort(
       (x, y) =>
         count(y.p) - count(x.p) ||
-        rise(y.p.failed) - rise(x.p.failed) ||
+        rise(y.p.mistakes) - rise(x.p.mistakes) ||
         rise(y.p.cost, true) - rise(x.p.cost, true) ||
         rise(y.p.round_trips, true) - rise(x.p.round_trips, true) ||
         x.i - y.i,
@@ -243,6 +308,30 @@ function caveats(report: Report, compared: NonNullable<Summary['compared']>): st
   return out;
 }
 
+/** Sum of a metric over cells (mean × n is the cell's total; rounded back to whole commands). */
+const total = (cells: readonly Cell[], id: string): number =>
+  Math.round(cells.reduce((s, c) => s + (c.metrics[id] ? c.metrics[id].mean * c.metrics[id].n : 0), 0));
+
+/** Failed GitHub commands by class over every task (episodes and waits) of the picked repo and model. */
+function failures(report: Report, p: Pick): Summary['failures'] {
+  const side = (bucket: string): FailureCounts | null => {
+    const cells = report.cells.filter(
+      (c) => c.view === 'intent' && c.project === p.project && c.model === p.model && c.bucket === bucket,
+    );
+    if (cells.length === 0) return null;
+    return {
+      commands: total(cells, 'gh_tool_calls'),
+      mistakes: total(cells, 'mistakes'),
+      dry_run_mistakes: total(cells, 'dry_run_mistakes'),
+      outcomes: total(cells, 'outcomes'),
+      denials: total(cells, 'denials'),
+    };
+  };
+  const before = side(BEFORE);
+  const after = side(AFTER);
+  return before && after ? { before, after } : null;
+}
+
 /** The summary's data: the comparison it picked, a row per task, the biggest problems and the caveats. */
 export function summarize(report: Report): Summary {
   const minN = report.stats.min_n;
@@ -257,6 +346,8 @@ export function summarize(report: Report): Summary {
     min_n: minN,
     rows: [],
     too_few: [],
+    failures: null,
+    main_lifecycle_subagent_share: null,
     problems: { total: 0, shown: [] },
     caveats: [],
     others: [],
@@ -300,7 +391,8 @@ export function summarize(report: Report): Summary {
     const main = sideOf(v, t.view, t.kind, category, 'main');
     const sub = sideOf(v, t.view, t.kind, category, 'subagent');
     if (!main.c && !sub.c) continue;
-    if (main.side.verdict === 'too few' && sub.side.verdict === 'too few') {
+    const few = (x: Side): boolean => x.verdict === 'too few' && x.first_try.verdict === 'too few';
+    if (few(main.side) && few(sub.side)) {
       tooFew.push(t.label);
       continue;
     }
@@ -311,6 +403,11 @@ export function summarize(report: Report): Summary {
     }
   }
   const ranked = rankProblems(problems);
+  const share = (bucket: string): number | null =>
+    v.cells.get(key('created_merged', 'pr_lifecycle', 'pr', 'main', best, bucket))?.metrics.subagent_share?.mean ??
+    null;
+  const shareBefore = share(BEFORE);
+  const shareAfter = share(AFTER);
   const compared = {
     project: best.project,
     repo: repo(best.project),
@@ -325,6 +422,9 @@ export function summarize(report: Report): Summary {
     min_n: minN,
     rows,
     too_few: tooFew,
+    failures: failures(report, best),
+    main_lifecycle_subagent_share:
+      shareBefore === null && shareAfter === null ? null : { before: shareBefore, after: shareAfter },
     problems: { total: ranked.length, shown: ranked.slice(0, MAX_PROBLEMS) },
     caveats: caveats(report, compared),
     others: others.map((o) => ({ project: o.project, repo: repo(o.project), model: o.model })),
@@ -344,7 +444,7 @@ export function usd(x: number): string {
 
 function problemText(label: string, p: Omit<Problem, 'text'>): string {
   const parts: string[] = [];
-  if (p.failed) parts.push(`${pct(p.failed.after)} hit a failed command (raw gh: ${pct(p.failed.before)})`);
+  if (p.mistakes) parts.push(`${pct(p.mistakes.after)} hit an agent mistake (raw gh: ${pct(p.mistakes.before)})`);
   if (p.round_trips) {
     parts.push(`${num(p.round_trips.after)} API round trips (raw gh: ${num(p.round_trips.before)})`);
   }
@@ -355,6 +455,25 @@ function problemText(label: string, p: Omit<Problem, 'text'>): string {
 function cellText(s: Side): string {
   if (s.verdict === 'too few') return 'too few';
   return `${usd(s.before as number)} → ${usd(s.after as number)}  ${s.verdict}`;
+}
+
+function rateText(r: Rate): string {
+  if (r.verdict === 'too few') return 'too few';
+  return `${pct(r.before as number)} → ${pct(r.after as number)}  ${r.verdict}`;
+}
+
+/** A share of commands, to one decimal under 10%. */
+const pct1 = (x: number): string => (x < 0.1 ? `${(Math.round(x * 1000) / 10).toFixed(1)}%` : pct(x));
+
+/** The headline mistake rate per command, then the other failures, before → after. */
+function failureText(f: NonNullable<Summary['failures']>): string {
+  const rate = (c: FailureCounts): string => (c.commands > 0 ? pct1(c.mistakes / c.commands) : '–');
+  return (
+    `agent mistakes ${rate(f.before)} → ${rate(f.after)} of commands (${f.before.mistakes} → ${f.after.mistakes}, ` +
+    `of them on a dry run ${f.before.dry_run_mistakes} → ${f.after.dry_run_mistakes}); CI or PR state ` +
+    `${f.before.outcomes} → ${f.after.outcomes}; refused by a hook, permission or the harness ` +
+    `${f.before.denials} → ${f.after.denials}.`
+  );
 }
 
 /** Lines of at most WIDTH columns: words after `first` wrap onto lines indented by `indent` spaces. */
@@ -390,17 +509,50 @@ export function renderSummary(report: Report): string {
       `(${c.repo}, ${c.model_name})`,
     '',
   );
-  const head = ['Median cost per task', 'Main thread, before → after', 'Subagents, before → after'];
-  const body = s.rows.map((r) => [r.label, cellText(r.main), cellText(r.subagent)]);
-  const w0 = Math.max(...[head, ...body].map((r) => (r[0] as string).length)) + 3;
-  const w1 = Math.max(...[head, ...body].map((r) => (r[1] as string).length)) + 4;
-  for (const r of [head, ...body]) lines.push(`${(r[0] as string).padEnd(w0)}${(r[1] as string).padEnd(w1)}${r[2]}`);
+  const blocks = (['main', 'subagent'] as const).map((ctx) => {
+    const rows = s.rows.filter((r) => !(r[ctx].verdict === 'too few' && r[ctx].first_try.verdict === 'too few'));
+    return { ctx, rows };
+  });
+  const all = blocks.flatMap((b) => [
+    [CONTEXT_TITLE[b.ctx], 'First try, before → after', 'Median cost, before → after'],
+    ...b.rows.map((r) => [r.label, rateText(r[b.ctx].first_try), cellText(r[b.ctx])]),
+  ]);
+  const w0 = Math.max(...all.map((r) => (r[0] as string).length)) + 3;
+  const w1 = Math.max(...all.map((r) => (r[1] as string).length)) + 4;
+  const line = (r: string[]): string => `${(r[0] as string).padEnd(w0)}${(r[1] as string).padEnd(w1)}${r[2]}`;
+  for (const b of blocks.filter((x) => x.rows.length > 0)) {
+    if (lines.at(-1) !== '') lines.push('');
+    lines.push(line([CONTEXT_TITLE[b.ctx], 'First try, before → after', 'Median cost, before → after']));
+    for (const r of b.rows) {
+      lines.push(line([r.label, rateText(r[b.ctx].first_try), cellText(r[b.ctx])]));
+      const sh = s.main_lifecycle_subagent_share;
+      if (b.ctx === 'main' && r.task === LIFECYCLE.id && sh) {
+        const side = (x: number | null): string => (x === null ? 'none' : pct(x));
+        lines.push(
+          ...wrap(
+            '  ',
+            `led from the main thread, but ${side(sh.after)} of its API round trips ran in subagents ` +
+              `(raw gh: ${side(sh.before)}).`,
+            4,
+          ),
+        );
+      }
+    }
+  }
+  lines.push('');
   if (s.too_few.length) lines.push(...wrap('Too few tasks to compare: ', `${s.too_few.join('; ')}.`, 2));
   lines.push(
-    `cost = API spend for one task, as if it started from a ${Math.round(s.ref_ctx / 1000)}k-token context.`,
+    ...wrap(
+      'first try = ',
+      'the first attempt at the task worked: no agent mistake and nothing denied, up to and including its ' +
+        'first command of that kind (a dry run counts). Red CI or a busy run is not a miss.',
+      2,
+    ),
+    `cost = API spend for one task, as if each agent in it started from a ${Math.round(s.ref_ctx / 1000)}k-token context.`,
     `better/worse = a clear difference; same = no clear change; too few = under ${s.min_n} tasks on a side.`,
     '',
   );
+  if (s.failures) lines.push(...wrap('Failed GitHub commands, raw gh → ghx: ', failureText(s.failures), 2), '');
   const { total, shown } = s.problems;
   if (total === 0) lines.push('Biggest problems with ghx: none stand out clearly in this data.');
   else {
