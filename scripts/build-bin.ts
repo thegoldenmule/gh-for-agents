@@ -5,7 +5,8 @@
 // dist-bin/ghx-<os>-<arch>-test-hooks, for GHX_TEST_BIN=<path> pnpm test:contract (test/helpers/spawn.ts);
 // never publish it. A release build fails if it contains test-command text.
 // macOS: bun's ad-hoc signature fails `codesign -v` once the bundle is appended, so darwin outputs are
-// re-signed ad hoc; that needs macOS, so darwin targets are refused elsewhere. x64 is not -baseline.
+// re-signed ad hoc; that needs macOS, so darwin targets are refused elsewhere. x64 builds use Bun's -baseline
+// runtime (no AVX2 needed), so older x86-64 CPUs can run them; the output name stays ghx-<os>-x64.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -77,7 +78,8 @@ function main(): void {
 
   for (const target of targets) {
     const out = join(OUT, `ghx-${target}${testHooks ? '-test-hooks' : ''}`);
-    must('bun', ['build', entry, '--compile', '--minify', `--target=bun-${target}`, '--outfile', out]);
+    const bunTarget = `bun-${target}${target.endsWith('-x64') ? '-baseline' : ''}`;
+    must('bun', ['build', entry, '--compile', '--minify', `--target=${bunTarget}`, '--outfile', out]);
     if (target.startsWith('darwin-')) {
       must('codesign', ['--force', '--sign', '-', out]);
       must('codesign', ['--verify', '--strict', out]);
