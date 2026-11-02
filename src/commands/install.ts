@@ -4,7 +4,6 @@
 // onto PATH. Idempotent; every changed file is backed up first and written atomically.
 // User scope adds no deny rules (04 "enforcement scope"): they can't be conditional, and the hook
 // enforces only in repos with .github/ghx.json. A user-scope re-install removes ones ghx added earlier.
-import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { defineCommand } from '../core/command.ts';
@@ -18,7 +17,6 @@ import {
   REPO_ROOT,
   readOrNull,
   resolveTargets,
-  SNIPPET_PATH,
 } from '../install/files.ts';
 import { handoff, runsFromNpx } from '../install/npx.ts';
 import {
@@ -40,6 +38,7 @@ import {
   removeDenyRules,
   serializeSettings,
 } from '../install/settings.ts';
+import { CLAUDE_MD_SNIPPET } from '../install/snippet.generated.ts';
 import { reformattedWarning, styleKeepsBytes, toPlain } from '../install/text.ts';
 
 export default defineCommand({
@@ -147,7 +146,7 @@ export default defineCommand({
     let claudeMdRecord: Manifest['claudeMd'] = manifest?.claudeMd ?? null;
     if (input.snippet) {
       const before = readOrNull(targets.claudeMd);
-      const snippet = readFileSync(SNIPPET_PATH, 'utf8');
+      const snippet = CLAUDE_MD_SNIPPET;
       // A block already there with no record is a legacy install's: it created the file if no backup exists.
       const legacy =
         before !== null && removeBlock(before, targets.claudeMd) === '' && backupsOf(targets.claudeMd).length === 0;

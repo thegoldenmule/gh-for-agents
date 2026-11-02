@@ -6,10 +6,12 @@ import { join, relative } from 'node:path';
 import { test } from 'node:test';
 import { z } from 'zod';
 import { deriveInterface, RESERVED_NAMES } from '../src/cli/args.ts';
-import { fsRegistry, isCommandSegment, MAX_NAME_DEPTH, scanCommandFiles } from '../src/cli/registry.ts';
+import { COMMANDS } from '../src/cli/commands.generated.ts';
+import { fsRegistry, isCommandSegment, lazyRegistry, MAX_NAME_DEPTH, scanCommandFiles } from '../src/cli/registry.ts';
 import { commandSchema } from '../src/cli/schema.ts';
 import { type AnyCommandSpec, defineCommand } from '../src/core/command.ts';
 import { isMutating } from '../src/gh/guard.ts';
+import { COMMANDS as TEST_COMMAND_ENTRIES } from './helpers/commands.generated.ts';
 import { FakeGh } from './helpers/fake-gh.ts';
 import { FakeProc } from './helpers/fake-proc.ts';
 import { GH_FIXTURE_ROOT } from './helpers/fixture-match.ts';
@@ -31,10 +33,20 @@ function allFiles(dir: string): string[] {
   );
 }
 
-for (const [label, root] of [
-  ['src/commands', SRC_COMMANDS],
-  ['test/helpers/commands', TEST_COMMANDS],
+for (const [label, root, entries] of [
+  ['src/commands', SRC_COMMANDS, COMMANDS],
+  ['test/helpers/commands', TEST_COMMANDS, TEST_COMMAND_ENTRIES],
 ] as const) {
+  test(`${label}: the generated command list matches the files (run pnpm codegen)`, async () => {
+    const scanned = scanCommandFiles(root).map((c) => c.name.join(' '));
+    assert.deepEqual(
+      entries.map((e) => e.name.join(' ')),
+      scanned,
+    );
+    const listed = (await lazyRegistry(entries).list()).map((s) => s.name.join(' '));
+    assert.deepEqual(listed, scanned);
+  });
+
   test(`${label}: every non-helper file is a command, and the registry lists exactly those`, async () => {
     const files = allFiles(root)
       .map((f) => relative(root, f))

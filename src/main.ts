@@ -1,7 +1,10 @@
 // The only module that touches `process` (01 §1): builds the real dependencies, runs the CLI, sets
 // process.exitCode and lets the event loop drain so the last byte reaches a pipe (01 §3.5).
+// Entry points: bin/ghx.js calls main() (Node); `bun build --compile` bundles this file as the entry
+// (import.meta.main); the --test-hooks binary's entry (test/helpers/bin-entry.ts) passes the test commands.
 import { readFile } from 'node:fs/promises';
-import { commandRoots, fsRegistry } from './cli/registry.ts';
+import { COMMANDS } from './cli/commands.generated.ts';
+import { type CommandEntry, combineRegistries, fsRegistry, lazyRegistry, testCommandRoots } from './cli/registry.ts';
 import { runCli } from './cli/run.ts';
 import { realClock } from './core/clock.ts';
 import { createWritableSink } from './core/output.ts';
@@ -53,7 +56,11 @@ function readStdin(maxBytes: number, signal: AbortSignal): Promise<string> {
   });
 }
 
-async function main(): Promise<void> {
+/**
+ * Run the CLI. `testCommands`: the test-only commands bundled into a --test-hooks binary, served
+ * (like test/helpers/commands in a checkout) only when GHX_TEST_HOOKS=1.
+ */
+export async function main(testCommands?: readonly CommandEntry[]): Promise<void> {
   const env = process.env;
   const shutdown = createShutdown();
   const uninstall = installSignalHandlers(shutdown, process);
@@ -80,7 +87,12 @@ async function main(): Promise<void> {
     finishLog = log.finish;
   }
   const outcome = await runCli(argv, {
-    registry: fsRegistry(commandRoots(env, import.meta.dirname)),
+    registry: combineRegistries(
+      lazyRegistry(COMMANDS),
+      testCommands
+        ? lazyRegistry(env.GHX_TEST_HOOKS === '1' ? testCommands : [])
+        : fsRegistry(testCommandRoots(env, import.meta.dirname)),
+    ),
     version: VERSION,
     cwd,
     env,
@@ -99,4 +111,4 @@ async function main(): Promise<void> {
   uninstall();
 }
 
-await main();
+if (import.meta.main) await main();

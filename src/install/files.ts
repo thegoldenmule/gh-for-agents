@@ -30,10 +30,9 @@ import { unifiedDiff } from './diff.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
-/** This checkout: the hook runs bin/ghx.js from here, and the snippet is read from here. */
+/** This checkout or package (not the standalone binary): the hook runs bin/ghx.js from here. */
 export const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url)).replace(/\/$/, '');
 export const GHX_BIN = join(REPO_ROOT, 'bin', 'ghx.js');
-export const SNIPPET_PATH = join(REPO_ROOT, 'docs', 'agents', 'claude-md-snippet.md');
 
 export type Scope = 'user' | 'project';
 

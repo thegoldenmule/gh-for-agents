@@ -5,10 +5,11 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import {
   combineRegistries,
-  commandRoots,
   fsRegistry,
+  lazyRegistry,
   scanCommandFiles,
   staticRegistry,
+  testCommandRoots,
 } from '../../../src/cli/registry.ts';
 import versionSpec from '../../../src/commands/version.ts';
 import { isGhxError } from '../../../src/core/errors.ts';
@@ -75,6 +76,28 @@ test('static and combined registries', async () => {
 
 test('the test-only root is added only with GHX_TEST_HOOKS=1', () => {
   const src = join(import.meta.dirname, '../../../src');
-  assert.equal(commandRoots({}, src).length, 1);
-  assert.equal(commandRoots({ GHX_TEST_HOOKS: '1' }, src).length, 2);
+  assert.deepEqual(testCommandRoots({}, src), []);
+  assert.deepEqual(testCommandRoots({ GHX_TEST_HOOKS: '1' }, src), [join(src, '..', 'test', 'helpers', 'commands')]);
+  assert.deepEqual(testCommandRoots({ GHX_TEST_HOOKS: '1' }, '/$bunfs/root'), []);
+});
+
+test('lazy registry: loads only the resolved command, validates its name, lists without loading', async () => {
+  const loaded: string[] = [];
+  const entry = (name: string[], mod: unknown) => ({
+    name,
+    load: async () => {
+      loaded.push(name.join(' '));
+      return { default: mod };
+    },
+  });
+  const reg = lazyRegistry([entry(['version'], versionSpec), entry(['pr', 'status'], versionSpec)]);
+  assert.deepEqual(await reg.names(), [['pr', 'status'], ['version']]);
+  assert.deepEqual(loaded, []);
+  const hit = await reg.resolve(['version', 'x']);
+  assert.equal(hit?.spec, versionSpec);
+  assert.equal(hit?.consumed, 1);
+  assert.deepEqual(loaded, ['version']);
+  assert.equal(await reg.resolve(['nope']), undefined);
+  await assert.rejects(reg.resolve(['pr', 'status']), (e) => isGhxError(e, 'INTERNAL'));
+  await assert.rejects(lazyRegistry([entry(['x'], {})]).list(), (e) => isGhxError(e, 'INTERNAL'));
 });

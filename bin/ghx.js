@@ -17,5 +17,6 @@ if (major < 24) {
   const { enableCompileCache } = await import('node:module');
   enableCompileCache?.();
   const src = new URL('../src/main.ts', import.meta.url);
-  await import(existsSync(src) ? src.href : new URL('../dist/main.js', import.meta.url).href);
+  const { main } = await import(existsSync(src) ? src.href : new URL('../dist/main.js', import.meta.url).href);
+  await main();
 }
