@@ -110,27 +110,35 @@ order is in [04-build-coordination](docs/plans/04-build-coordination.md).
 
 ## Install
 
-You need Node.js 24 or later and `gh` 2.81.0 or later, logged in
-(`gh auth login`). Install `ghx` and set up Claude Code in one step:
+You need `gh` 2.81.0 or later, logged in (`gh auth login`). On macOS or Linux,
+install the `ghx` binary into `~/.local/bin` and set up Claude Code:
 
 ```sh
-npx @thegoldenmule/ghx install
-```
-
-Run from `npx`, `ghx install` first installs the same version globally
-(`npm i -g @thegoldenmule/ghx@<version>`) and hands the install to that copy,
-so the hook never points into npm's cache. To do it in two steps instead:
-
-```sh
-npm i -g @thegoldenmule/ghx
-ghx install --dry-run   # shows the diffs; writes nothing
+curl -fsSL https://github.com/thegoldenmule/gh-for-agents/releases/latest/download/install.sh | sh
 ghx install
-ghx doctor
-ghx init                # in the repo you work on: writes .github/ghx.json
 ```
 
-If `npm i -g` fails with `EACCES`, your global npm prefix belongs to root: use
-a Node.js you own (nvm or fnm) rather than `sudo`.
+The script picks the archive for your OS and CPU, checks it against the
+release's `SHA256SUMS`, and needs no `sudo`. `GHX_VERSION=v0.1.0` pins a
+release and `GHX_INSTALL_DIR` picks another directory. If `~/.local/bin` isn't
+on your `PATH`, it prints the line to add. `ghx install --dry-run` shows the
+diffs `ghx install` would make and writes nothing; `ghx doctor` checks the
+setup; and `ghx init`, run in the repo you work on, writes `.github/ghx.json`.
+
+To download by hand instead, take `ghx-<os>-<arch>.tar.gz` for your machine
+from the [Releases page](https://github.com/thegoldenmule/gh-for-agents/releases),
+run `tar xzf` on it, and move `ghx` into a directory on your `PATH`. A file a
+browser downloaded on macOS is quarantined: clear it with
+`xattr -d com.apple.quarantine ghx`, or allow it under System Settings →
+Privacy & Security → Open Anyway. Each release is attested:
+`gh attestation verify ghx-<os>-<arch>.tar.gz --repo thegoldenmule/gh-for-agents`.
+
+To upgrade, run the one-liner again. The path stays the same, so the hook
+keeps working. Uninstall with:
+
+```sh
+ghx uninstall && rm ~/.local/bin/ghx
+```
 
 `ghx install` adds the PreToolUse hook to `~/.claude/settings.json` and the
 CLAUDE.md snippet to `~/.claude/CLAUDE.md`. Enforcement is per repo: the hook
@@ -147,13 +155,24 @@ configured or not. [docs/agents/hooks.md](docs/agents/hooks.md) describes what
 it writes. The [docs/agents](docs/agents/) folder also has the skill and the
 command reference.
 
-Upgrade with `npm update -g @thegoldenmule/ghx`; the hook runs the global copy,
-so it picks up the new version (`ghx doctor` warns if the hook runs another
-copy or another `node`; run `ghx install` again). Uninstall with:
+### With npm (Node.js 24 or later, and Windows)
+
+There is no Windows binary. On Windows, or to run `ghx` on your own Node.js,
+install the npm package from the release:
 
 ```sh
-ghx uninstall && npm rm -g @thegoldenmule/ghx
+npm i -g https://github.com/thegoldenmule/gh-for-agents/releases/latest/download/ghx.tgz
+ghx install
 ```
+
+Once `@thegoldenmule/ghx` is on the npm registry, `npm i -g @thegoldenmule/ghx`
+works too, as does `npx @thegoldenmule/ghx install`, which installs the same
+version globally first so the hook never points into npm's cache. If
+`npm i -g` fails with `EACCES`, your global npm prefix belongs to root: use a
+Node.js you own (nvm or fnm) rather than `sudo`. Upgrade by installing again
+(`ghx doctor` warns if the hook runs another copy or another `node`; run
+`ghx install` again), and uninstall with
+`ghx uninstall && npm rm -g @thegoldenmule/ghx`.
 
 ### Developing
 
