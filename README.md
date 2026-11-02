@@ -170,8 +170,8 @@ works too, as does `npx @thegoldenmule/ghx install`, which installs the same
 version globally first so the hook never points into npm's cache. If
 `npm i -g` fails with `EACCES`, your global npm prefix belongs to root: use a
 Node.js you own (nvm or fnm) rather than `sudo`. Upgrade by installing again
-(`ghx doctor` warns if the hook runs another copy or another `node`; run
-`ghx install` again), and uninstall with
+(`ghx doctor` warns if the hook runs another copy, another `node`, or the
+standalone binary; run `ghx install` again), and uninstall with
 `ghx uninstall && npm rm -g @thegoldenmule/ghx`.
 
 ### Developing

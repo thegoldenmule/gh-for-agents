@@ -6,7 +6,7 @@ A `v*` tag runs `.github/workflows/release.yml`, which publishes a GitHub releas
 
 | Asset | What it is |
 | --- | --- |
-| `ghx-darwin-arm64.tar.gz`, `ghx-darwin-x64.tar.gz`, `ghx-linux-arm64.tar.gz`, `ghx-linux-x64.tar.gz` | One executable, `ghx`, at the archive root: a Bun `--compile` build with its own runtime. There is no Windows binary. |
+| `ghx-darwin-arm64.tar.gz`, `ghx-darwin-x64.tar.gz`, `ghx-linux-arm64.tar.gz`, `ghx-linux-x64.tar.gz` | One executable, `ghx`, at the archive root: a Bun `--compile` build with its own runtime (the x64 builds use Bun's `-baseline` runtime, so they need no AVX2). There is no Windows binary. |
 | `ghx.tgz` | The `npm pack` tarball, for Node.js 24 or later and Windows: `npm i -g https://github.com/thegoldenmule/gh-for-agents/releases/latest/download/ghx.tgz`. The name has no version so that URL stays stable. |
 | `install.sh` | The installer behind `curl -fsSL …/releases/latest/download/install.sh \| sh`. |
 | `SHA256SUMS` | `sha256sum` lines for every other asset. `install.sh` checks the archive against it. |
@@ -27,7 +27,7 @@ The release is never a pre-release, because `releases/latest/download/…`, whic
 
    `npm version` tags the commit it makes, so everything meant for the release, notes included, has to be committed before it. To do it by hand instead, edit `version`, commit, and run `git tag v<version>`. The tag must be exactly `v` plus the `package.json` version, or the workflow stops before building.
 
-3. Optionally, dry-run the workflow first: push `main` (`git push origin main`), then run `release` on it from the Actions tab or with `gh workflow run release.yml --ref main`. On `workflow_dispatch` it does everything except publish: it checks, builds, tests, and uploads the assets as the `release-assets` workflow artifact.
+3. Optionally, dry-run the workflow first: push `main` (`git push origin main`), then run `release` on it from the Actions tab or with `gh workflow run release.yml --ref main`. On `workflow_dispatch` it does everything except publish: it checks, builds, tests, and uploads the assets as the `release-assets` workflow artifact (`gh run download <run-id> -n release-assets`).
 
 4. Push the commit and the tag:
 
@@ -38,13 +38,13 @@ The release is never a pre-release, because `releases/latest/download/…`, whic
 
 5. Watch the `release` workflow. Its jobs:
    - **check**: the tag matches `package.json`; `pnpm check`, `pnpm docs:check` and `pnpm pack:test`.
-   - **build**: installs a pinned Bun, cross-compiles all four binaries with `pnpm build:bin --target all` (and a `--test-hooks` set for the contract suite), packs `ghx.tgz`, and writes the archives, `install.sh` and `SHA256SUMS`.
-   - **test**: on a native runner per target (`ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15`, `macos-15-intel`), `install.sh` installs the archive from the built assets, macOS checks the code signature, and the contract suite (`GHX_TEST_BIN=… pnpm test:contract`) and the smoke test (`pnpm bin:test`) run against the binary.
+   - **build**: on a native runner per target (`ubuntu-24.04` → `linux-x64`, `ubuntu-24.04-arm` → `linux-arm64`, `macos-15` → `darwin-arm64`, `macos-15-intel` → `darwin-x64`), installs a pinned Bun and runs `pnpm build:bin` and `pnpm build:bin --test-hooks` for that machine (`dist-bin/ghx-<os>-<arch>` and `dist-bin/ghx-<os>-<arch>-test-hooks`; `build:bin` refuses darwin targets off macOS, because it re-signs them with `codesign`). macOS checks the signature with `codesign --verify --strict`, the contract suite runs against the test-hooks binary (`GHX_TEST_BIN=dist-bin/ghx-<os>-<arch>-test-hooks pnpm test:contract`), the smoke test (`pnpm bin:test --bin dist-bin/ghx-<os>-<arch>`) against the release binary, and `install.sh` installs it from a local archive. It uploads the release binary.
+   - **assemble**: packs each binary as `ghx-<os>-<arch>.tar.gz`, packs `ghx.tgz`, adds `install.sh` and writes `SHA256SUMS`, and uploads them as the `release-assets` workflow artifact.
    - **release**: attests the assets, creates the release as a draft with them, then publishes it and marks it latest. A re-run that finds its own draft replaces the draft's assets; a release that is already published stops it.
    - **verify-install**: runs the published one-liner on Linux and macOS with `GHX_VERSION=<tag>` and checks that `ghx --version` reports the tag.
    - **npm**: publishes to npm, only when the `NPM_PUBLISH` repository variable is `true` (see below) and the binary tests passed.
 
-Binary users upgrade by running the one-liner again; it replaces `~/.local/bin/ghx` in place, so the hook keeps working. npm users upgrade with `npm update -g @thegoldenmule/ghx`; the hook runs the global copy by path, so it picks up the new version. `ghx doctor` warns `INSTALL_HOOK_VERSION_MISMATCH` or `INSTALL_HOOK_NODE_MISMATCH` when the hook runs another copy or another node, and rerunning `ghx install` fixes it.
+Binary users upgrade by running the one-liner again; it replaces `~/.local/bin/ghx` in place, so the hook keeps working. npm users upgrade with `npm update -g @thegoldenmule/ghx`; the hook runs the global copy by path, so it picks up the new version. `ghx doctor` warns `INSTALL_HOOK_VERSION_MISMATCH` when the hook runs another version, `INSTALL_HOOK_NODE_MISMATCH` when it runs another node, and `INSTALL_HOOK_OTHER_INSTALL` when it runs the other kind of install (the binary's hook seen from an npm ghx, or the reverse), and rerunning `ghx install` fixes it.
 
 ## npm publishing (one-time setup)
 
