@@ -2,7 +2,7 @@
 // pnpm build:bin [--target <os-arch>|all ...] [--test-hooks]: bun build --compile ghx into
 // dist-bin/ghx-<os>-<arch> (default: this machine). Needs Bun; nothing else in the repo does.
 // --test-hooks bundles test/helpers/bin-entry.ts (`ghx test …` under GHX_TEST_HOOKS=1) into
-// dist-bin/ghx-<os>-<arch>-test-hooks, for GHX_TEST_BIN=<abs path> pnpm test:contract (test/helpers/spawn.ts);
+// dist-bin/ghx-<os>-<arch>-test-hooks, for GHX_TEST_BIN=<path> pnpm test:contract (test/helpers/spawn.ts);
 // never publish it. A release build fails if it contains test-command text.
 // macOS: bun's ad-hoc signature fails `codesign -v` once the bundle is appended, so darwin outputs are
 // re-signed ad hoc; that needs macOS, so darwin targets are refused elsewhere. x64 is not -baseline.

@@ -1,20 +1,21 @@
 // Spawn bin/ghx.js the way an agent does: through pipes, with an environment built from scratch
 // (never process.env: agent sessions set CLAUDE_CODE_SESSION_ATTENDED, 03 §3.6).
 //
-// GHX_TEST_BIN=<abs path> runs that executable instead (a standalone binary, pnpm build:bin):
-//   GHX_TEST_BIN=$PWD/dist-bin/ghx-darwin-arm64 pnpm test:contract
+// GHX_TEST_BIN=<path> runs that executable instead (a standalone binary, pnpm build:bin):
+//   GHX_TEST_BIN=dist-bin/ghx-darwin-arm64 pnpm test:contract
 // Tests that need the test-only commands (`ghx test …`) skip unless the binary serves them, which is
 // probed once (a binary built with pnpm build:bin --test-hooks does). Tests that run node on bin/ghx.js
 // itself skip under GHX_TEST_BIN.
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, symlinkSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { scratchDir } from './harness.ts';
 
 export const BIN = join(import.meta.dirname, '..', '..', 'bin', 'ghx.js');
-/** The standalone binary under test (GHX_TEST_BIN), or undefined for node bin/ghx.js. */
-export const TEST_BIN: string | undefined = process.env.GHX_TEST_BIN || undefined;
-if (TEST_BIN !== undefined && !isAbsolute(TEST_BIN)) throw new Error(`GHX_TEST_BIN must be absolute: ${TEST_BIN}`);
+/** The standalone binary under test (GHX_TEST_BIN, relative to the repo root), or undefined for node bin/ghx.js. */
+export const TEST_BIN: string | undefined = process.env.GHX_TEST_BIN
+  ? resolve(join(import.meta.dirname, '..', '..'), process.env.GHX_TEST_BIN)
+  : undefined;
 
 /** Whether `ghx test …` exists (always for bin/ghx.js; for a binary, only a --test-hooks build). */
 export const TEST_HOOKS: boolean =
