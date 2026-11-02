@@ -2,3 +2,4 @@ node_modules/
 dist/
 coverage/
 .ghx-artifacts/
+dist-bin/

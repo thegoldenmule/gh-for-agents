@@ -15,7 +15,16 @@ const PATH = join(ROOT, CONFIG_PATH);
 const config = parseConfigText(readFileSync(PATH, 'utf8'), { kind: 'local', path: PATH });
 
 /** Untracked or generated trees (.gitignore, the VCS and local tool state). */
-const SKIP = new Set(['node_modules', 'dist', 'coverage', '.ghx-artifacts', '.git', '.claude', '.DS_Store']);
+const SKIP = new Set([
+  'node_modules',
+  'dist',
+  'dist-bin',
+  'coverage',
+  '.ghx-artifacts',
+  '.git',
+  '.claude',
+  '.DS_Store',
+]);
 
 function repoFiles(dir = ROOT): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
