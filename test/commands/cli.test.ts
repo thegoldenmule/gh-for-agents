@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { versionInfo } from '../../src/commands/version.ts';
 import { createShutdown } from '../../src/core/signals.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeClock, flush } from '../helpers/fake-clock.ts';
@@ -17,6 +18,15 @@ test('ghx version prints one JSON document and exits 0', async () => {
   assert.equal(r.json.name, 'ghx');
   assert.match(r.json.version, /^\d+\.\d+\.\d+/);
   assert.equal(r.calls.length, 0);
+});
+
+test('ghx version names its runtime; the standalone binary reports no Node.js version', async () => {
+  const r = await runInProcess(['version']);
+  assert.deepEqual(r.json.runtime, { name: 'node', version: process.versions.node, standalone: false });
+  assert.equal(r.json.node, process.versions.node);
+  const bin = versionInfo({ compiled: true, name: 'bun', version: '1.3.8', execPath: '/x/ghx' });
+  assert.equal(bin.node, null);
+  assert.deepEqual(bin.runtime, { name: 'bun', version: '1.3.8', standalone: true });
 });
 
 test('--version is an alias of the version command', async () => {
