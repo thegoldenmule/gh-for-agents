@@ -58,10 +58,11 @@
       "paths": ["test/**"]
     },
     "build": {
-      "description": "CI, scripts, package and tool configuration",
+      "description": "CI, release, scripts, the installer, package and tool configuration",
       "paths": [
         ".github/**",
         "scripts/**",
+        "install.sh",
         "package.json",
         "LICENSE",
         "pnpm-lock.yaml",
