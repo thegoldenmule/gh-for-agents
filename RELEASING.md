@@ -17,17 +17,17 @@ The release is never a pre-release, because `releases/latest/download/…`, whic
 
 ## Each release
 
-1. Bump the version in `package.json` (this also makes the commit and the tag):
+1. Optionally, write the release notes to `docs/release-notes/v<version>.md` and commit them. When that file exists at the tagged commit, the release uses it; otherwise GitHub generates notes from the merged PRs and commits.
+
+2. Bump the version in `package.json`:
 
    ```sh
    npm version patch   # or minor / major; commits "x.y.z" and tags vx.y.z
    ```
 
-   To do it by hand instead, edit `version`, commit, and run `git tag v<version>`. The tag must be exactly `v` plus the `package.json` version, or the workflow stops before building.
+   `npm version` tags the commit it makes, so everything meant for the release, notes included, has to be committed before it. To do it by hand instead, edit `version`, commit, and run `git tag v<version>`. The tag must be exactly `v` plus the `package.json` version, or the workflow stops before building.
 
-2. Optionally, write the release notes to `docs/release-notes/v<version>.md` and commit them before tagging. When that file exists, the release uses it; otherwise GitHub generates notes from the merged PRs and commits.
-
-3. Optionally, dry-run the workflow first: run `release` from the Actions tab (or `gh workflow run release.yml`). On `workflow_dispatch` it does everything except publish: it checks, builds, tests, and uploads the assets as the `release-assets` workflow artifact.
+3. Optionally, dry-run the workflow first: push `main` (`git push origin main`), then run `release` on it from the Actions tab or with `gh workflow run release.yml --ref main`. On `workflow_dispatch` it does everything except publish: it checks, builds, tests, and uploads the assets as the `release-assets` workflow artifact.
 
 4. Push the commit and the tag:
 
