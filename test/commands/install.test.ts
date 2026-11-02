@@ -24,6 +24,7 @@ import { GHX_DENY_RULES } from '../../src/install/settings.ts';
 import { VERSION } from '../../src/version.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { fakeGit } from '../helpers/fake-git.ts';
+import { FakeProc } from '../helpers/fake-proc.ts';
 import { runInProcess } from '../helpers/harness.ts';
 
 const tmp = mkdtempSync(join(tmpdir(), 'ghx-install-'));
@@ -517,6 +518,31 @@ test('doctor warns when the hook runs another ghx version or another node than t
   assert.deepEqual(await codes(), ['INSTALL_HOOK_NODE_MISMATCH']);
   const r = await run(['doctor'], { HOME: h.home });
   assert.match(r.json.warnings[0].message, /Re-run ghx install/);
+
+  // A standalone-binary hook, seen from this (Node.js) ghx: another kind of install, not a node mismatch.
+  const binary = join(old, 'ghx');
+  writeFileSync(binary, '');
+  set(`'${binary}' hook claude-pretooluse`);
+  assert.deepEqual(await codes(), ['INSTALL_HOOK_OTHER_INSTALL']);
+  // doctor asks the binary its version (here a fake `<binary> version`).
+  const proc = new FakeProc()
+    .on(() => true, { exitCode: 1, stderr: 'not found' })
+    .on((req) => req.cmd === binary && req.args[0] === 'version', {
+      exitCode: 0,
+      stdout: '{"name":"ghx","version":"0.0.2"}\n',
+    });
+  const b = await runInProcess(['doctor'], { env: { HOME: h.home }, proc: proc.runner() });
+  assert.deepEqual(b.json.install.user.hook, {
+    ...b.json.install.user.hook,
+    node: null,
+    binary,
+    version: '0.0.2',
+  });
+  assert.deepEqual(
+    b.json.warnings.map((w: { code: string }) => w.code),
+    ['INSTALL_HOOK_VERSION_MISMATCH', 'INSTALL_HOOK_OTHER_INSTALL'],
+  );
+  assert.match(b.json.warnings[1].message, /standalone ghx binary .*a different ghx install than this one/);
 });
 
 /** The shape of a real user settings file (fake values): permissions without deny, an empty PreToolUse, env, statusLine. */
@@ -806,6 +832,7 @@ test('doctor reports the install per scope, informationally, and flags a hook wh
     command: null,
     missingPaths: [],
     node: null,
+    binary: null,
     version: null,
   });
   assert.equal(before.json.install.user.status, 'missing');

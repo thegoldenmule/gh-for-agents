@@ -7,8 +7,9 @@ import { basename, join, resolve, sep } from 'node:path';
 import type { Context } from '../core/command.ts';
 import { ERROR_CODES, type ErrorCode, GhxError } from '../core/errors.ts';
 import type { ProcResult } from '../proc/runner.ts';
+import { BINARY_INSTALL_COMMAND, RUNTIME, type Runtime } from '../util/runtime.ts';
 import { PACKAGE_NAME, VERSION } from '../version.ts';
-import { hookCommand } from './files.ts';
+import { nodeHookCommand } from './files.ts';
 import type { InstallOutput } from './report.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -18,9 +19,12 @@ export const HANDOFF_ENV = 'GHX_NPX_HANDOFF';
 /** Test seam: the package spec `npm i -g` installs (pnpm pack:test passes the packed tarball). */
 export const SPEC_ENV = 'GHX_TEST_GLOBAL_SPEC';
 
-/** Whether this ghx runs from the npx cache, or under `npx`/`npm exec`, rather than from an install. */
-export function runsFromNpx(root: string, env: Env): boolean {
-  if (env[HANDOFF_ENV]) return false;
+/**
+ * Whether this ghx runs from the npx cache, or under `npx`/`npm exec`, rather than from an install.
+ * Never for the standalone binary, which is its own install wherever it is.
+ */
+export function runsFromNpx(root: string, env: Env, rt: Runtime = RUNTIME): boolean {
+  if (rt.compiled || env[HANDOFF_ENV]) return false;
   return (
     `${root}${sep}`.includes(`${sep}_npx${sep}`) || env.npm_command === 'exec' || env.npm_lifecycle_event === 'npx'
   );
@@ -66,7 +70,7 @@ const same = (a: string, b: string): boolean => {
 
 function npmMissing(): GhxError {
   return new GhxError('ENV_NPM_MISSING', 'npm was not found, and ghx install needs it to install ghx globally.', {
-    hint: `Install Node.js with npm, or install ghx yourself (npm i -g ${PACKAGE_NAME}) and run ghx install.`,
+    hint: `Install Node.js with npm, or install ghx yourself (npm i -g ${PACKAGE_NAME}, or the standalone binary: ${BINARY_INSTALL_COMMAND}) and run ghx install.`,
   });
 }
 
@@ -79,7 +83,7 @@ function npmFailed(argv: string[], r: ProcResult, prefix: string | null): GhxErr
       'INSTALL_NOT_WRITABLE',
       `${command} was refused: npm cannot write to ${prefix ?? 'its global prefix'}.`,
       {
-        hint: `Use a Node.js you own (nvm or fnm), whose global prefix is yours, or run npm i -g ${PACKAGE_NAME} yourself and then ghx install. ghx changed nothing.`,
+        hint: `Use a Node.js you own (nvm or fnm), whose global prefix is yours, or run npm i -g ${PACKAGE_NAME} yourself and then ghx install, or install the standalone binary (${BINARY_INSTALL_COMMAND}), which needs no npm. ghx changed nothing.`,
         details: { command, prefix, code: 'EACCES', stderr },
       },
     );
@@ -128,7 +132,7 @@ export async function handoff(input: HandoffInput, ctx: Context, root: string): 
       dryRun: true,
       changed: [],
       files: [],
-      hookCommand: input.hook ? hookCommand(process.execPath, join(pkgDir, 'bin', 'ghx.js')) : null,
+      hookCommand: input.hook ? nodeHookCommand(process.execPath, join(pkgDir, 'bin', 'ghx.js')) : null,
       denyRules: [],
       binLink: null,
       wouldRun: [],

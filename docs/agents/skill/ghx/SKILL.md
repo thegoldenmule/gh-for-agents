@@ -82,6 +82,6 @@ Spawning a subagent for PR work? Paste the [coordinator PR template](https://git
 - `ghx pr review` (write): Post a review: verdict, inline findings in the diff, hidden blocks, pinned to the head
 - `ghx pr status` (read): One object: description, block, merge readiness, CI for the head, feedback, preconditions, stack
 - `ghx uninstall` (write): Remove what ghx install added to Claude Code settings and CLAUDE.md (try --dry-run).
-- `ghx version` (read): Print the ghx version, Node version and platform (no gh calls).
+- `ghx version` (read): Print the ghx version, runtime and platform (no gh calls).
 
 Full reference: `ghx <cmd> --help`, or docs/agents/commands.md in the ghx repo.

@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BEGIN, END, installBlock, removeBlock } from '../../../src/install/claude-md.ts';
 import { unifiedDiff } from '../../../src/install/diff.ts';
-import { hookCommand, shellQuote } from '../../../src/install/files.ts';
+import {
+  binaryHookCommand,
+  GHX_BIN,
+  hookCommand,
+  nodeHookCommand,
+  selfTarget,
+  shellQuote,
+} from '../../../src/install/files.ts';
 import {
   GHX_DENY_RULES,
   inspectSettings,
@@ -14,6 +21,7 @@ import {
   uninstallSettings,
 } from '../../../src/install/settings.ts';
 import { WRAPPED_WRITES } from '../../../src/passthrough/policy.ts';
+import { detectRuntime, RUNTIME } from '../../../src/util/runtime.ts';
 
 const CMD = "'/n' '/g/bin/ghx.js' hook claude-pretooluse";
 
@@ -161,6 +169,36 @@ test('unifiedDiff: hunks with three lines of context, and /dev/null for a new fi
 
 test('the hook command shell-quotes both absolute paths', () => {
   assert.equal(shellQuote("it's"), `'it'\\''s'`);
-  assert.equal(hookCommand('/a b/node', '/r/bin/ghx.js'), "'/a b/node' '/r/bin/ghx.js' hook claude-pretooluse");
+  assert.equal(nodeHookCommand('/a b/node', '/r/bin/ghx.js'), "'/a b/node' '/r/bin/ghx.js' hook claude-pretooluse");
   assert.match(hookCommand(), /^'\/.+' '\/.+\/bin\/ghx\.js' hook claude-pretooluse$/);
+});
+
+test('compiled: the hook command and --bin-dir target are the executable itself', () => {
+  const rt = { compiled: true, name: 'bun' as const, version: '1.3.8', execPath: "/opt/it's/ghx" };
+  assert.equal(binaryHookCommand('/a b/ghx'), "'/a b/ghx' hook claude-pretooluse");
+  assert.equal(hookCommand(rt), "'/opt/it'\\''s/ghx' hook claude-pretooluse");
+  assert.equal(selfTarget(rt), "/opt/it's/ghx");
+  const node = { compiled: false, name: 'node' as const, version: '24.0.0', execPath: '/n/node' };
+  assert.equal(hookCommand(node), `'/n/node' '${GHX_BIN}' hook claude-pretooluse`);
+  assert.equal(selfTarget(node), GHX_BIN);
+});
+
+test('detectRuntime: compiled only under Bun with a /$bunfs/ module url', () => {
+  assert.deepEqual(detectRuntime({ node: '24.1.0' }, 'file:///x/src/util/runtime.ts', '/n/node'), {
+    compiled: false,
+    name: 'node',
+    version: '24.1.0',
+    execPath: '/n/node',
+  });
+  assert.deepEqual(detectRuntime({ node: '24.3.0', bun: '1.3.8' }, 'file:///$bunfs/root/ghx', '/b/ghx'), {
+    compiled: true,
+    name: 'bun',
+    version: '1.3.8',
+    execPath: '/b/ghx',
+  });
+  assert.equal(
+    detectRuntime({ node: '24.3.0', bun: '1.3.8' }, 'file:///x/src/util/runtime.ts', '/b/bun').compiled,
+    false,
+  );
+  assert.equal(RUNTIME.compiled, false);
 });

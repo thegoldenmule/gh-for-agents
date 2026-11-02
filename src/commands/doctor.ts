@@ -1,6 +1,6 @@
 // ghx doctor (01 §8): gh on PATH and its version, feature probes, auth on the target host, git and
 // the cwd repo, and the config. Every probe is caught: doctor reports, it does not crash.
-import { accessSync, constants, realpathSync } from 'node:fs';
+import { accessSync, constants } from 'node:fs';
 import { delimiter, isAbsolute, join } from 'node:path';
 import { z } from 'zod';
 import type { ConfigSource } from '../config/load.ts';
@@ -11,8 +11,7 @@ import { GhFailure } from '../gh/index.ts';
 import { type ResolvedRepo, resolveCwdRepo } from '../gh/repo.ts';
 import { DEFAULT_HOST, repoSlug } from '../gh/types.ts';
 import { MIN_GH_VERSION, versionAtLeast } from '../gh/version.ts';
-import { InstallReport, inspectInstall } from '../install/inspect.ts';
-import { VERSION } from '../version.ts';
+import { hookWarnings, InstallReport, inspectInstall } from '../install/inspect.ts';
 
 const Check = z.object({ name: z.string(), ok: z.boolean(), message: z.string(), hint: z.string().nullable() });
 
@@ -72,14 +71,6 @@ function findOnPath(cmd: string, path: string | undefined): string | null {
     }
   }
   return null;
-}
-
-function samePath(a: string, b: string): boolean {
-  try {
-    return realpathSync(a) === realpathSync(b);
-  } catch {
-    return a === b;
-  }
 }
 
 function sourceJson(s: ConfigSource): Record<string, unknown> {
@@ -284,7 +275,25 @@ export default defineCommand({
     }
 
     // ghx install state (informational: never part of ok or the exit code).
-    const install = await inspectInstall(ctx.env, ctx.git);
+    // A standalone-binary hook names another ghx executable: ask it its version (bounded, never fatal).
+    const versionOf = async (exe: string): Promise<string | null> => {
+      try {
+        const r = await ctx.proc({
+          cmd: exe,
+          args: ['version'],
+          env: ctx.env,
+          cwd: ctx.cwd,
+          signal: ctx.signal,
+          timeoutMs: 5_000,
+        });
+        const v = r.exitCode === 0 ? (JSON.parse(r.stdout) as { version?: unknown }).version : undefined;
+        return typeof v === 'string' ? v : null;
+      } catch (e) {
+        if (ctx.signal.aborted) throw e;
+        return null;
+      }
+    };
+    const install = await inspectInstall(ctx.env, ctx.git, { versionOf });
     for (const [scope, s] of Object.entries(install)) {
       const flag = scope === 'project' ? ' --scope project' : '';
       if (s?.hook.installed && s.hook.missingPaths.length > 0) {
@@ -293,21 +302,8 @@ export default defineCommand({
           message: `The ${scope} ghx hook runs ${s.hook.missingPaths.join(', ')}, which no longer exists; it fails open. Re-run ghx install${scope === 'project' ? ' --scope project' : ''}.`,
         });
       }
-      // A hook that still runs, but runs another ghx or another node than this one: an older install.
-      if (s?.hook.installed && s.hook.missingPaths.length === 0) {
-        if (s.hook.version !== null && s.hook.version !== VERSION) {
-          ctx.warn({
-            code: 'INSTALL_HOOK_VERSION_MISMATCH',
-            message: `The ${scope} ghx hook runs ghx ${s.hook.version}, but this is ghx ${VERSION}. Re-run ghx install${flag} with this ghx so the hook runs it.`,
-          });
-        }
-        if (s.hook.node !== null && !samePath(s.hook.node, process.execPath)) {
-          ctx.warn({
-            code: 'INSTALL_HOOK_NODE_MISMATCH',
-            message: `The ${scope} ghx hook runs ${s.hook.node}, but this ghx runs on ${process.execPath}. Re-run ghx install${flag} so the hook uses this node.`,
-          });
-        }
-      }
+      // A hook that still runs, but runs another ghx, node or kind of install than this one.
+      if (s) for (const w of hookWarnings(scope as 'user' | 'project', s.hook)) ctx.warn(w);
       // User scope expects no deny rules; only ones an earlier ghx install left behind are worth a warning.
       if (s?.deny.expected === false && s.deny.ghxAdded.length > 0) {
         ctx.warn({

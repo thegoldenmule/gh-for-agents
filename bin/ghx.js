@@ -7,7 +7,7 @@ if (major < 24) {
   const error = {
     code: 'ENV_NODE_UNSUPPORTED',
     message: `ghx needs Node.js 24 or newer; this is Node.js ${process.versions.node} (${process.execPath}).`,
-    hint: 'Install Node.js 24+ (for example with nvm or fnm) and run ghx with it.',
+    hint: 'Install Node.js 24+ (for example with nvm or fnm) and run ghx with it, or install the standalone binary (no Node.js): curl -fsSL https://github.com/thegoldenmule/gh-for-agents/releases/latest/download/install.sh | sh',
     details: { node: process.versions.node, required: '>=24' },
   };
   process.stdout.write(`${JSON.stringify({ error })}\n`);

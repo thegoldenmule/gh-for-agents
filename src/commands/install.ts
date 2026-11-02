@@ -53,8 +53,10 @@ export default defineCommand({
     '(--no-deny skips them). Warns ' +
     'SETTINGS_LOCAL_NOT_IGNORED when git would not ignore that file. Keeps every other setting, backs up each changed ' +
     'file to <config dir>/ghx-install/<scope>-<hash>/backups/<name>.bak-ghx-<time> (never into the repo; ' +
-    'files[].backup gives each path) beside the record of what it added, and writes atomically. The hook runs this ghx by absolute path. ' +
+    'files[].backup gives each path) beside the record of what it added, and writes atomically. The hook runs this ghx by absolute path ' +
+    '(node and bin/ghx.js for an npm install or checkout; the executable itself for the standalone binary). ' +
     'Run from npx, it first runs npm i -g @thegoldenmule/ghx@<this version> and hands the install to that global copy (handoff); --no-global refuses instead. ' +
+    'To upgrade, upgrade ghx the way you installed it (npm i -g @thegoldenmule/ghx, or re-run the standalone install.sh), then run ghx install again. ' +
     'Re-running updates in place; --dry-run returns unified diffs and writes nothing. Undo: ghx uninstall.',
   kind: 'write',
   needs: { repo: 'none', config: 'none' },
@@ -75,7 +77,9 @@ export default defineCommand({
       .string()
       .min(1)
       .optional()
-      .describe('Also symlink <dir>/ghx to bin/ghx.js (recorded, so uninstall removes it without the flag)'),
+      .describe(
+        'Also symlink <dir>/ghx to this ghx (bin/ghx.js, or the standalone executable), recorded so uninstall removes it',
+      ),
     hookMode: z
       .enum(['ask', 'deny'])
       .optional()
@@ -83,7 +87,7 @@ export default defineCommand({
     global: z
       .boolean()
       .default(true)
-      .describe('From npx: install ghx globally first (default); --no-global refuses instead'),
+      .describe('From npx only: install ghx globally first (default); --no-global refuses instead'),
   }),
   output: InstallOutput,
   brief: ['scope', 'dryRun', 'changed', 'files.path', 'files.action', 'binLink.action', 'binLink.onPath', 'next'],

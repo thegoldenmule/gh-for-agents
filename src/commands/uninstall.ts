@@ -102,7 +102,7 @@ export default defineCommand({
     if (binLink?.action === 'unchanged') {
       ctx.warn({
         code: 'INSTALL_BIN_FOREIGN',
-        message: `${binLink.path} is not a link to this checkout's bin/ghx.js; left it alone.`,
+        message: `${binLink.path} is not a link to this ghx (${binLink.target}); left it alone.`,
       });
     }
     return finish(

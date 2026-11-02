@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import type { Clock } from '../core/clock.ts';
 import { GhxError } from '../core/errors.ts';
 import type { Git } from '../git/index.ts';
+import { RUNTIME, type Runtime } from '../util/runtime.ts';
 import { unifiedDiff } from './diff.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -58,8 +59,23 @@ export function shellQuote(s: string): string {
 }
 
 /** Absolute node and bin/ghx.js, so the hook runs whatever PATH Claude Code gives hooks. */
-export function hookCommand(node: string = process.execPath, bin: string = GHX_BIN): string {
+export function nodeHookCommand(node: string, bin: string): string {
   return `${shellQuote(node)} ${shellQuote(bin)} hook claude-pretooluse`;
+}
+
+/** The absolute standalone ghx executable. */
+export function binaryHookCommand(exe: string): string {
+  return `${shellQuote(exe)} hook claude-pretooluse`;
+}
+
+/** The hook command that runs this ghx: the executable itself when compiled, else node and bin/ghx.js. */
+export function hookCommand(rt: Runtime = RUNTIME): string {
+  return rt.compiled ? binaryHookCommand(rt.execPath) : nodeHookCommand(rt.execPath, GHX_BIN);
+}
+
+/** What runs this ghx by path, which --bin-dir links to: the executable when compiled, else bin/ghx.js. */
+export function selfTarget(rt: Runtime = RUNTIME): string {
+  return rt.compiled ? rt.execPath : GHX_BIN;
 }
 
 /** The user-scope Claude config dir: $CLAUDE_CONFIG_DIR, else $HOME/.claude. Null when neither is set. */
@@ -307,10 +323,17 @@ function pointsAt(link: string, target: string): boolean {
   }
 }
 
-/** Whether `link` is a symlink that resolves to bin/ghx.js. */
-const pointsAtGhx = (link: string): boolean => pointsAt(link, GHX_BIN);
+/** Whether `path` is `target` itself (not a link): the binary installed straight into the --bin-dir. */
+function isTarget(path: string, target: string): boolean {
+  try {
+    return !lstatSync(path).isSymbolicLink() && realpathSync(path) === realpathSync(target);
+  } catch {
+    return false;
+  }
+}
 
-export function planBinLink(dir: string, env: Env): BinLink {
+/** `target`: what the link points at, this ghx (selfTarget()) unless a test passes another. */
+export function planBinLink(dir: string, env: Env, target: string = selfTarget()): BinLink {
   const abs = resolve(dir);
   const path = join(abs, 'ghx');
   if (!existsSync(abs) || !statSync(abs).isDirectory()) {
@@ -319,8 +342,8 @@ export function planBinLink(dir: string, env: Env): BinLink {
       details: { issues: [{ path: 'binDir', code: 'not_a_directory', message: `${abs} is not a directory` }] },
     });
   }
-  const base = { path, target: GHX_BIN, onPath: onPath(abs, env) };
-  if (pointsAtGhx(path)) return { ...base, action: 'unchanged' };
+  const base = { path, target, onPath: onPath(abs, env) };
+  if (pointsAt(path, target) || isTarget(path, target)) return { ...base, action: 'unchanged' };
   let exists = false;
   try {
     lstatSync(path);
@@ -329,7 +352,7 @@ export function planBinLink(dir: string, env: Env): BinLink {
     // absent: ghx creates it
   }
   if (exists) {
-    throw new GhxError('INSTALL_BIN_CONFLICT', `${path} already exists and is not a link to ${GHX_BIN}.`, {
+    throw new GhxError('INSTALL_BIN_CONFLICT', `${path} already exists and is not a link to ${target}.`, {
       hint: 'Remove or rename it yourself, or pass a different --bin-dir. ghx changed nothing.',
       details: { path },
     });
@@ -338,14 +361,15 @@ export function planBinLink(dir: string, env: Env): BinLink {
 }
 
 /**
- * 'removed' only for a link to this ghx's bin/ghx.js, or to `recorded` (the target the install record
- * names, which may be another copy of ghx); anything else at the path is left alone ('unchanged').
+ * 'removed' only for a link to this ghx (selfTarget()), or to `recorded` (the target the install record
+ * names, which may be another copy of ghx); anything else at the path, the binary itself included, is
+ * left alone ('unchanged').
  */
-export function planBinUnlink(dir: string, env: Env, recorded?: string): BinLink {
+export function planBinUnlink(dir: string, env: Env, recorded?: string, target: string = selfTarget()): BinLink {
   const abs = resolve(dir);
   const path = join(abs, 'ghx');
-  const base = { path, target: GHX_BIN, onPath: onPath(abs, env) };
-  if (pointsAtGhx(path)) return { ...base, action: 'removed' };
+  const base = { path, target, onPath: onPath(abs, env) };
+  if (pointsAt(path, target)) return { ...base, action: 'removed' };
   if (recorded && pointsAt(path, recorded)) return { ...base, target: recorded, action: 'removed' };
   try {
     lstatSync(path);
