@@ -3,7 +3,7 @@
 // 11–14) are in exit-rows.contract.test.ts, and 3, 6, 7, 10 and 15 in their commands' contract files.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readyPath, spawnGhx, waitForFile } from '../helpers/spawn.ts';
+import { needsTestHooks, readyPath, spawnGhx, waitForFile } from '../helpers/spawn.ts';
 import { EXIT } from './exit-table.ts';
 
 const HOOKS = { GHX_TEST_HOOKS: '1' };
@@ -23,7 +23,8 @@ const ROWS: { exit: number; code: string | null; argv: string[]; env?: Record<st
 ];
 
 for (const row of ROWS) {
-  test(`exit ${row.exit}${row.code ? ` (${row.code})` : ''}: ghx ${row.argv.join(' ')}`, async () => {
+  const opts = row.env?.GHX_TEST_HOOKS ? needsTestHooks : {};
+  test(`exit ${row.exit}${row.code ? ` (${row.code})` : ''}: ghx ${row.argv.join(' ')}`, opts, async () => {
     const r = await spawnGhx(row.argv, { ...(row.env ? { env: row.env } : {}), stdin: '{"title":"t"}' });
     assert.equal(r.exitCode, row.exit, r.stdout);
     const doc = JSON.parse(r.stdout);
@@ -34,7 +35,7 @@ for (const row of ROWS) {
   });
 }
 
-test('exit 3 (CONFIG): see doctor.contract.test.ts; exit 130 and 143 (signals)', async () => {
+test('exit 3 (CONFIG): see doctor.contract.test.ts; exit 130 and 143 (signals)', needsTestHooks, async () => {
   for (const [signal, exit] of [
     ['SIGINT', EXIT.SIGINT],
     ['SIGTERM', EXIT.SIGTERM],

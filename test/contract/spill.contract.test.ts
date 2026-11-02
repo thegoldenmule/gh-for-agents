@@ -3,12 +3,12 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { spawnGhx } from '../helpers/spawn.ts';
+import { needsTestHooks, spawnGhx } from '../helpers/spawn.ts';
 import { EXIT } from './exit-table.ts';
 
 const HOOKS = { GHX_TEST_HOOKS: '1' };
 
-test('--max-bytes 2000 spills; the file parses and is `bytes` long; exit 0', async () => {
+test('--max-bytes 2000 spills; the file parses and is `bytes` long; exit 0', needsTestHooks, async () => {
   const r = await spawnGhx(['test', 'big', '--bytes', '50000', '--max-bytes', '2000'], { env: HOOKS });
   assert.equal(r.exitCode, EXIT.OK);
   const out = JSON.parse(r.stdout);
@@ -18,7 +18,7 @@ test('--max-bytes 2000 spills; the file parses and is `bytes` long; exit 0', asy
   assert.equal(JSON.parse(file.toString('utf8')).last, 'END');
 });
 
-test('GHX_MAX_BYTES is honoured; the default 16 KB bound applies without it', async () => {
+test('GHX_MAX_BYTES is honoured; the default 16 KB bound applies without it', needsTestHooks, async () => {
   const env = await spawnGhx(['test', 'big', '--bytes', '5000'], { env: { ...HOOKS, GHX_MAX_BYTES: '1000' } });
   assert.equal(JSON.parse(env.stdout).spilled, true);
   const small = await spawnGhx(['test', 'big', '--bytes', '5000'], { env: HOOKS });
