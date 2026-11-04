@@ -14,7 +14,7 @@ import { repoSlug } from '../../gh/types.ts';
 import { loadPrStatus, type PrStatusState } from '../../pr/status/compose.ts';
 import type { Outcome, StalledCheck, TargetSummary } from '../../schemas/ci.ts';
 import type { SettleHook } from './driver.ts';
-import { STALL_BASIS, settledAt, stallConfig } from './stall.ts';
+import { detectStalls, STALL_BASIS, settledAt, stallConfig } from './stall.ts';
 
 /** Consecutive failed gate reads (gh failures) before the wait gives up (error document, exit 7). */
 export const MAX_GATE_FAILURES = 5;
@@ -46,6 +46,11 @@ export interface GateClock {
   missingMs: number;
   /** How long this gate has been answering null in this process. */
   heldMs: number;
+  /**
+   * Checks still pending in the gate's own view that the wait's queued/running stall rules (stall.ts)
+   * already call stalled: an unselected job queued with no runner, a commit status that never resolves.
+   */
+  stalledPending?: readonly StalledCheck[];
 }
 
 /**
@@ -54,7 +59,8 @@ export interface GateClock {
  * has had nothing pending for more than `missingMs` and the gate has held for GATE_MIN_HOLD_MS, a gate
  * still at CI_PENDING for a missing expected check (`expected-missing`) or at MERGEABLE_UNKNOWN
  * (`mergeable-unknown`) ends `stalled` (exit 14) instead of polling forever. A check still pending in that
- * view keeps it polling: running checks end on their own (GitHub's job timeouts, the wait's stall rules).
+ * view keeps it polling until the wait's own queued/running stall rules call it stalled (`stalledPending`,
+ * held GATE_MIN_HOLD_MS): then it ends `stalled` with `reason: "gate-stalled"`.
  */
 export function gateVerdict(
   s: Pick<PrStatusState, 'snapshot' | 'ci' | 'evaluation'>,
@@ -87,6 +93,10 @@ export function gateVerdict(
   });
   if (status('MERGEABLE_UNKNOWN') === 'fail') return overdue ? stuck('mergeable-unknown') : null;
   if (status('CI_PENDING') === 'fail' && !s.ci.truncated) {
+    const stalledPending = clock?.stalledPending ?? [];
+    if (stalledPending.length > 0 && (clock?.heldMs ?? 0) >= GATE_MIN_HOLD_MS && s.ci.pending.length > 0) {
+      return stuck('gate-stalled', [...stalledPending]);
+    }
     if (!overdue || !clock || settledFor === null) return null;
     const missing = s.ci.expectedMissing.filter((e) => e.state === 'missing');
     if (missing.length === 0) return null;
@@ -137,10 +147,14 @@ export function createGateClocks() {
   };
   return {
     get,
-    /** The GateClock for this read: `settled` is the gate's own view with nothing pending. */
-    clock(key: string, now: number, settled: boolean, missingMs: number): GateClock {
+    /**
+     * The GateClock for this read: `settled` is the gate's own view with nothing pending; `saved` is the
+     * first-settled time an earlier process recorded in the wait state (a --foreground re-run). The earlier
+     * of the two wins, so the bound survives re-runs; an unsettled view clears both.
+     */
+    clock(key: string, now: number, settled: boolean, missingMs: number, saved: number | null = null): GateClock {
       const g = get(key);
-      g.settledSince = settled ? (g.settledSince ?? now) : null;
+      g.settledSince = settled ? Math.min(g.settledSince ?? now, saved ?? now) : null;
       return { now, settledSince: g.settledSince, missingMs, heldMs: g.heldSince === null ? 0 : now - g.heldSince };
     },
     /** After a verdict: null keeps the hold running, an answer resets it. */
@@ -157,15 +171,15 @@ export function createGateClocks() {
  */
 export function createMergeGate(ctx: StreamContext, o: { compareMain: boolean; useAgedOut: boolean }): SettleHook {
   const clocks = createGateClocks();
-  return async ({ target, repo, headSha, agedOut, expected, warn }) => {
+  return async ({ target, repo, headSha, agedOut, expected, gateSettledSince, setGateSettledSince, warn }) => {
     if (target.kind !== 'pr') throw new Error('unreachable: --until mergeable takes PR targets only');
     const key = `${repoSlug(repo)}#${target.number}@${headSha}`;
     const g = clocks.get(key);
     let state: PrStatusState;
-    let missingMs = stallConfig().missingMinutes * 60_000;
+    let stallCfg = stallConfig();
     try {
       const { config, source } = await ctx.config({ ref: repo });
-      missingMs = stallConfig(config.ci.stall).missingMinutes * 60_000;
+      stallCfg = stallConfig(config.ci.stall);
       state = await loadPrStatus({
         gh: ctx.gh,
         clock: ctx.clock,
@@ -193,9 +207,27 @@ export function createMergeGate(ctx: StreamContext, o: { compareMain: boolean; u
     }
     for (const w of state.warnings) warn(w);
     const now = ctx.clock.now();
+    const missingMs = stallCfg.missingMinutes * 60_000;
     // Settled as the gate sees it: its own unfiltered view (the wait's checks may be --check-filtered).
-    const settled = settledAt(state.snapshot.ci.checks) !== null;
-    const verdict = gateVerdict(state, headSha, clocks.clock(key, now, settled, missingMs));
+    const gateChecks = state.snapshot.ci.checks;
+    const settled = settledAt(gateChecks) !== null;
+    const c = clocks.clock(key, now, settled, missingMs, gateSettledSince ?? null);
+    // Saved with the wait state, so a --foreground re-run (a new process every 9 min) keeps the bound.
+    setGateSettledSince?.(c.settledSince);
+    // The wait's queued/running stall rules on the gate's own pending checks (no baselines: the job's
+    // limit, else 360 min; queued with nothing in its run started: ci.stall.queuedMinutes).
+    const stalledPending = settled
+      ? []
+      : detectStalls({
+          checks: gateChecks,
+          jobs: [],
+          baselines: {},
+          timeouts: {},
+          expected: [],
+          now,
+          config: stallCfg,
+        });
+    const verdict = gateVerdict(state, headSha, { ...c, stalledPending });
     clocks.answered(key, now, verdict);
     return verdict;
   };

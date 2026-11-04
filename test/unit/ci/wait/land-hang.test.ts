@@ -10,6 +10,7 @@ import { test } from 'node:test';
 import { ignoreRuleFor } from '../../../../src/ci/checks.ts';
 import { ciState } from '../../../../src/ci/summary.ts';
 import {
+  addRequired,
   buildExpectedSet,
   type ConfigExpectedEntry,
   configExpected,
@@ -245,4 +246,31 @@ test('the gate bound runs on the local clock: a GitHub completedAt from a skewed
   assert.equal(gateVerdict(r, H, first), null);
   assert.equal(gateVerdict(r, H, c.clock(k, T0 + 9 * MIN, true, 10 * MIN)), null);
   assert.equal(gateVerdict(r, H, c.clock(k, T0 + 11 * MIN, true, 10 * MIN))?.reason, 'expected-missing');
+});
+
+test('gate clocks take the earlier of their own and a saved first-settled time; an unsettled view clears it', () => {
+  const c = createGateClocks();
+  const k = 'o/r#7@h';
+  assert.equal(c.clock(k, T0 + 9 * MIN, true, 10 * MIN, T0 + 3 * MIN).settledSince, T0 + 3 * MIN, 'a re-run keeps it');
+  assert.equal(c.clock(k, T0 + 10 * MIN, true, 10 * MIN, null).settledSince, T0 + 3 * MIN);
+  assert.equal(c.clock(k, T0 + 11 * MIN, false, 10 * MIN, T0 + 3 * MIN).settledSince, null, 'pending again');
+  assert.equal(c.clock(k, T0 + 12 * MIN, true, 10 * MIN, null).settledSince, T0 + 12 * MIN, 'starts over');
+});
+
+test('gate: a pending check the stall rules call stalled ends it (gate-stalled) once held', () => {
+  const stalledPending = [
+    { name: 'deploy', state: 'queued' as const, forSec: 1900, thresholdSec: 1800, basis: 'ci.stall.queuedMinutes' },
+  ];
+  const r = gateRead({ ciPending: ['deploy'] });
+  assert.equal(gateVerdict(r, H, clock({ settledSince: null, stalledPending, heldMs: 0 })), null);
+  const v = gateVerdict(r, H, clock({ settledSince: null, stalledPending }));
+  assert.equal(v?.reason, 'gate-stalled');
+  assert.deepEqual(v?.stalled, stalledPending);
+});
+
+test('addRequired only adds required names, never removes or duplicates, and honours ci.ignore', () => {
+  const defs = defsFrom(headConfig);
+  const out = addRequired(defs, ['lint', 'build', 'notify'], ['notify']);
+  assert.deepEqual(out.slice(0, defs.length), defs);
+  assert.deepEqual(out.slice(defs.length), [{ name: 'build', workflow: null, source: 'required' }]);
 });

@@ -87,6 +87,11 @@ export const WaitStateSchema = z.object({
    * recorded). A resume under another fingerprint re-derives the set (WAIT_CONFIG_CHANGED).
    */
   configFingerprint: z.string().optional(),
+  /**
+   * --until mergeable: when the merge gate first saw its own CI view settled (local epoch ms), by
+   * whichever process saw it; null or absent while it has not. Its bound counts from here across re-runs.
+   */
+  gateSettledSince: z.number().nullable().optional(),
   machine: MachineStateSchema,
   poller: z.object({
     etags: z.record(z.string(), z.object({ etag: z.string(), body: z.unknown() })),

@@ -157,6 +157,10 @@ export type SettleHook = (o: {
   agedOut: readonly string[];
   /** The expected definitions this wait bound: the gate judges the same set (04, one check set). */
   expected: readonly ExpectedDef[];
+  /** The gate's first-settled time an earlier process saved for this binding (survives re-runs). */
+  gateSettledSince?: number | null;
+  /** Save the gate's first-settled time (or null) with the wait state. */
+  setGateSettledSince?: (at: number | null) => void;
   /** The wait's warning sink (deduplicated and capped in the summary). */
   warn: (w: { code: string; message: string }) => void;
 }) => Promise<{
@@ -1022,6 +1026,10 @@ export async function* runWait(
               checks,
               agedOut: st.machine.agedOut,
               expected: st.machine.expected,
+              gateSettledSince: st.gateSettledSince ?? null,
+              setGateSettledSince: (at) => {
+                st.gateSettledSince = at;
+              },
               warn,
             })
           : { outcome: d.outcome, reason: d.reason, merge: null };

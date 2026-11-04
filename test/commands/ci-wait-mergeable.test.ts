@@ -2,12 +2,13 @@
 // gate (02 §8.2 rows 6–12, through loadPrStatus with scope ci-gate) decides green, red-shared or red.
 // The sim answers REST; the PR snapshot's GraphQL (Q1, mergeable, Q2, commits) is mirrored from it here.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { WaitSummary } from '../../src/schemas/ci.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeClock } from '../helpers/fake-clock.ts';
+import { scratchDir } from '../helpers/harness.ts';
 import {
   isMergeable,
   isPrCommits,
@@ -166,6 +167,49 @@ test('the same UNKNOWN past a shorter ci.stall.missingMinutes ends stalled (merg
   assert.deepEqual(t0?.next, ['ghx pr status o/r#7']);
   const sec = t0?.elapsedSec ?? 0;
   assert.ok(sec > 8 * 60 && sec < 12 * 60, `${sec} s: 5 min after the gate saw CI settled at ~3 min`);
+});
+
+test('--foreground re-runs keep the gate bound: a stuck UNKNOWN reaches exit 14 across processes', async () => {
+  // Each --foreground run returns at 9 min (exit 15), under the default 10 min missingMinutes; the bound
+  // must count from the first-settled time an earlier run saved, not restart in every process.
+  const t = running(35, 'test');
+  const sim = world([t]);
+  change(sim, 3 * MIN, done(t, 3 * MIN));
+  mirrorPr(sim, () => ['UNKNOWN', 'UNKNOWN']);
+  const artifacts = mkdtempSync(join(scratchDir(), 'fg-'));
+  const exits: number[] = [];
+  for (let i = 0; i < 6 && exits.at(-1) !== EXIT.CI_STALLED; i++) {
+    const r = await wait(sim, ['o/r#7', '--until', 'mergeable', '--foreground'], { artifacts });
+    exits.push(r.exitCode);
+    if (r.exitCode === EXIT.CI_STALLED) {
+      assert.equal(r.json.results[0].reason, 'mergeable-unknown');
+      assert.deepEqual(r.json.results[0].stalled, []);
+    } else {
+      assert.equal(r.exitCode, EXIT.CI_PENDING_RESUME, r.stdout);
+    }
+  }
+  assert.deepEqual(exits, [EXIT.CI_PENDING_RESUME, EXIT.CI_STALLED], 'the second run ends it');
+  assert.ok(sim.clock.monotonic() < 20 * MIN, `${sim.clock.monotonic() / MIN} min`);
+});
+
+test('a check stuck in its own view (queued, no runner) ends the gate stalled: gate-stalled, exit 14', async () => {
+  // `deploy` is outside --check and never gets a runner; the wait settles on `lint`, the gate sees `deploy`
+  // queued and applies the wait's queued rule (ci.stall.queuedMinutes, 30).
+  const lint = running(71, 'lint');
+  const deploy: SimJob = { id: 72, runId: 601, name: 'deploy', status: 'queued' };
+  const sim = world([lint, deploy]);
+  change(sim, 3 * MIN, done(lint, 3 * MIN));
+  mirrorPr(sim, () => ['MERGEABLE', 'CLEAN']);
+  const r = await wait(sim, ['o/r#7', '--until', 'mergeable', '--check', 'lint']);
+  assert.equal(r.exitCode, EXIT.CI_STALLED, r.stdout);
+  const t0 = WaitSummary.parse(r.json).results[0];
+  assert.equal(t0?.reason, 'gate-stalled');
+  assert.deepEqual(
+    t0?.stalled.map((x) => [x.name, x.state, x.basis]),
+    [['deploy', 'queued', 'ci.stall.queuedMinutes']],
+  );
+  const sec = t0?.elapsedSec ?? 0;
+  assert.ok(sec >= 30 * 60 && sec < 40 * 60, `${sec} s: the queued rule, not open-ended`);
 });
 
 test('an expected check the gate never sees ends stalled (expected-missing, exit 14) past missingMinutes', async () => {
