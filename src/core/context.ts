@@ -100,7 +100,10 @@ export function createContext(d: ContextDeps): BuiltContext {
               throw e;
           }
         }
-        return loadConfig({ target, git, gh, need: configNeed });
+        const loaded = await loadConfig({ target, git, gh, need: configNeed });
+        // Once per repo (memoized): CONFIG_DRIFT and the like join the command's warnings.
+        warnings.push(...loaded.warnings);
+        return loaded;
       })();
       configs.set(key, p);
     }

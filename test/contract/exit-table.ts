@@ -29,7 +29,12 @@ export const EXIT_TABLE = [
   { exit: 11, class: 'CI_RED_SHARED', meaning: 'ci wait: red, but every failure is shared with main' },
   { exit: 12, class: 'SUPERSEDED', meaning: 'ci wait: head moved, or the PR closed or merged' },
   { exit: 13, class: 'NO_CHECKS', meaning: 'ci wait: nothing registered within the grace period' },
-  { exit: 14, class: 'CI_STALLED', meaning: 'ci wait: a check is running far past its baseline or stuck in the queue' },
+  {
+    exit: 14,
+    class: 'CI_STALLED',
+    meaning:
+      'ci wait: a check is running far past its baseline or stuck in the queue, an expected check never came, or the merge gate stayed stuck (expected-missing, mergeable-unknown, gate-stalled)',
+  },
   { exit: 15, class: 'CI_PENDING_RESUME', meaning: 'ci wait: self-returned in an unattended session' },
   { exit: 130, class: 'INTERRUPTED', meaning: 'SIGINT' },
   { exit: 143, class: 'INTERRUPTED', meaning: 'SIGTERM' },

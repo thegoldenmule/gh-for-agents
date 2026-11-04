@@ -18,7 +18,7 @@ Status: draft. It follows `00-brief.md` (including the user's confirmed decision
 | Hidden block | `<!-- ghx:v1 {json} -->` with 4 types: `pr`, `review`, `finding`, `comment`. Strict on write, lenient on read. Status changes are append-only events | §8c |
 | Trust | A block counts only if its author is `OWNER`, `MEMBER` or `COLLABORATOR` (configurable) | prompt-injection defence |
 | Merge | REST `PUT /pulls/N/merge` with `sha` pinned. The policy engine is shared with `pr status` `merge.blockers`. Overrides take a code plus `--reason` | §4.3, §7 |
-| `ci wait` | Run in the background; one JSON summary at exit; no caller durations. It terminates only on CI-derived states (including `stalled`), and is resumable. It has an expected-check model, the diagnosis folded in, ETA, multiple targets and flake signals | §5.2, §9.2; §11.0 |
+| `ci wait` | Run in the background; one JSON summary at exit; no caller durations. It terminates only on states it observes on GitHub (CI states including `stalled`, and with `--until mergeable` a merge gate stuck at `MERGEABLE_UNKNOWN`, which ends `stalled` too), and is resumable. It has an expected-check model, the diagnosis folded in, ETA, multiple targets and flake signals | §5.2, §9.2; §11.0 |
 
 Gotcha tags used in the gh-call lists:
 
@@ -521,7 +521,7 @@ This table starts from 01's provisional table and adds 9 STATE plus `ci wait` ou
 | 11 | CI_RED_SHARED | `ci wait`, any mode: red, but every failure is shared with main (§1.5). Distinct because the user's rule makes it mergeable (§4.3) | Go to `pr merge` (waived) |
 | 12 | SUPERSEDED | `ci wait`: head moved (with `--on-head-change stop`), or the PR closed or merged | Re-read the state |
 | 13 | NO_CHECKS | `ci wait`: nothing registered within the grace period. This is not green (§3.1, 11 cases) | Check triggers, or `ci retrigger` |
-| 14 | CI_STALLED | `ci wait`: a check is running far past its baseline or stuck in the queue (§11.1) | Read `stalled[]`; `ci rerun`, or re-wait |
+| 14 | CI_STALLED | `ci wait`: a check is running far past its baseline or stuck in the queue, an expected check never registered, or (`--until mergeable`) the merge gate stayed stuck past `ci.stall.missingMinutes`: `reason` `expected-missing`, `mergeable-unknown` or `gate-stalled` (§11.1) | Read `reason` and `stalled[]`: `ci rerun` or re-wait for a running or queued check (including `gate-stalled`); for `missing` / `expected-missing`, check `ci.expected` (pull on `CONFIG_DRIFT`); for `mergeable-unknown` (`stalled: []`), re-read `pr status` and re-wait, since a rerun does not help |
 | 15 | CI_PENDING_RESUME | `ci wait`: self-returned in an unattended session. State is cached | Re-run the identical command |
 | 130/143 | INTERRUPTED | SIGINT or SIGTERM. `ci wait` returns `outcome:"interrupted"` when it can | — |
 
@@ -763,7 +763,7 @@ All checks run, and all violations are reported together.
 | 7 | `MERGE_CONFLICT` | state | no | PR is CONFLICTING. The hint gives the exact fetch, merge and push commands | §3.3 |
 | 8 | `BEHIND_BASE` | state | no | `mergeStateStatus` is BEHIND | |
 | 9 | `BLOCKED_BY_PROTECTION` | state | no | BLOCKED for any other reason | |
-| 10a | `CI_PENDING` | state | no | Checks pending, or a required or config check missing (§11.3). Hint: `ci wait --until mergeable` | §5.2 |
+| 10a | `CI_PENDING` | state | no | Checks pending, or a required or config check missing (§11.3). Hint: `ci wait --until mergeable`. `details.config` names where `ci.expected` was read (working tree and commit, or the default branch), and the message says so when a missing check is config-sourced, since a stale checkout's `ci.expected` can name a check that no longer exists (`CONFIG_DRIFT`) | §5.2 |
 | 10b | `CI_NO_CHECKS` | state | yes | Nothing reported. Passes automatically if the expected set is empty and either the repo has no workflows (`GET actions/workflows` total 0) or `ci.none` is true | |
 | 11 | `CI_RED` | policy | yes | Waived automatically when every failure is shared with main and `merge.sharedRed` is `tests` (default) or `step` | §4.3, §7 #3246 |
 | 12 | `KEY_STEP_SKIPPED` | policy | yes | A `ci.keySteps` step was skipped in a green job | §6 |
@@ -971,9 +971,12 @@ Why not Monitor:
 
 A stall ends the wait with the diagnosis so far, the stalled checks, and `next` suggestions (`ci rerun`, or re-wait).
 
+**The merge gate is bounded too** (`--until mergeable`, `pr land`; 2026-11-04, after a `pr land` polled for 12 h on green CI). An attended background wait has no time cap, so every keep-polling answer must end on its own. Once CI has settled, the gate keeps polling only while its read lags the wait's: `MERGEABLE_UNKNOWN`, or `CI_PENDING`. Its bound runs on the local clock from the moment the gate first saw its own, unfiltered CI view (the GraphQL rollup, not the wait's `--check`-filtered checks) with nothing pending, so clock skew against GitHub's `completedAt` cannot shorten it. When that view has had nothing pending for more than `ci.stall.missingMinutes` and the gate has kept polling for at least 60 s, the wait ends `stalled` (exit 14) with `next: [pr status]`: `reason: "expected-missing"` when an expected check is still missing (`stalled` names it, `state: "missing"`, `basis: "ci.stall.missingMinutes"`), or `reason: "mergeable-unknown"` with `stalled: []` when GitHub never resolves mergeability. A check still pending in the gate's view keeps it polling only until the wait's own queued and running stall rules above call it stalled, applied to the gate's view without baselines (the job's literal `timeout-minutes`, else 360 min, for a running check or a commit status that never resolves; `ci.stall.queuedMinutes` for a job queued with nothing in its run started): the wait then ends `stalled` with `reason: "gate-stalled"`, naming those checks. This covers an unselected (`--check`) job the wait never watches. The clocks are per target, so `ci wait 12 13 --until mergeable` bounds each PR separately. **The bound survives re-runs:** the first-settled time is saved in the wait state (per target and head, by whichever process saw it first), and each read takes the earlier of the saved time and its own, so a `--foreground` wait that returns every 9 min (exit 15) and is re-run still reaches exit 14; only the 60 s hold is per process. A view that stops being settled clears the saved time. There is no wall-clock cap beyond that: a background wait still ends when CI finishes or stalls.
+
 **Resumability.** This is the guarantee that makes the protocol robust.
 - **State on disk.** State lives in 01's cache dir, keyed by `repo + target + boundSha`: check states, expected set, baselines, the diagnosis so far, and ETags.
 - **Re-running resumes.** Re-running the identical command resumes the wait. It pays no repeat baseline or diagnosis calls, and it returns immediately if a terminal state is already known.
+- **The config travels with the state.** The state records a fingerprint of the `ci.expected` and `ci.ignore` it derived its expected set from. A wait resumed under another fingerprint (another checkout of the repo, or an edit since) warns `WAIT_CONFIG_CHANGED`, re-derives the expected set from its own config, and drops any stored answer, so `ci wait`, `pr status` and `pr merge` run from one checkout judge the same set. A state saved without a fingerprint is re-derived the same way (without the warning). A follower never adopts an answer its leader reached under another fingerprint: it keeps following, then takes over and re-derives. `pr land` merges on the set its gate judged ready, so the merge cannot re-derive a different one. The `start` event names the config's source (`config: {kind, path, commit, dirty}` for the working tree, `{kind, repo, ref, path}` for the default branch).
 - **Interruptions are harmless.** A kill (harness limit, subagent end, Ctrl-C) costs at most one extra call.
 - **Expiry.** State expires 24 h after the SHA's last check completes.
 
@@ -998,7 +1001,7 @@ A stall ends the wait with the diagnosis so far, the stalled checks, and `next` 
 |---|---|---|
 | `settled` (default) | All considered checks are complete, required and config checks have reported, and baseline checks have reported or aged out | green, red-shared or red |
 | `first-failure` | The first failure (diagnosed immediately), or settled green | red-shared or red early, otherwise green |
-| `mergeable` | Settled, mergeable resolved (§4.3), and the merge CI gate evaluated (§8.2 rows 6–12) | green if no failures and MERGEABLE; red-shared if only shared failures and MERGEABLE; otherwise red, with `merge.blockers` |
+| `mergeable` | Settled, mergeable resolved (§4.3), and the merge CI gate evaluated (§8.2 rows 6–12) on the wait's own expected set (one check set: the definitions the wait bound, never a set re-derived from another config) | green if no failures and MERGEABLE; red-shared if only shared failures and MERGEABLE; otherwise red, with `merge.blockers`; `stalled` if the gate keeps polling long after CI settled (§11.1) |
 
 - red-shared exits 11 in every mode.
 - `mergeable` takes PR targets only. A branch or run target under it (`ghx ci wait branch:main --until mergeable`) is `VALIDATION` (2) before any gh call; use `--until settled`.

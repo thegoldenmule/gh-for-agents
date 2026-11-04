@@ -97,7 +97,7 @@ async function readStatus(
   o: { compareMain: boolean; waitMergeable: boolean },
   share: PrShare = { deadline: ctx.deadline, signal: ctx.signal },
 ): Promise<PrStatusOutput> {
-  const { resolved, number, config, configMissing, warnings } = await prContext(ctx, selector);
+  const { resolved, number, config, configSource, configMissing, warnings } = await prContext(ctx, selector);
   // The share's signal also kills this PR's gh children; repo and config reads above stay shared.
   const gh = share.signal === ctx.signal ? ctx.gh : (ctx.gh.withSignal?.(share.signal) ?? ctx.gh);
   let state: Awaited<ReturnType<typeof loadPrStatus>>;
@@ -110,6 +110,7 @@ async function readStatus(
       repo: resolved.repo,
       number,
       config,
+      configSource,
       configMissing,
       waitMergeable: o.waitMergeable,
       compareMain: o.compareMain,

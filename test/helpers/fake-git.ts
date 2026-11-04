@@ -13,6 +13,18 @@ export interface FakeGitState {
   ignored?: string[];
   /** `history` answers these, newest first (at most `limit`); absent answers undefined. */
   history?: GitCommit[];
+  /** `objectIds` answers, keyed by spec (`<ref>:<path>` or `<ref>`); absent specs are missing objects. */
+  objects?: Record<string, string>;
+  /** `head`: the clone is shallow (its commit is `refs.HEAD`). */
+  shallow?: boolean;
+  /** `mergeBase` answers, keyed `<a>...<b>`. */
+  mergeBases?: Record<string, string>;
+  /** `hashFile` answers, keyed by file path. */
+  files?: Record<string, string>;
+  /** `aheadBehind` answers, keyed `<a>...<b>`. */
+  counts?: Record<string, { ahead: number; behind: number }>;
+  /** `remoteHead` answers, keyed by remote name (e.g. origin → origin/main). */
+  remoteHeads?: Record<string, string>;
 }
 
 export function fakeGit(s: FakeGitState = {}): Git {
@@ -25,6 +37,13 @@ export function fakeGit(s: FakeGitState = {}): Git {
     diffNames: async (from, to) => s.diffs?.[`${from}...${to}`],
     isIgnored: async (path) => s.ignored?.includes(path) ?? false,
     history: async (limit) => s.history?.slice(0, limit),
+    head: async () =>
+      s.refs?.HEAD ? { commit: s.refs.HEAD, shallow: s.shallow ?? false } : s.toplevel ? { shallow: false } : undefined,
+    objectIds: async (specs) => specs.map((x) => s.objects?.[x]),
+    mergeBase: async (a, b) => s.mergeBases?.[`${a}...${b}`],
+    hashFile: async (file) => s.files?.[file],
+    aheadBehind: async (a, b) => s.counts?.[`${a}...${b}`],
+    remoteHead: async (remote) => s.remoteHeads?.[remote],
   };
 }
 

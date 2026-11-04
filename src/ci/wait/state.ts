@@ -8,6 +8,7 @@
 // the same target, repo and machine finds it held and follows instead of polling: it reads the leader's
 // saved state until a terminal answer to its own question appears, or takes the lease over once the
 // leader is gone (it exited, its pid is dead, or it is past the `until` it promised to be back by).
+import { createHash } from 'node:crypto';
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -81,6 +82,16 @@ export const WaitStateSchema = z.object({
   restarts: z.number().int().min(0),
   base: z.string(),
   defaultBranch: z.string(),
+  /**
+   * ciConfigFingerprint of the config the expected set was derived from (absent: saved before this was
+   * recorded). A resume under another fingerprint re-derives the set (WAIT_CONFIG_CHANGED).
+   */
+  configFingerprint: z.string().optional(),
+  /**
+   * --until mergeable: when the merge gate first saw its own CI view settled (local epoch ms), by
+   * whichever process saw it; null or absent while it has not. Its bound counts from here across re-runs.
+   */
+  gateSettledSince: z.number().nullable().optional(),
   machine: MachineStateSchema,
   poller: z.object({
     etags: z.record(z.string(), z.object({ etag: z.string(), body: z.unknown() })),
@@ -122,6 +133,20 @@ export type WaitState = Omit<z.infer<typeof WaitStateSchema>, 'machine' | 'polle
   baselines: BaselineStats;
   timeouts: Record<string, WorkflowTimeouts | null>;
 };
+
+/**
+ * A short hash of the ci config keys the expected set is derived from (`ci.expected`, `ci.ignore`), so a
+ * resumed wait knows whether its stored set still matches the config this process read.
+ */
+export function ciConfigFingerprint(ci: {
+  expected?: readonly unknown[] | undefined;
+  ignore?: readonly unknown[];
+}): string {
+  return createHash('sha256')
+    .update(JSON.stringify([ci.expected ?? [], ci.ignore ?? []]))
+    .digest('hex')
+    .slice(0, 16);
+}
 
 const Index = z.object({ v: z.literal(1), boundSha: Sha, savedAt: z.number() });
 

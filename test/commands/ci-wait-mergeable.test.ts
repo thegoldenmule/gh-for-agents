@@ -2,12 +2,13 @@
 // gate (02 §8.2 rows 6–12, through loadPrStatus with scope ci-gate) decides green, red-shared or red.
 // The sim answers REST; the PR snapshot's GraphQL (Q1, mergeable, Q2, commits) is mirrored from it here.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { WaitSummary } from '../../src/schemas/ci.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeClock } from '../helpers/fake-clock.ts';
+import { scratchDir } from '../helpers/harness.ts';
 import {
   isMergeable,
   isPrCommits,
@@ -49,11 +50,12 @@ const reply = (r: { exitCode: number; stdout: string; stderr: string }): ProcRes
  * The PR snapshot's GraphQL, mirrored from the sim's state at call time: the Q1 rollup carries the sim's
  * check runs for the head (same job, run and workflow ids as REST), and `merge(ms)` gives mergeable.
  */
-function mirrorPr(sim: GitHubSim, merge: (monotonicMs: number) => Merge) {
+function mirrorPr(sim: GitHubSim, merge: (monotonicMs: number) => Merge, o: { hide?: string[] } = {}) {
   sim.override(isQ1, () => {
     const st = sim.stateAt();
     const [mergeable, mergeStateStatus] = merge(sim.clock.monotonic());
-    const contexts = (st.checks[st.pr.head] ?? []).map((j) => {
+    const shown = (st.checks[st.pr.head] ?? []).filter((j) => !o.hide?.includes(j.name));
+    const contexts = shown.map((j) => {
       const r = sim.checkRun(j) as Record<string, string | null>;
       return {
         __typename: 'CheckRun',
@@ -131,9 +133,16 @@ test('green: CI settles, the PR is MERGEABLE, the gate passes; exit 0 with merge
   assert.deepEqual(sim.mutations(), []);
 });
 
-test('CI settles, then mergeable resolves, then the gate runs: UNKNOWN keeps polling, no deadline', async () => {
+/** A config whose only effect is ci.stall.missingMinutes (and, optionally, ci.expected). */
+const stallConfig = (missingMinutes: number, expected?: { name: string; workflow: string }[]) => ({
+  version: 1,
+  components: { x: {} },
+  ci: { stall: { missingMinutes }, ...(expected ? { expected } : {}) },
+});
+
+test('UNKNOWN after CI settled keeps polling within ci.stall.missingMinutes, then resolves green', async () => {
   const t = running(31, 'test');
-  const sim = world([t]);
+  const sim = world([t], { config: stallConfig(20) });
   change(sim, 3 * MIN, done(t, 3 * MIN));
   mirrorPr(sim, (ms) => (ms < 12 * MIN ? ['UNKNOWN', 'UNKNOWN'] : ['MERGEABLE', 'CLEAN']));
   const r = await wait(sim, ['o/r#7', '--until', 'mergeable']);
@@ -142,6 +151,98 @@ test('CI settles, then mergeable resolves, then the gate runs: UNKNOWN keeps pol
   assert.ok(r.json.results[0].elapsedSec >= 12 * 60, `${r.json.results[0].elapsedSec} s`);
   assert.equal(r.json.results[0].merge.mergeable, 'MERGEABLE');
   assert.ok(sim.calls.filter((c) => isQ1(c.argv)).length > 1, 'the gate re-read the PR while UNKNOWN');
+});
+
+test('the same UNKNOWN past a shorter ci.stall.missingMinutes ends stalled (mergeable-unknown, exit 14)', async () => {
+  const t = running(32, 'test');
+  const sim = world([t], { config: stallConfig(5) });
+  change(sim, 3 * MIN, done(t, 3 * MIN));
+  mirrorPr(sim, (ms) => (ms < 12 * MIN ? ['UNKNOWN', 'UNKNOWN'] : ['MERGEABLE', 'CLEAN']));
+  const r = await wait(sim, ['o/r#7', '--until', 'mergeable']);
+  assert.equal(r.exitCode, EXIT.CI_STALLED, r.stdout);
+  const t0 = WaitSummary.parse(r.json).results[0];
+  assert.equal(t0?.outcome, 'stalled');
+  assert.equal(t0?.reason, 'mergeable-unknown');
+  assert.deepEqual(t0?.stalled, [], 'nothing to rerun');
+  assert.deepEqual(t0?.next, ['ghx pr status o/r#7']);
+  const sec = t0?.elapsedSec ?? 0;
+  assert.ok(sec > 8 * 60 && sec < 12 * 60, `${sec} s: 5 min after the gate saw CI settled at ~3 min`);
+});
+
+test('--foreground re-runs keep the gate bound: a stuck UNKNOWN reaches exit 14 across processes', async () => {
+  // Each --foreground run returns at 9 min (exit 15), under the default 10 min missingMinutes; the bound
+  // must count from the first-settled time an earlier run saved, not restart in every process.
+  const t = running(35, 'test');
+  const sim = world([t]);
+  change(sim, 3 * MIN, done(t, 3 * MIN));
+  mirrorPr(sim, () => ['UNKNOWN', 'UNKNOWN']);
+  const artifacts = mkdtempSync(join(scratchDir(), 'fg-'));
+  const exits: number[] = [];
+  for (let i = 0; i < 6 && exits.at(-1) !== EXIT.CI_STALLED; i++) {
+    const r = await wait(sim, ['o/r#7', '--until', 'mergeable', '--foreground'], { artifacts });
+    exits.push(r.exitCode);
+    if (r.exitCode === EXIT.CI_STALLED) {
+      assert.equal(r.json.results[0].reason, 'mergeable-unknown');
+      assert.deepEqual(r.json.results[0].stalled, []);
+    } else {
+      assert.equal(r.exitCode, EXIT.CI_PENDING_RESUME, r.stdout);
+    }
+  }
+  assert.deepEqual(exits, [EXIT.CI_PENDING_RESUME, EXIT.CI_STALLED], 'the second run ends it');
+  assert.ok(sim.clock.monotonic() < 20 * MIN, `${sim.clock.monotonic() / MIN} min`);
+});
+
+test('a check stuck in its own view (queued, no runner) ends the gate stalled: gate-stalled, exit 14', async () => {
+  // `deploy` is outside --check and never gets a runner; the wait settles on `lint`, the gate sees `deploy`
+  // queued and applies the wait's queued rule (ci.stall.queuedMinutes, 30).
+  const lint = running(71, 'lint');
+  const deploy: SimJob = { id: 72, runId: 601, name: 'deploy', status: 'queued' };
+  const sim = world([lint, deploy]);
+  change(sim, 3 * MIN, done(lint, 3 * MIN));
+  mirrorPr(sim, () => ['MERGEABLE', 'CLEAN']);
+  const r = await wait(sim, ['o/r#7', '--until', 'mergeable', '--check', 'lint']);
+  assert.equal(r.exitCode, EXIT.CI_STALLED, r.stdout);
+  const t0 = WaitSummary.parse(r.json).results[0];
+  assert.equal(t0?.reason, 'gate-stalled');
+  assert.deepEqual(
+    t0?.stalled.map((x) => [x.name, x.state, x.basis]),
+    [['deploy', 'queued', 'ci.stall.queuedMinutes']],
+  );
+  const sec = t0?.elapsedSec ?? 0;
+  assert.ok(sec >= 30 * 60 && sec < 40 * 60, `${sec} s: the queued rule, not open-ended`);
+});
+
+test('an expected check the gate never sees ends stalled (expected-missing, exit 14) past missingMinutes', async () => {
+  // REST (the wait) has `test`; the gate's GraphQL rollup never shows it: the gate wiring end to end.
+  const t = running(41, 'test');
+  const lint = running(42, 'lint');
+  const sim = world([t, lint], { config: stallConfig(5, [{ name: 'test', workflow: 'CI' }]) });
+  change(sim, 2 * MIN, done(t, 2 * MIN));
+  change(sim, 3 * MIN, done(lint, 3 * MIN));
+  mirrorPr(sim, () => ['MERGEABLE', 'CLEAN'], { hide: ['test'] });
+  const r = await wait(sim, ['o/r#7', '--until', 'mergeable']);
+  assert.equal(r.exitCode, EXIT.CI_STALLED, r.stdout);
+  const t0 = WaitSummary.parse(r.json).results[0];
+  assert.equal(t0?.reason, 'expected-missing');
+  assert.deepEqual(
+    t0?.stalled.map((x) => [x.name, x.state, x.basis]),
+    [['test', 'missing', 'ci.stall.missingMinutes']],
+  );
+  assert.deepEqual(t0?.merge?.blockers, ['CI_PENDING']);
+  assert.ok((t0?.elapsedSec ?? 0) < 12 * 60, `${t0?.elapsedSec} s`);
+});
+
+test('--check: an unselected check still running is not a stall; green once it finishes (review finding 2)', async () => {
+  const lint = running(51, 'lint');
+  const e2e = running(52, 'e2e');
+  const sim = world([lint, e2e]);
+  change(sim, 3 * MIN, done(lint, 3 * MIN));
+  change(sim, 40 * MIN, done(e2e, 40 * MIN));
+  mirrorPr(sim, () => ['MERGEABLE', 'CLEAN']);
+  const r = await wait(sim, ['o/r#7', '--until', 'mergeable', '--check', 'lint']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.results[0].outcome, 'green');
+  assert.ok(r.json.results[0].elapsedSec >= 40 * 60, `${r.json.results[0].elapsedSec} s`);
 });
 
 test('red-shared: every failure also fails on main, so the gate waives CI_RED; exit 11 with merge.ready true', async () => {
