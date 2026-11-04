@@ -24,6 +24,14 @@ export interface Git {
   isIgnored(path: string): Promise<boolean | undefined>;
   /** The last `limit` non-merge commits' subjects and changed paths, newest first; undefined without history. */
   history?(limit: number): Promise<GitCommit[] | undefined>;
+  /** `git rev-parse --verify --quiet <ref>:<path>`: the blob id of a repo-relative path at a ref; undefined when absent. */
+  blobAt?(ref: string, path: string): Promise<string | undefined>;
+  /** `git hash-object -- <file>`: the blob id a working-tree file would have; undefined when git cannot answer. */
+  hashFile?(file: string): Promise<string | undefined>;
+  /** `git rev-list --left-right --count <a>...<b>`: commits only in `a` (ahead) and only in `b` (behind). */
+  aheadBehind?(a: string, b: string): Promise<{ ahead: number; behind: number } | undefined>;
+  /** `git symbolic-ref --quiet --short refs/remotes/<remote>/HEAD`, e.g. `origin/main`; undefined when unset. */
+  remoteHead?(remote: string): Promise<string | undefined>;
 }
 
 export interface GitCommit {
@@ -121,6 +129,23 @@ export function createGit(deps: GitDeps): Git {
         '--name-only',
       ]);
       return r.ok ? parseHistory(r.out) : undefined;
+    },
+    blobAt: async (ref, path) => {
+      const r = await run(['rev-parse', '--verify', '--quiet', `${ref}:${path}`]);
+      return r.ok && r.out ? r.out : undefined;
+    },
+    hashFile: async (file) => {
+      const r = await run(['hash-object', '--', file]);
+      return r.ok && r.out ? r.out : undefined;
+    },
+    aheadBehind: async (a, b) => {
+      const r = await run(['rev-list', '--left-right', '--count', `${a}...${b}`]);
+      const m = r.ok ? /^(\d+)\s+(\d+)$/.exec(r.out) : null;
+      return m ? { ahead: Number(m[1]), behind: Number(m[2]) } : undefined;
+    },
+    remoteHead: async (remote) => {
+      const r = await run(['symbolic-ref', '--quiet', '--short', `refs/remotes/${remote}/HEAD`]);
+      return r.ok && r.out ? r.out : undefined;
     },
   };
 }

@@ -13,6 +13,14 @@ export interface FakeGitState {
   ignored?: string[];
   /** `history` answers these, newest first (at most `limit`); absent answers undefined. */
   history?: GitCommit[];
+  /** `blobAt` answers, keyed `<ref>:<path>`; absent keys answer undefined. */
+  blobs?: Record<string, string>;
+  /** `hashFile` answers, keyed by file path. */
+  files?: Record<string, string>;
+  /** `aheadBehind` answers, keyed `<a>...<b>`. */
+  counts?: Record<string, { ahead: number; behind: number }>;
+  /** `remoteHead` answers, keyed by remote name (e.g. origin → origin/main). */
+  remoteHeads?: Record<string, string>;
 }
 
 export function fakeGit(s: FakeGitState = {}): Git {
@@ -25,6 +33,10 @@ export function fakeGit(s: FakeGitState = {}): Git {
     diffNames: async (from, to) => s.diffs?.[`${from}...${to}`],
     isIgnored: async (path) => s.ignored?.includes(path) ?? false,
     history: async (limit) => s.history?.slice(0, limit),
+    blobAt: async (ref, path) => s.blobs?.[`${ref}:${path}`],
+    hashFile: async (file) => s.files?.[file],
+    aheadBehind: async (a, b) => s.counts?.[`${a}...${b}`],
+    remoteHead: async (remote) => s.remoteHeads?.[remote],
   };
 }
 

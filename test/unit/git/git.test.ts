@@ -66,3 +66,28 @@ test('history: git log subjects and paths, one record per commit; undefined when
   const g2 = createGit({ proc: empty.runner(), cwd: '/w', env: {}, signal: new AbortController().signal });
   assert.equal(await g2.history?.(5), undefined);
 });
+
+test('createGit: blob ids, ahead/behind counts and the remote HEAD for config drift', async () => {
+  // Later rules win: the catch-alls first.
+  const fake = new FakeProc()
+    .on({ cmd: 'git', args: ['rev-parse'] }, { exitCode: 1 })
+    .on({ cmd: 'git', args: ['hash-object'] }, { exitCode: 128 })
+    .on({ cmd: 'git', args: ['rev-list'] }, { exitCode: 128 })
+    .on({ cmd: 'git', args: ['symbolic-ref'] }, { exitCode: 1 })
+    .on({ cmd: 'git', args: ['rev-parse', '--verify', '--quiet', 'origin/main:.github/ghx.json'] }, { stdout: 'c1\n' })
+    .on({ cmd: 'git', args: ['hash-object', '--', '/work/r/.github/ghx.json'] }, { stdout: 'b1\n' })
+    .on({ cmd: 'git', args: ['rev-list', '--left-right', '--count', 'HEAD...origin/main'] }, { stdout: '2\t39\n' })
+    .on(
+      { cmd: 'git', args: ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'] },
+      { stdout: 'origin/main\n' },
+    );
+  const git = createGit({ proc: fake.runner(), cwd: '/work/r', env: {}, signal: new AbortController().signal });
+  assert.equal(await git.blobAt?.('origin/main', '.github/ghx.json'), 'c1');
+  assert.equal(await git.blobAt?.('HEAD', '.github/ghx.json'), undefined);
+  assert.equal(await git.hashFile?.('/work/r/.github/ghx.json'), 'b1');
+  assert.equal(await git.hashFile?.('/elsewhere'), undefined);
+  assert.deepEqual(await git.aheadBehind?.('HEAD', 'origin/main'), { ahead: 2, behind: 39 });
+  assert.equal(await git.aheadBehind?.('HEAD', 'nope'), undefined);
+  assert.equal(await git.remoteHead?.('origin'), 'origin/main');
+  assert.equal(await git.remoteHead?.('upstream'), undefined);
+});

@@ -2,13 +2,17 @@
 //   1. the cwd toplevel resolves to the target → read the local working copy (uncommitted edits count);
 //   2. otherwise → GET repos/{o}/{r}/contents/.github/ghx.json on the default branch (a read call).
 // Local wins whenever it applies; the two are never merged. Invalid is always an error, whatever the need.
+// A local read records where it came from (HEAD, and whether the file differs from HEAD's) and, from git
+// alone (no network), warns CONFIG_DRIFT when the file differs from the default branch's remote-tracking
+// copy while HEAD lacks commits of that branch: a stale checkout, whose ci.expected and policy are old.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import type { ConfigNeed } from '../core/command.ts';
+import type { ConfigNeed, Warning } from '../core/command.ts';
 import { GhxError, mapZodIssues } from '../core/errors.ts';
 import { suggest } from '../core/suggest.ts';
 import { type Gh, GhFailure } from '../gh/index.ts';
+import { tryParseRepo } from '../gh/refs.ts';
 import type { ResolvedRepo } from '../gh/repo.ts';
 import { type RepoRef, repoSlug, sameRepo } from '../gh/types.ts';
 import type { Git } from '../git/index.ts';
@@ -16,13 +20,16 @@ import { parseJsonWithPosition } from '../util/json.ts';
 import { CONFIG_PATH, CONFIG_VERSION, ConfigSchema, defaultConfig, type GhxConfig } from './schema.ts';
 
 export type ConfigSource =
-  | { kind: 'local'; path: string }
+  /** `commit`: HEAD of the checkout; `dirty`: the file differs from HEAD's (both absent when git cannot say). */
+  | { kind: 'local'; path: string; commit?: string; dirty?: boolean }
   | { kind: 'remote'; repo: RepoRef; ref: string; path: typeof CONFIG_PATH }
   | { kind: 'default' };
 
 export interface LoadedConfig {
   config: GhxConfig;
   source: ConfigSource;
+  /** CONFIG_DRIFT, for the command's warnings. */
+  warnings: Warning[];
 }
 
 export interface LoadConfigOptions {
@@ -39,8 +46,16 @@ const ContentsResponse = z.object({
   url: z.string().optional(),
 });
 
-function describeSource(s: ConfigSource): Record<string, unknown> {
-  if (s.kind === 'local') return { kind: 'local', path: s.path };
+/** The source as plain JSON (error details, the CI_PENDING blocker, the ci wait `start` event). */
+export function describeSource(s: ConfigSource): Record<string, unknown> {
+  if (s.kind === 'local') {
+    return {
+      kind: 'local',
+      path: s.path,
+      ...(s.commit !== undefined ? { commit: s.commit } : {}),
+      ...(s.dirty !== undefined ? { dirty: s.dirty } : {}),
+    };
+  }
   if (s.kind === 'remote') return { kind: 'remote', repo: repoSlug(s.repo), ref: s.ref, path: s.path };
   return { kind: 'default' };
 }
@@ -122,6 +137,72 @@ async function readRemote(gh: Gh, repo: RepoRef): Promise<{ text: string; ref: s
   }
 }
 
+/** One line naming the source: `the working tree at fb84c4e (dirty)`, `o/r@main`, `the defaults`. */
+export function sourceLabel(s: ConfigSource): string {
+  if (s.kind === 'remote') return `${repoSlug(s.repo)}@${s.ref}`;
+  if (s.kind === 'default') return 'the defaults';
+  const at = s.commit ? ` at ${s.commit.slice(0, 7)}` : '';
+  return `the working tree${at}${s.dirty ? ' (dirty)' : ''}`;
+}
+
+/** The remote-tracking ref of the target's default branch: `<remote>/HEAD`'s target, else `<remote>/main|master`. */
+async function baseRef(git: Git, target: ResolvedRepo): Promise<string | undefined> {
+  const remotes = (await git.remotes()).filter((r) => {
+    const repo = tryParseRepo(r.url);
+    return repo !== undefined && sameRepo(repo, target.repo);
+  });
+  for (const r of remotes) {
+    const head = await git.remoteHead?.(r.name);
+    if (head) return head;
+    for (const b of ['main', 'master']) if (await git.revParse(`${r.name}/${b}`)) return `${r.name}/${b}`;
+  }
+  return undefined;
+}
+
+/**
+ * HEAD and dirtiness of the local file, and CONFIG_DRIFT: the file differs from the default branch's
+ * remote-tracking copy and HEAD is behind that branch. A branch on top of it (behind 0) that edits the
+ * file is the edit under review, not drift. Anything git cannot answer is skipped quietly.
+ */
+export async function inspectLocal(
+  git: Git,
+  file: string,
+  target: ResolvedRepo | undefined,
+): Promise<{ commit?: string; dirty?: boolean; warnings: Warning[] }> {
+  const out: { commit?: string; dirty?: boolean; warnings: Warning[] } = { warnings: [] };
+  const commit = await git.revParse('HEAD');
+  if (commit) out.commit = commit;
+  const work = await git.hashFile?.(file);
+  if (!work) return out;
+  const atHead = await git.blobAt?.('HEAD', CONFIG_PATH);
+  if (commit) out.dirty = atHead !== work;
+  if (!target) return out;
+  const base = await baseRef(git, target);
+  const atBase = base ? await git.blobAt?.(base, CONFIG_PATH) : undefined;
+  if (!base || !atBase || atBase === work) return out;
+  const counts = await git.aheadBehind?.('HEAD', base);
+  if (counts && counts.behind === 0) return out;
+  const baseCommit = await git.revParse(base);
+  const head = commit ? `HEAD (${commit.slice(0, 7)})` : 'HEAD';
+  const where = counts
+    ? `${head} is ${counts.behind} commit${counts.behind === 1 ? '' : 's'} behind ${base}${counts.ahead > 0 ? ` and ${counts.ahead} ahead` : ''}`
+    : `${head} may not include ${base}`;
+  out.warnings.push({
+    code: 'CONFIG_DRIFT',
+    message:
+      `${CONFIG_PATH} here differs from ${base}'s${baseCommit ? ` (${baseCommit.slice(0, 7)})` : ''}, and ${where}. ` +
+      `ghx reads the working tree, so ci.expected and the merge policy may be stale: pull, or run ghx from an up-to-date checkout.`,
+    details: {
+      path: file,
+      base,
+      ...(baseCommit ? { baseCommit } : {}),
+      ...(commit ? { head: commit } : {}),
+      ...(counts ? { ahead: counts.ahead, behind: counts.behind } : {}),
+    },
+  });
+  return out;
+}
+
 /** Which source applies: local when the cwd checkout is the target (or no target), else remote. */
 export function localApplies(target: ResolvedRepo | undefined, toplevel: string | undefined): boolean {
   if (!toplevel) return false;
@@ -133,19 +214,19 @@ export async function loadConfig(o: LoadConfigOptions): Promise<LoadedConfig> {
   const toplevel = await o.git.toplevel();
   if (localApplies(o.target, toplevel)) {
     const local = readLocal(toplevel as string);
-    if (local)
-      return {
-        config: parseConfigText(local.text, { kind: 'local', path: local.path }),
-        source: { kind: 'local', path: local.path },
-      };
+    if (local) {
+      const config = parseConfigText(local.text, { kind: 'local', path: local.path });
+      const { warnings, ...seen } = await inspectLocal(o.git, local.path, o.target);
+      return { config, source: { kind: 'local', path: local.path, ...seen }, warnings };
+    }
   } else if (o.target) {
     const remote = await readRemote(o.gh, o.target.repo);
     if (remote) {
       const source: ConfigSource = { kind: 'remote', repo: o.target.repo, ref: remote.ref, path: CONFIG_PATH };
-      return { config: parseConfigText(remote.text, source), source };
+      return { config: parseConfigText(remote.text, source), source, warnings: [] };
     }
   }
-  if (o.need === 'optional') return { config: defaultConfig(), source: { kind: 'default' } };
+  if (o.need === 'optional') return { config: defaultConfig(), source: { kind: 'default' }, warnings: [] };
   const where = o.target ? repoSlug(o.target.repo) : (toplevel ?? 'this directory');
   throw new GhxError('CONFIG_MISSING', `${where} has no ${CONFIG_PATH}.`, {
     hint: "Run 'ghx init' to write a starter config (or 'ghx schema config' for the format).",
