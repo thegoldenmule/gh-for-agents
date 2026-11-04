@@ -1015,6 +1015,9 @@ export async function* runWait(
     const diagnosis = (c: Check) => (c.jobId === null ? undefined : st.diagnoses[String(c.jobId)]);
     const d = decide(st.machine, { checks, now: clock.now(), open }, { cfg, diagnosis, stalled });
     r.lastDecision = d;
+    // The gate's settled clock counts only while CI stays settled: a tick that does not reach the gate (a
+    // ci rerun in progress, new checks registering) restarts it, here and on disk.
+    if (!d?.gate) st.gateSettledSince = null;
     if (d) {
       if (d.gate) {
         const gated = hooks.onSettled

@@ -252,9 +252,11 @@ test('gate clocks take the earlier of their own and a saved first-settled time; 
   const c = createGateClocks();
   const k = 'o/r#7@h';
   assert.equal(c.clock(k, T0 + 9 * MIN, true, 10 * MIN, T0 + 3 * MIN).settledSince, T0 + 3 * MIN, 'a re-run keeps it');
-  assert.equal(c.clock(k, T0 + 10 * MIN, true, 10 * MIN, null).settledSince, T0 + 3 * MIN);
+  assert.equal(c.clock(k, T0 + 10 * MIN, true, 10 * MIN).settledSince, T0 + 3 * MIN, 'no saved time: its own');
+  // The wait cleared the saved time (CI went unsettled: a rerun) while the gate was not called: restart.
+  assert.equal(c.clock(k, T0 + 10 * MIN, true, 10 * MIN, null).settledSince, T0 + 10 * MIN, 'cleared: restarts');
   assert.equal(c.clock(k, T0 + 11 * MIN, false, 10 * MIN, T0 + 3 * MIN).settledSince, null, 'pending again');
-  assert.equal(c.clock(k, T0 + 12 * MIN, true, 10 * MIN, null).settledSince, T0 + 12 * MIN, 'starts over');
+  assert.equal(c.clock(k, T0 + 12 * MIN, true, 10 * MIN).settledSince, T0 + 12 * MIN, 'starts over');
 });
 
 test('gate: a pending check the stall rules call stalled ends it (gate-stalled) once held', () => {

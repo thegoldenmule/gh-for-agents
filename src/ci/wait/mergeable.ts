@@ -149,11 +149,14 @@ export function createGateClocks() {
     get,
     /**
      * The GateClock for this read: `settled` is the gate's own view with nothing pending; `saved` is the
-     * first-settled time an earlier process recorded in the wait state (a --foreground re-run). The earlier
-     * of the two wins, so the bound survives re-runs; an unsettled view clears both.
+     * first-settled time in the wait state (recorded by this or an earlier process, a --foreground re-run).
+     * The earlier of the two wins, so the bound survives re-runs. An unsettled view clears both, and a
+     * null `saved` (the wait saw CI unsettled since, e.g. a ci rerun: driver.ts) drops this process's
+     * value too, so the bound restarts; undefined means the caller keeps no saved time.
      */
-    clock(key: string, now: number, settled: boolean, missingMs: number, saved: number | null = null): GateClock {
+    clock(key: string, now: number, settled: boolean, missingMs: number, saved?: number | null): GateClock {
       const g = get(key);
+      if (saved === null) g.settledSince = null;
       g.settledSince = settled ? Math.min(g.settledSince ?? now, saved ?? now) : null;
       return { now, settledSince: g.settledSince, missingMs, heldMs: g.heldSince === null ? 0 : now - g.heldSince };
     },
@@ -211,11 +214,13 @@ export function createMergeGate(ctx: StreamContext, o: { compareMain: boolean; u
     // Settled as the gate sees it: its own unfiltered view (the wait's checks may be --check-filtered).
     const gateChecks = state.snapshot.ci.checks;
     const settled = settledAt(gateChecks) !== null;
-    const c = clocks.clock(key, now, settled, missingMs, gateSettledSince ?? null);
+    const c = clocks.clock(key, now, settled, missingMs, gateSettledSince);
     // Saved with the wait state, so a --foreground re-run (a new process every 9 min) keeps the bound.
     setGateSettledSince?.(c.settledSince);
-    // The wait's queued/running stall rules on the gate's own pending checks (no baselines: the job's
-    // limit, else 360 min; queued with nothing in its run started: ci.stall.queuedMinutes).
+    // The wait's stall rules on the gate's own pending checks, where they need no workflow file: queued
+    // with nothing in its run started (ci.stall.queuedMinutes), and a commit status still pending after
+    // 360 min (GitHub never times one out). A running Actions job is left alone: the wait scans
+    // timeout-minutes only for the checks it considers, and GitHub cancels a job at its own timeout.
     const stalledPending = settled
       ? []
       : detectStalls({
@@ -226,7 +231,11 @@ export function createMergeGate(ctx: StreamContext, o: { compareMain: boolean; u
           expected: [],
           now,
           config: stallCfg,
-        });
+        }).filter(
+          (x) =>
+            x.state === 'queued' ||
+            (x.state === 'running' && gateChecks.some((c) => c.name === x.name && c.kind === 'status')),
+        );
     const verdict = gateVerdict(state, headSha, { ...c, stalledPending });
     clocks.answered(key, now, verdict);
     return verdict;

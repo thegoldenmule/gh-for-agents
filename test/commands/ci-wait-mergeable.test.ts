@@ -50,7 +50,11 @@ const reply = (r: { exitCode: number; stdout: string; stderr: string }): ProcRes
  * The PR snapshot's GraphQL, mirrored from the sim's state at call time: the Q1 rollup carries the sim's
  * check runs for the head (same job, run and workflow ids as REST), and `merge(ms)` gives mergeable.
  */
-function mirrorPr(sim: GitHubSim, merge: (monotonicMs: number) => Merge, o: { hide?: string[] } = {}) {
+function mirrorPr(
+  sim: GitHubSim,
+  merge: (monotonicMs: number) => Merge,
+  o: { hide?: string[]; statuses?: unknown[] } = {},
+) {
   sim.override(isQ1, () => {
     const st = sim.stateAt();
     const [mergeable, mergeStateStatus] = merge(sim.clock.monotonic());
@@ -88,7 +92,7 @@ function mirrorPr(sim: GitHubSim, merge: (monotonicMs: number) => Merge, o: { hi
         mergeable,
         mergeStateStatus,
       },
-      { contexts },
+      { contexts: [...contexts, ...(o.statuses ?? [])] },
     );
     return reply(q1Reply(pr));
   });
@@ -210,6 +214,67 @@ test('a check stuck in its own view (queued, no runner) ends the gate stalled: g
   );
   const sec = t0?.elapsedSec ?? 0;
   assert.ok(sec >= 30 * 60 && sec < 40 * 60, `${sec} s: the queued rule, not open-ended`);
+});
+
+test('a ci rerun restarts the gate bound: the clock does not carry over from before the rerun', async () => {
+  // Settled at 3 min with UNKNOWN until 8; a rerun runs 8–40; UNKNOWN again 40–43, then MERGEABLE. The
+  // old settled time (3 min) used to survive the rerun and stall mergeable-unknown at ~40.4 min.
+  const t = running(81, 'test');
+  const sim = world([t]);
+  change(sim, 3 * MIN, done(t, 3 * MIN));
+  sim.at(8 * MIN, (st) => {
+    st.checks[H] = [running(82, 'test', { startedAt: 8 * MIN })];
+    return st;
+  });
+  sim.at(40 * MIN, (st) => {
+    st.checks[H] = [done(running(82, 'test', { startedAt: 8 * MIN }), 40 * MIN)];
+    return st;
+  });
+  mirrorPr(sim, (ms) =>
+    ms < 8 * MIN || (ms >= 40 * MIN && ms < 43 * MIN) ? ['UNKNOWN', 'UNKNOWN'] : ['MERGEABLE', 'CLEAN'],
+  );
+  const r = await wait(sim, ['o/r#7', '--until', 'mergeable']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.results[0].outcome, 'green');
+  assert.ok(r.json.results[0].elapsedSec >= 43 * 60, `${r.json.results[0].elapsedSec} s`);
+});
+
+test('an unselected Actions job running past 6 h is left to its own timeout-minutes, not gate-stalled', async () => {
+  // A self-hosted job with timeout-minutes above 360 runs 7 h; the gate has no workflow file for it, so it
+  // no longer applies the 360 min default to running Actions jobs (GitHub cancels a job at its timeout).
+  const lint = running(91, 'lint');
+  const soak = running(92, 'soak', { runId: 602 });
+  const sim = world([lint, soak]);
+  change(sim, 3 * MIN, done(lint, 3 * MIN));
+  change(sim, 7 * 60 * MIN, done(soak, 7 * 60 * MIN));
+  mirrorPr(sim, () => ['MERGEABLE', 'CLEAN']);
+  const r = await wait(sim, ['o/r#7', '--until', 'mergeable', '--check', 'lint'], { maxMs: 9 * 3_600_000 });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.ok(r.json.results[0].elapsedSec >= 7 * 3600, `${r.json.results[0].elapsedSec} s`);
+});
+
+test('a commit status pending past 360 min still ends the gate stalled (gate-stalled, exit 14)', async () => {
+  const lint = running(95, 'lint');
+  const sim = world([lint]);
+  change(sim, 3 * MIN, done(lint, 3 * MIN));
+  const created = new Date(sim.clock.now()).toISOString();
+  const status = {
+    __typename: 'StatusContext',
+    context: 'deploy/preview',
+    state: 'PENDING',
+    targetUrl: 'https://ci.example.com/1',
+    createdAt: created,
+    isRequired: false,
+  };
+  mirrorPr(sim, () => ['MERGEABLE', 'CLEAN'], { statuses: [status] });
+  const r = await wait(sim, ['o/r#7', '--until', 'mergeable'], { maxMs: 9 * 3_600_000 });
+  assert.equal(r.exitCode, EXIT.CI_STALLED, r.stdout);
+  const t0 = WaitSummary.parse(r.json).results[0];
+  assert.equal(t0?.reason, 'gate-stalled');
+  assert.deepEqual(
+    t0?.stalled.map((x) => [x.name, x.state, x.basis]),
+    [['deploy/preview', 'running', 'default-360']],
+  );
 });
 
 test('an expected check the gate never sees ends stalled (expected-missing, exit 14) past missingMinutes', async () => {
