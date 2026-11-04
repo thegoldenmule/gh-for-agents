@@ -33,7 +33,7 @@ export const EXIT_TABLE = [
     exit: 14,
     class: 'CI_STALLED',
     meaning:
-      'ci wait: a check is running far past its baseline or stuck in the queue, an expected check never came, or the merge gate stayed stuck (expected-missing, mergeable-unknown)',
+      'ci wait: a check is running far past its baseline or stuck in the queue, an expected check never came, or the merge gate stayed stuck (expected-missing, mergeable-unknown, gate-stalled)',
   },
   { exit: 15, class: 'CI_PENDING_RESUME', meaning: 'ci wait: self-returned in an unattended session' },
   { exit: 130, class: 'INTERRUPTED', meaning: 'SIGINT' },
