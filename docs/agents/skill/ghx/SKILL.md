@@ -56,7 +56,7 @@ Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then co
 | 11 | `ci wait`: red, but every failure is also red on main | Before merging, `ghx ci wait <pr> --until mergeable` |
 | 12 | `ci wait`: the head moved, or the PR closed or merged | Re-read with `ghx pr status` |
 | 13 | `ci wait`: no checks registered | `merge-conflict`: merge the base and push; else `ghx ci retrigger <pr>` |
-| 14 | `ci wait`: a check stalled, or an expected one never came | Read `stalled`. `state: missing`: check `ci.expected` (pull on `CONFIG_DRIFT`); else `ghx ci rerun`, or wait again |
+| 14 | `ci wait`: a check stalled, an expected one never came, or the merge gate stayed stuck | Read `reason` and `stalled`. A running or queued check: `ghx ci rerun`, or wait again. `missing` or `expected-missing`: check `ci.expected` (pull on `CONFIG_DRIFT`). `mergeable-unknown` (`stalled` is `[]`): GitHub never resolved mergeability; a rerun won't help, so check `ghx pr status` and wait again |
 | 15 | `ci wait`: returned before CI settled; state is cached | Re-run the identical command (main thread: in the background) |
 | 130, 143 | Interrupted | Re-run if still needed |
 
