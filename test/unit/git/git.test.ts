@@ -67,14 +67,20 @@ test('history: git log subjects and paths, one record per commit; undefined when
   assert.equal(await g2.history?.(5), undefined);
 });
 
-test('createGit: blob ids, ahead/behind counts and the remote HEAD for config drift', async () => {
+test('createGit: head, object ids, merge-base, counts and the remote HEAD, all without lazy fetch', async () => {
+  const H = 'f'.repeat(40);
   // Later rules win: the catch-alls first.
   const fake = new FakeProc()
-    .on({ cmd: 'git', args: ['rev-parse'] }, { exitCode: 1 })
     .on({ cmd: 'git', args: ['hash-object'] }, { exitCode: 128 })
     .on({ cmd: 'git', args: ['rev-list'] }, { exitCode: 128 })
+    .on({ cmd: 'git', args: ['merge-base'] }, { exitCode: 1 })
     .on({ cmd: 'git', args: ['symbolic-ref'] }, { exitCode: 1 })
-    .on({ cmd: 'git', args: ['rev-parse', '--verify', '--quiet', 'origin/main:.github/ghx.json'] }, { stdout: 'c1\n' })
+    .on({ cmd: 'git', args: ['rev-parse', '--is-shallow-repository', 'HEAD'] }, { stdout: `true\n${H}\n` })
+    .on(
+      { cmd: 'git', args: ['cat-file', '--batch-check=%(objectname)'] },
+      { stdout: `${'c'.repeat(40)}\nHEAD:.github/ghx.json missing\n` },
+    )
+    .on({ cmd: 'git', args: ['merge-base', 'HEAD', 'origin/main'] }, { stdout: `${'a'.repeat(40)}\n` })
     .on({ cmd: 'git', args: ['hash-object', '--', '/work/r/.github/ghx.json'] }, { stdout: 'b1\n' })
     .on({ cmd: 'git', args: ['rev-list', '--left-right', '--count', 'HEAD...origin/main'] }, { stdout: '2\t39\n' })
     .on(
@@ -82,12 +88,20 @@ test('createGit: blob ids, ahead/behind counts and the remote HEAD for config dr
       { stdout: 'origin/main\n' },
     );
   const git = createGit({ proc: fake.runner(), cwd: '/work/r', env: {}, signal: new AbortController().signal });
-  assert.equal(await git.blobAt?.('origin/main', '.github/ghx.json'), 'c1');
-  assert.equal(await git.blobAt?.('HEAD', '.github/ghx.json'), undefined);
+  assert.deepEqual(await git.head?.(), { shallow: true, commit: H });
+  assert.deepEqual(await git.objectIds?.(['origin/main:.github/ghx.json', 'HEAD:.github/ghx.json']), [
+    'c'.repeat(40),
+    undefined,
+  ]);
+  const batch = fake.calls.find((c) => c.args[0] === 'cat-file');
+  assert.equal(batch?.stdin, 'origin/main:.github/ghx.json\nHEAD:.github/ghx.json\n', 'one call for every spec');
+  assert.equal(await git.mergeBase?.('HEAD', 'origin/main'), 'a'.repeat(40));
+  assert.equal(await git.mergeBase?.('HEAD', 'nope'), undefined);
   assert.equal(await git.hashFile?.('/work/r/.github/ghx.json'), 'b1');
   assert.equal(await git.hashFile?.('/elsewhere'), undefined);
   assert.deepEqual(await git.aheadBehind?.('HEAD', 'origin/main'), { ahead: 2, behind: 39 });
   assert.equal(await git.aheadBehind?.('HEAD', 'nope'), undefined);
   assert.equal(await git.remoteHead?.('origin'), 'origin/main');
   assert.equal(await git.remoteHead?.('upstream'), undefined);
+  for (const c of fake.calls) assert.equal(c.env?.GIT_NO_LAZY_FETCH, '1', c.args.join(' '));
 });

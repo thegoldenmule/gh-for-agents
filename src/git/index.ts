@@ -24,8 +24,14 @@ export interface Git {
   isIgnored(path: string): Promise<boolean | undefined>;
   /** The last `limit` non-merge commits' subjects and changed paths, newest first; undefined without history. */
   history?(limit: number): Promise<GitCommit[] | undefined>;
-  /** `git rev-parse --verify --quiet <ref>:<path>`: the blob id of a repo-relative path at a ref; undefined when absent. */
-  blobAt?(ref: string, path: string): Promise<string | undefined>;
+  // Config provenance and drift (config/load.ts). Each runs with GIT_NO_LAZY_FETCH=1, so a partial clone
+  // answers from what it has instead of fetching from the network.
+  /** `git rev-parse --is-shallow-repository HEAD`: HEAD's commit (absent when unborn) and whether the clone is shallow. */
+  head?(): Promise<{ commit?: string; shallow: boolean } | undefined>;
+  /** `git cat-file --batch-check`: each spec's object id (`<ref>:<path>`, `<ref>`), undefined when missing. */
+  objectIds?(specs: readonly string[]): Promise<(string | undefined)[] | undefined>;
+  /** `git merge-base <a> <b>`; undefined without a common ancestor or an answer. */
+  mergeBase?(a: string, b: string): Promise<string | undefined>;
   /** `git hash-object -- <file>`: the blob id a working-tree file would have; undefined when git cannot answer. */
   hashFile?(file: string): Promise<string | undefined>;
   /** `git rev-list --left-right --count <a>...<b>`: commits only in `a` (ahead) and only in `b` (behind). */
@@ -77,11 +83,13 @@ export function createGit(deps: GitDeps): Git {
   const cmd = deps.gitPath ?? 'git';
   const env = { ...deps.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' };
   const memo = new Map<string, Promise<{ ok: boolean; code: number | null; out: string; missing: boolean }>>();
-  const run = (args: string[]) => {
-    const key = args.join('\0');
+  const offline = { ...env, GIT_NO_LAZY_FETCH: '1' };
+  const run = (args: string[], o: { stdin?: string; offline?: boolean } = {}) => {
+    const key = [...args, o.offline ? '\u0001offline' : '', o.stdin ?? ''].join('\0');
     let p = memo.get(key);
     if (!p) {
-      p = deps.proc({ cmd, args, env, cwd: deps.cwd, signal: deps.signal, timeoutMs: 10_000 }).then((r) => ({
+      const req = { cmd, args, env: o.offline ? offline : env, cwd: deps.cwd, signal: deps.signal, timeoutMs: 10_000 };
+      p = deps.proc(o.stdin !== undefined ? { ...req, stdin: o.stdin } : req).then((r) => ({
         ok: r.exitCode === 0,
         code: r.exitCode,
         out: r.stdout.trim(),
@@ -130,21 +138,38 @@ export function createGit(deps: GitDeps): Git {
       ]);
       return r.ok ? parseHistory(r.out) : undefined;
     },
-    blobAt: async (ref, path) => {
-      const r = await run(['rev-parse', '--verify', '--quiet', `${ref}:${path}`]);
+    head: async () => {
+      const r = await run(['rev-parse', '--is-shallow-repository', 'HEAD'], { offline: true });
+      const [shallow, commit] = r.out.split('\n').map((l) => l.trim());
+      if (shallow !== 'true' && shallow !== 'false') return undefined;
+      return { shallow: shallow === 'true', ...(r.ok && commit && /^[0-9a-f]{40,64}$/.test(commit) ? { commit } : {}) };
+    },
+    objectIds: async (specs) => {
+      if (specs.length === 0) return [];
+      const r = await run(['cat-file', '--batch-check=%(objectname)'], {
+        stdin: `${specs.join('\n')}\n`,
+        offline: true,
+      });
+      if (!r.ok) return undefined;
+      const lines = r.out.split('\n');
+      if (lines.length !== specs.length) return undefined;
+      return lines.map((l) => (/^[0-9a-f]{40,64}$/.test(l.trim()) ? l.trim() : undefined));
+    },
+    mergeBase: async (a, b) => {
+      const r = await run(['merge-base', a, b], { offline: true });
       return r.ok && r.out ? r.out : undefined;
     },
     hashFile: async (file) => {
-      const r = await run(['hash-object', '--', file]);
+      const r = await run(['hash-object', '--', file], { offline: true });
       return r.ok && r.out ? r.out : undefined;
     },
     aheadBehind: async (a, b) => {
-      const r = await run(['rev-list', '--left-right', '--count', `${a}...${b}`]);
+      const r = await run(['rev-list', '--left-right', '--count', `${a}...${b}`], { offline: true });
       const m = r.ok ? /^(\d+)\s+(\d+)$/.exec(r.out) : null;
       return m ? { ahead: Number(m[1]), behind: Number(m[2]) } : undefined;
     },
     remoteHead: async (remote) => {
-      const r = await run(['symbolic-ref', '--quiet', '--short', `refs/remotes/${remote}/HEAD`]);
+      const r = await run(['symbolic-ref', '--quiet', '--short', `refs/remotes/${remote}/HEAD`], { offline: true });
       return r.ok && r.out ? r.out : undefined;
     },
   };

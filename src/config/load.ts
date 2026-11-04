@@ -3,8 +3,9 @@
 //   2. otherwise → GET repos/{o}/{r}/contents/.github/ghx.json on the default branch (a read call).
 // Local wins whenever it applies; the two are never merged. Invalid is always an error, whatever the need.
 // A local read records where it came from (HEAD, and whether the file differs from HEAD's) and, from git
-// alone (no network), warns CONFIG_DRIFT when the file differs from the default branch's remote-tracking
-// copy while HEAD lacks commits of that branch: a stale checkout, whose ci.expected and policy are old.
+// alone (no network, no lazy fetch), warns CONFIG_DRIFT when the default branch changed the file since
+// HEAD forked from it and HEAD lacks those commits: a stale checkout, whose ci.expected and policy are old.
+// It knows the default branch only as of the last fetch.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -145,24 +146,29 @@ export function sourceLabel(s: ConfigSource): string {
   return `the working tree${at}${s.dirty ? ' (dirty)' : ''}`;
 }
 
-/** The remote-tracking ref of the target's default branch: `<remote>/HEAD`'s target, else `<remote>/main|master`. */
-async function baseRef(git: Git, target: ResolvedRepo): Promise<string | undefined> {
-  const remotes = (await git.remotes()).filter((r) => {
+/**
+ * Candidate remote-tracking refs for the target's default branch, best first: for each remote that is the
+ * target, `<remote>/HEAD`'s target, then `<remote>/main` and `<remote>/master`. The caller keeps the first
+ * that exists, so a stale or unset `<remote>/HEAD` falls back. (ghx learns the default branch from the API
+ * only later in a command, so config loading does not wait for it.)
+ */
+async function baseCandidates(git: Git, target: ResolvedRepo): Promise<string[]> {
+  const out: string[] = [];
+  for (const r of await git.remotes()) {
     const repo = tryParseRepo(r.url);
-    return repo !== undefined && sameRepo(repo, target.repo);
-  });
-  for (const r of remotes) {
+    if (!repo || !sameRepo(repo, target.repo)) continue;
     const head = await git.remoteHead?.(r.name);
-    if (head) return head;
-    for (const b of ['main', 'master']) if (await git.revParse(`${r.name}/${b}`)) return `${r.name}/${b}`;
+    for (const ref of [head, `${r.name}/main`, `${r.name}/master`]) if (ref && !out.includes(ref)) out.push(ref);
   }
-  return undefined;
+  return out;
 }
 
 /**
- * HEAD and dirtiness of the local file, and CONFIG_DRIFT: the file differs from the default branch's
- * remote-tracking copy and HEAD is behind that branch. A branch on top of it (behind 0) that edits the
- * file is the edit under review, not drift. Anything git cannot answer is skipped quietly.
+ * HEAD and dirtiness of the local file, and CONFIG_DRIFT: the default branch's copy differs from the one
+ * at merge-base(HEAD, base), i.e. the base changed the config after HEAD forked, and HEAD is behind it. A
+ * branch that edits the file while the base left it alone is the edit under review, not drift. A shallow
+ * clone (its merge-base and counts are unreliable), a missing ref or any unanswered git call skips the
+ * check quietly.
  */
 export async function inspectLocal(
   git: Git,
@@ -170,34 +176,43 @@ export async function inspectLocal(
   target: ResolvedRepo | undefined,
 ): Promise<{ commit?: string; dirty?: boolean; warnings: Warning[] }> {
   const out: { commit?: string; dirty?: boolean; warnings: Warning[] } = { warnings: [] };
-  const commit = await git.revParse('HEAD');
-  if (commit) out.commit = commit;
+  const head = await git.head?.();
+  if (head?.commit) out.commit = head.commit;
   const work = await git.hashFile?.(file);
-  if (!work) return out;
-  const atHead = await git.blobAt?.('HEAD', CONFIG_PATH);
-  if (commit) out.dirty = atHead !== work;
-  if (!target) return out;
-  const base = await baseRef(git, target);
-  const atBase = base ? await git.blobAt?.(base, CONFIG_PATH) : undefined;
-  if (!base || !atBase || atBase === work) return out;
+  if (!head || !work || !git.objectIds) return out;
+  const candidates = target && !head.shallow ? await baseCandidates(git, target) : [];
+  const ids = await git.objectIds([`HEAD:${CONFIG_PATH}`, ...candidates.flatMap((c) => [c, `${c}:${CONFIG_PATH}`])]);
+  if (!ids) return out;
+  if (head.commit) out.dirty = ids[0] !== work;
+  const i = candidates.findIndex((_, k) => ids[1 + 2 * k] !== undefined);
+  if (i < 0) return out;
+  const base = candidates[i] as string;
+  const baseCommit = ids[1 + 2 * i] as string;
+  const atBase = ids[2 + 2 * i];
+  if (!atBase || atBase === work) return out;
+  const fork = await git.mergeBase?.('HEAD', base);
+  if (!fork) return out;
+  const [atFork] = (await git.objectIds([`${fork}:${CONFIG_PATH}`])) ?? [atBase];
+  if (atFork === atBase) return out;
   const counts = await git.aheadBehind?.('HEAD', base);
-  if (counts && counts.behind === 0) return out;
-  const baseCommit = await git.revParse(base);
-  const head = commit ? `HEAD (${commit.slice(0, 7)})` : 'HEAD';
-  const where = counts
-    ? `${head} is ${counts.behind} commit${counts.behind === 1 ? '' : 's'} behind ${base}${counts.ahead > 0 ? ` and ${counts.ahead} ahead` : ''}`
-    : `${head} may not include ${base}`;
+  if (!counts || counts.behind === 0) return out;
+  const at = head.commit ? `HEAD (${head.commit.slice(0, 7)})` : 'HEAD';
+  const plural = counts.behind === 1 ? '' : 's';
   out.warnings.push({
     code: 'CONFIG_DRIFT',
     message:
-      `${CONFIG_PATH} here differs from ${base}'s${baseCommit ? ` (${baseCommit.slice(0, 7)})` : ''}, and ${where}. ` +
-      `ghx reads the working tree, so ci.expected and the merge policy may be stale: pull, or run ghx from an up-to-date checkout.`,
+      `${CONFIG_PATH} changed on ${base} (${baseCommit.slice(0, 7)}) since ${at} forked from it, and HEAD is ` +
+      `${counts.behind} commit${plural} behind${counts.ahead > 0 ? ` (${counts.ahead} ahead)` : ''}. ghx reads the ` +
+      `working tree, so ci.expected and the merge policy may be stale: pull or merge ${base}, or run ghx from an ` +
+      `up-to-date checkout. (${base} as of the last fetch.)`,
     details: {
       path: file,
       base,
-      ...(baseCommit ? { baseCommit } : {}),
-      ...(commit ? { head: commit } : {}),
-      ...(counts ? { ahead: counts.ahead, behind: counts.behind } : {}),
+      baseCommit,
+      forkCommit: fork,
+      ...(head.commit ? { head: head.commit } : {}),
+      ahead: counts.ahead,
+      behind: counts.behind,
     },
   });
   return out;

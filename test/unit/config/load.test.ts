@@ -8,6 +8,7 @@ import { isGhxError } from '../../../src/core/errors.ts';
 import { seededRandom } from '../../../src/core/random.ts';
 import { createGh } from '../../../src/gh/index.ts';
 import { resolveRepo } from '../../../src/gh/repo.ts';
+import type { Git } from '../../../src/git/index.ts';
 import { FakeClock } from '../../helpers/fake-clock.ts';
 import { type FakeGitState, gitCheckout } from '../../helpers/fake-git.ts';
 import { FakeProc } from '../../helpers/fake-proc.ts';
@@ -106,95 +107,129 @@ test('no target (repo need none): local file only', async () => {
 });
 
 // Provenance and CONFIG_DRIFT (git only, no network): the tally#27 case, a main checkout 39 commits behind
-// origin/main whose working-tree ci.expected still named a retired job.
-const FILE_BLOB = 'b'.repeat(40);
-const BASE_BLOB = 'c'.repeat(40);
+// origin/main whose working-tree ci.expected still named a retired job that origin/main had since renamed.
+const OLD_BLOB = 'b'.repeat(40);
+const NEW_BLOB = 'c'.repeat(40);
 const HEAD_SHA = 'fb84c4ee691c913bddf916389e62f8e18c4713a3';
 const BASE_SHA = '781edff0000000000000000000000000000000aa';
+const FORK_SHA = '9475673000000000000000000000000000000bb';
 
-function provenance(name: string, extra: FakeGitState = {}) {
+/**
+ * A checkout of o/<name>: the working tree and HEAD hold OLD_BLOB, origin/main holds NEW_BLOB and HEAD
+ * forked at FORK_SHA, which also held OLD_BLOB (origin/main changed the file after the fork).
+ */
+function provenance(
+  name: string,
+  extra: FakeGitState = {},
+  objects: Record<string, string | undefined> = {},
+  work = OLD_BLOB,
+) {
   const dir = join(tmp, name);
   mkdirSync(join(dir, '.github'), { recursive: true });
   writeFileSync(join(dir, '.github', 'ghx.json'), VALID);
   const file = join(dir, '.github', 'ghx.json');
+  const all: Record<string, string | undefined> = {
+    'HEAD:.github/ghx.json': OLD_BLOB,
+    'origin/main': BASE_SHA,
+    'origin/main:.github/ghx.json': NEW_BLOB,
+    [`${FORK_SHA}:.github/ghx.json`]: OLD_BLOB,
+    ...objects,
+  };
   return {
     file,
     git: gitCheckout(`o/${name}`, {
       toplevel: dir,
-      refs: { HEAD: HEAD_SHA, 'origin/main': BASE_SHA },
-      files: { [file]: FILE_BLOB },
-      blobs: { 'HEAD:.github/ghx.json': FILE_BLOB, 'origin/main:.github/ghx.json': BASE_BLOB },
+      refs: { HEAD: HEAD_SHA },
+      files: { [file]: work },
+      objects: Object.fromEntries(Object.entries(all).filter((e): e is [string, string] => e[1] !== undefined)),
+      mergeBases: { 'HEAD...origin/main': FORK_SHA },
       remoteHeads: { origin: 'origin/main' },
+      counts: { 'HEAD...origin/main': { ahead: 0, behind: 39 } },
       ...extra,
     }),
   };
 }
 
+async function load(git: Git, flag?: string) {
+  const target = await resolveRepo({ ...(flag ? { flag } : {}), env: {}, git, need: 'inferred' });
+  const local = flag ? ({ ...target, cwdRepo: target?.repo } as NonNullable<typeof target>) : target;
+  return loadConfig({ target: local, git, gh: gh(new FakeProc()), need: 'required' });
+}
+
 test('local: the source records HEAD and whether the file differs from it', async () => {
-  const { git, file } = provenance('prov-clean', { blobs: { 'HEAD:.github/ghx.json': FILE_BLOB } });
-  const target = await resolveRepo({ env: {}, git, need: 'inferred' });
-  const r = await loadConfig({ target, git, gh: gh(new FakeProc()), need: 'required' });
+  const { git, file } = provenance('prov-clean', {}, { 'origin/main:.github/ghx.json': OLD_BLOB });
+  const r = await load(git);
   assert.deepEqual(r.source, { kind: 'local', path: file, commit: HEAD_SHA, dirty: false });
   assert.equal(sourceLabel(r.source), 'the working tree at fb84c4e');
-  assert.deepEqual(r.warnings, [], 'no base copy: no drift is claimed');
-  const edited = provenance('prov-dirty', { blobs: { 'HEAD:.github/ghx.json': 'd'.repeat(40) } });
-  const t2 = await resolveRepo({ env: {}, git: edited.git, need: 'inferred' });
-  const r2 = await loadConfig({ target: t2, git: edited.git, gh: gh(new FakeProc()), need: 'required' });
-  assert.equal(sourceLabel(r2.source), 'the working tree at fb84c4e (dirty)');
+  assert.deepEqual(r.warnings, [], 'the base has the same file: no drift');
+  const edited = provenance('prov-dirty', {}, { 'HEAD:.github/ghx.json': 'd'.repeat(40) });
+  assert.equal(sourceLabel((await load(edited.git)).source), 'the working tree at fb84c4e (dirty)');
 });
 
-test('CONFIG_DRIFT: the file differs from origin/main and HEAD is behind it', async () => {
-  const { git, file } = provenance('drift', { counts: { 'HEAD...origin/main': { ahead: 0, behind: 39 } } });
-  const target = await resolveRepo({ env: {}, git, need: 'inferred' });
-  const r = await loadConfig({ target, git, gh: gh(new FakeProc()), need: 'required' });
+test('CONFIG_DRIFT: origin/main changed the file since HEAD forked, and HEAD is behind it', async () => {
+  const { git, file } = provenance('drift');
+  const r = await load(git);
   assert.equal(r.warnings.length, 1);
   const w = r.warnings[0];
   assert.equal(w?.code, 'CONFIG_DRIFT');
   assert.match(
     w?.message ?? '',
-    /differs from origin\/main's \(781edff\), and HEAD \(fb84c4e\) is 39 commits behind origin\/main\./,
+    /changed on origin\/main \(781edff\) since HEAD \(fb84c4e\) forked from it, and HEAD is 39 commits behind\./,
   );
-  assert.match(w?.message ?? '', /pull, or run ghx from an up-to-date checkout/);
+  assert.match(w?.message ?? '', /pull or merge origin\/main/);
+  assert.match(w?.message ?? '', /as of the last fetch/);
   assert.deepEqual(w?.details, {
     path: file,
     base: 'origin/main',
     baseCommit: BASE_SHA,
+    forkCommit: FORK_SHA,
     head: HEAD_SHA,
     ahead: 0,
     behind: 39,
   });
   const diverged = provenance('drift-diverged', { counts: { 'HEAD...origin/main': { ahead: 2, behind: 1 } } });
-  const t2 = await resolveRepo({ env: {}, git: diverged.git, need: 'inferred' });
-  const r2 = await loadConfig({ target: t2, git: diverged.git, gh: gh(new FakeProc()), need: 'required' });
-  assert.match(r2.warnings[0]?.message ?? '', /is 1 commit behind origin\/main and 2 ahead/);
+  assert.match((await load(diverged.git)).warnings[0]?.message ?? '', /HEAD is 1 commit behind \(2 ahead\)/);
+  const added = provenance('drift-added', {}, { [`${FORK_SHA}:.github/ghx.json`]: undefined });
+  assert.equal((await load(added.git)).warnings[0]?.code, 'CONFIG_DRIFT', 'the base added the file after the fork');
+});
+
+test('no CONFIG_DRIFT for a PR branch that edits the file while the base left it alone (review 4a)', async () => {
+  // The branch changed ghx.json and is behind main, but main's copy is still the one it forked from.
+  const { git } = provenance(
+    'branch-edit',
+    {},
+    { 'origin/main:.github/ghx.json': OLD_BLOB, 'HEAD:.github/ghx.json': NEW_BLOB },
+    NEW_BLOB,
+  );
+  assert.deepEqual((await load(git)).warnings, []);
+});
+
+test('no CONFIG_DRIFT on a shallow clone, or when the counts cannot be read (review 4b, 4c)', async () => {
+  assert.deepEqual((await load(provenance('shallow', { shallow: true }).git)).warnings, []);
+  assert.deepEqual((await load(provenance('no-counts', { counts: {} }).git)).warnings, []);
+  assert.deepEqual((await load(provenance('no-fork', { mergeBases: {} }).git)).warnings, []);
 });
 
 test('no CONFIG_DRIFT for a branch on top of the base, the same file, or a missing base ref', async () => {
-  const cases: FakeGitState[] = [
-    { counts: { 'HEAD...origin/main': { ahead: 3, behind: 0 } } },
-    { blobs: { 'HEAD:.github/ghx.json': FILE_BLOB, 'origin/main:.github/ghx.json': FILE_BLOB } },
-    { remoteHeads: {}, refs: { HEAD: HEAD_SHA } },
-    { remotes: [{ name: 'origin', url: 'git@github.com:someone/fork.git' }] },
+  const cases: [FakeGitState, Record<string, string | undefined>][] = [
+    [{ counts: { 'HEAD...origin/main': { ahead: 3, behind: 0 } } }, {}],
+    [{}, { 'origin/main:.github/ghx.json': OLD_BLOB }],
+    [{ remoteHeads: {} }, { 'origin/main': undefined }],
+    [{ remotes: [{ name: 'origin', url: 'git@github.com:someone/fork.git' }] }, {}],
   ];
-  for (const [i, extra] of cases.entries()) {
-    const { git } = provenance(`nodrift-${i}`, extra);
-    const target = await resolveRepo({ flag: `o/nodrift-${i}`, env: {}, git, need: 'inferred' });
-    const local = { ...target, cwdRepo: target?.repo } as NonNullable<typeof target>;
-    const r = await loadConfig({ target: local, git, gh: gh(new FakeProc()), need: 'required' });
+  for (const [i, [extra, objects]] of cases.entries()) {
+    const r = await load(provenance(`nodrift-${i}`, extra, objects).git, `o/nodrift-${i}`);
     assert.equal(r.source.kind, 'local', `case ${i}`);
     assert.deepEqual(r.warnings, [], `case ${i}`);
   }
 });
 
-test('without a remote HEAD, <remote>/main is the base', async () => {
-  const { git } = provenance('drift-main', {
-    remoteHeads: {},
-    counts: { 'HEAD...origin/main': { ahead: 0, behind: 2 } },
-  });
-  const target = await resolveRepo({ env: {}, git, need: 'inferred' });
-  const r = await loadConfig({ target, git, gh: gh(new FakeProc()), need: 'required' });
-  assert.equal(r.warnings[0]?.code, 'CONFIG_DRIFT');
-  assert.equal(r.warnings[0]?.details?.base, 'origin/main');
+test('a stale or unset <remote>/HEAD falls back to <remote>/main', async () => {
+  const unset = provenance('drift-unset', { remoteHeads: {} });
+  assert.equal((await load(unset.git)).warnings[0]?.details?.base, 'origin/main');
+  // origin/HEAD names a branch that is gone locally: the next candidate that exists is used.
+  const stale = provenance('drift-stale', { remoteHeads: { origin: 'origin/trunk' } });
+  assert.equal((await load(stale.git)).warnings[0]?.details?.base, 'origin/main');
 });
 
 test('the remote and default sources carry no provenance and no warnings', async () => {
