@@ -22,7 +22,7 @@ import {
   q1Reply,
   q2Reply,
 } from '../unit/pr/snapshot-fixture.ts';
-import { drive, endpoint, GitHubSim, type ProcResultLike, type SimJob, sha } from './ci-wait-world.ts';
+import { drive, endpoint, forbidden, GitHubSim, type ProcResultLike, type SimJob, sha } from './ci-wait-world.ts';
 import { CONFIG } from './pr-status-world.ts';
 
 const H = sha('a');
@@ -332,4 +332,32 @@ test('land merges on the set its gate judged: the merge does not re-derive one (
   const s = LandSummary.parse(r.json);
   assert.equal(s.outcome, 'merged');
   assert.equal(puts(sim), 1);
+});
+
+test('a required check missing from the bound set is added back at the gate and the merge (re-review item 2)', async () => {
+  // The wait bound with the required-check reads failing (as on a private Free repo), so its set has no
+  // required checks. When the reads work at land time, `build` is required and never reports: land must
+  // not merge on the narrower set.
+  const { sim, t } = world();
+  let fail = true;
+  sim.override(
+    (argv) => fail && /\/rules\/branches\/|\/branches\/main$/.test(endpoint(argv) ?? ''),
+    () => forbidden(),
+  );
+  green(sim, t, 2 * MIN);
+  const artifacts = mkdtempSync(join(scratchDir(), 'land-'));
+  const first = await runIn(sim, ['ci', 'wait', 'o/r#7'], artifacts);
+  assert.equal(first.exitCode, EXIT.OK, first.stdout);
+  assert.match(JSON.stringify(first.json.warnings), /EXPECTED_CHECKS_PARTIAL/);
+  fail = false;
+  sim.o.required = ['build'];
+  const r = await runIn(sim, ['pr', 'land', 'o/r#7'], artifacts);
+  assert.equal(r.exitCode, EXIT.CI_STALLED, r.stdout);
+  const s = LandSummary.parse(r.json);
+  assert.equal(s.wait?.reason, 'expected-missing');
+  assert.deepEqual(
+    s.wait?.stalled.map((x) => x.name),
+    ['build'],
+  );
+  assert.equal(puts(sim), 0, 'never merged on the bound set alone');
 });

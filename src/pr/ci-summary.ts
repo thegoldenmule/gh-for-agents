@@ -28,6 +28,7 @@ import { type CiSnapshot, snapshotSummary } from '../ci/snapshot.ts';
 import { isRed } from '../ci/summary.ts';
 import { type BaselineStats, computeEta } from '../ci/wait/eta.ts';
 import {
+  addRequired,
   buildExpectedSet,
   type ConfigExpectedEntry,
   configExpected,
@@ -191,6 +192,17 @@ async function expectedSet(o: CiSummaryOptions, graceOver: boolean): Promise<Exp
 }
 
 /**
+ * A caller's bound definitions plus the required contexts read now (cached as pr status reads them). It
+ * only ever adds: a set bound from a partial or old required read cannot drop a required check at the
+ * merge gate or at pr land's final merge.
+ */
+async function withFreshRequired(o: CiSummaryOptions, defs: readonly ExpectedDef[]): Promise<ExpectedDef[]> {
+  const cache = await repoCache({ artifacts: o.artifacts, repo: o.repo, clock: o.clock, ns: PR_CI_CACHE_NS });
+  const required = requiredChecks((await requiredSources(o, cache)).sources, o.ci.checks);
+  return addRequired(defs, required, o.config.ignore);
+}
+
+/**
  * A caller's bound definitions matched against the checks: its `agedOut` when it passes one, else the
  * grace rule (every missing baseline check is absent once everything else settled EXPECT_GRACE_MS ago).
  */
@@ -346,7 +358,7 @@ export async function buildCiSummary(o: CiSummaryOptions): Promise<CiSummaryResu
   const at = settledAt(s.checks);
   const graceOver = at !== null && o.clock.now() - at >= EXPECT_GRACE_MS;
   const expected = o.expectedDefs
-    ? boundExpected(o.expectedDefs, s.checks, o.agedOut, graceOver)
+    ? boundExpected(await withFreshRequired(o, o.expectedDefs), s.checks, o.agedOut, graceOver)
     : await expectedSet(o, graceOver);
   const summary = snapshotSummary(s, { expected, eta: pending.length > 0 ? await etaOf(o, pending) : null });
   const red = s.checks.filter(isRed);

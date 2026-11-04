@@ -143,6 +143,21 @@ export function buildExpectedSet(i: BuildExpectedInput): ExpectedDef[] {
   return out;
 }
 
+/** `defs` plus each required name not already there (ci.ignore still applies): it never removes one. */
+export function addRequired(
+  defs: readonly ExpectedDef[],
+  required: readonly string[],
+  ignore: readonly IgnoreRule[] = [],
+): ExpectedDef[] {
+  const out = [...defs];
+  for (const name of required) {
+    if (out.some((d) => overlaps(d, name, null))) continue;
+    if (ignoreRuleFor({ name, workflow: null }, ignore)) continue;
+    out.push({ name, workflow: null, source: 'required' });
+  }
+  return out;
+}
+
 /** Whether a reported check satisfies an expected definition (same name; same workflow when the definition names one). */
 export function satisfies(
   def: Pick<ExpectedDef, 'name' | 'workflow'>,
