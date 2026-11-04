@@ -16,7 +16,7 @@ import {
   expectedState,
 } from '../../../../src/ci/wait/expected.ts';
 import { decide, initialState, observe, WAIT_DEFAULTS } from '../../../../src/ci/wait/machine.ts';
-import { GATE_MIN_HOLD_MS, type GateClock, gateVerdict } from '../../../../src/ci/wait/mergeable.ts';
+import { createGateClocks, GATE_MIN_HOLD_MS, type GateClock, gateVerdict } from '../../../../src/ci/wait/mergeable.ts';
 import { detectStalls, stallConfig } from '../../../../src/ci/wait/stall.ts';
 import { ciConfigFingerprint } from '../../../../src/ci/wait/state.ts';
 import { boundExpected } from '../../../../src/pr/ci-summary.ts';
@@ -79,7 +79,7 @@ function gateRead(o: { pending?: boolean; missing?: string[]; ciPending?: string
 
 const clock = (o: Partial<GateClock> = {}): GateClock => ({
   now: SETTLED + 11 * MIN,
-  settledAt: SETTLED,
+  settledSince: SETTLED,
   missingMs: 10 * MIN,
   heldMs: GATE_MIN_HOLD_MS,
   ...o,
@@ -151,7 +151,7 @@ test('gate: a missing check past missingMinutes after settle, held for GATE_MIN_
   assert.equal(gateVerdict(r, H), null, 'no clock: keep polling (the old behaviour)');
   assert.equal(gateVerdict(r, H, clock({ now: SETTLED + 2 * MIN })), null, 'within missingMinutes');
   assert.equal(gateVerdict(r, H, clock({ heldMs: GATE_MIN_HOLD_MS - 1 })), null, 'not held long enough yet');
-  assert.equal(gateVerdict(r, H, clock({ settledAt: null })), null, 'the wait has pending checks');
+  assert.equal(gateVerdict(r, H, clock({ settledSince: null })), null, 'the gate’s view has pending checks');
   const v = gateVerdict(r, H, clock());
   assert.equal(v?.outcome, 'stalled');
   assert.equal(v?.reason, 'expected-missing');
@@ -163,15 +163,18 @@ test('gate: a missing check past missingMinutes after settle, held for GATE_MIN_
   );
 });
 
-test('gate: a GraphQL view still pending long after the wait settled, or a stuck UNKNOWN, ends stalled', () => {
-  const pending = gateVerdict(gateRead({ ciPending: ['e2e'] }), H, clock());
-  assert.equal(pending?.reason, 'gate-pending');
-  assert.deepEqual(
-    pending?.stalled?.map((s) => [s.name, s.state]),
-    [['e2e', 'queued']],
-  );
+test('gate: a check still pending in its own view keeps it polling, however long (review finding 2)', () => {
+  // --check filters the wait's checks, never the gate's: an unselected running check is not a stall.
+  for (const now of [SETTLED + 11 * MIN, SETTLED + 10 * 60 * MIN]) {
+    assert.equal(gateVerdict(gateRead({ ciPending: ['e2e'] }), H, clock({ now })), null);
+    assert.equal(gateVerdict(gateRead({ ciPending: ['e2e'], missing: ['x'] }), H, clock({ now })), null);
+  }
+});
+
+test('gate: a stuck UNKNOWN ends stalled with nothing to rerun', () => {
   const unknown = gateRead({ pending: false, unknown: true });
   assert.equal(gateVerdict(unknown, H, clock({ heldMs: 0 })), null, 'a fresh UNKNOWN is polled');
+  assert.equal(gateVerdict(unknown, H, clock({ now: SETTLED + 9 * MIN })), null, 'within missingMinutes');
   const v = gateVerdict(unknown, H, clock());
   assert.equal(v?.outcome, 'stalled');
   assert.equal(v?.reason, 'mergeable-unknown');
@@ -209,4 +212,37 @@ test('ci.ignore with the exact name drops the expectation from every source, and
     ignoreRuleFor({ name: 'packaging snapshot / build', workflow: 'Snapshot' }, ['packaging snapshot']),
     undefined,
   );
+});
+
+test('gate clocks are per target: one PR’s hold and settle time never count for another (review finding 6)', () => {
+  const c = createGateClocks();
+  const A = 'o/r#12@a';
+  const B = 'o/r#13@b';
+  assert.equal(c.clock(A, T0, true, 10 * MIN).heldMs, 0);
+  c.answered(A, T0, null);
+  const a = c.clock(A, T0 + 30 * MIN, true, 10 * MIN);
+  assert.deepEqual([a.settledSince, a.heldMs], [T0, 30 * MIN]);
+  const b = c.clock(B, T0 + 30 * MIN, true, 10 * MIN);
+  assert.deepEqual([b.settledSince, b.heldMs], [T0 + 30 * MIN, 0], 'B starts its own clocks');
+  // A pending check resets the settle clock; an answer resets the hold.
+  assert.equal(c.clock(A, T0 + 31 * MIN, false, 10 * MIN).settledSince, null);
+  c.answered(A, T0 + 31 * MIN, {
+    outcome: 'green',
+    reason: 'mergeable',
+    merge: { mergeable: 'MERGEABLE', ready: true, blockers: [], waivers: [] },
+  });
+  assert.equal(c.clock(A, T0 + 32 * MIN, true, 10 * MIN).heldMs, 0);
+});
+
+test('the gate bound runs on the local clock: a GitHub completedAt from a skewed clock cannot shorten it (finding 7)', () => {
+  // Checks that GitHub stamped hours "ago" (local clock ahead) still get the full missingMinutes after the
+  // gate first sees them settled.
+  const c = createGateClocks();
+  const k = 'o/r#27@h';
+  const first = c.clock(k, T0, true, 10 * MIN);
+  c.answered(k, T0, null);
+  const r = gateRead({ missing: ['packaging snapshot'] });
+  assert.equal(gateVerdict(r, H, first), null);
+  assert.equal(gateVerdict(r, H, c.clock(k, T0 + 9 * MIN, true, 10 * MIN)), null);
+  assert.equal(gateVerdict(r, H, c.clock(k, T0 + 11 * MIN, true, 10 * MIN))?.reason, 'expected-missing');
 });

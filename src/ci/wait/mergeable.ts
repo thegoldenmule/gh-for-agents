@@ -10,6 +10,7 @@
 import type { StreamContext } from '../../core/command.ts';
 import { rethrowControlFlow } from '../../core/control-flow.ts';
 import { GhFailure } from '../../gh/index.ts';
+import { repoSlug } from '../../gh/types.ts';
 import { loadPrStatus, type PrStatusState } from '../../pr/status/compose.ts';
 import type { Outcome, StalledCheck, TargetSummary } from '../../schemas/ci.ts';
 import type { SettleHook } from './driver.ts';
@@ -28,16 +29,20 @@ export interface GateResult {
 
 /**
  * How long the gate may keep answering "keep polling" in this process, at least, before it can give up:
- * a few polls, so a resumed wait on long-settled CI still rides out a brief UNKNOWN or REST/GraphQL lag.
+ * a few polls, so a short UNKNOWN or REST/GraphQL lag is always ridden out.
  */
 export const GATE_MIN_HOLD_MS = 60_000;
 
-/** The clocks behind the gate's own bound (all epoch ms or ms). */
+/** The clocks behind the gate's own bound, all local (epoch ms, or ms). */
 export interface GateClock {
   now: number;
-  /** When the wait's checks all completed (stall.ts settledAt), or null while any is pending. */
-  settledAt: number | null;
-  /** ci.stall.missingMinutes in ms: how long after settling an expected check may still be missing. */
+  /**
+   * When this gate first saw its own (GraphQL, unfiltered) CI view with every check complete, by the local
+   * clock; null while any is pending. Local, not GitHub's completedAt, so clock skew cannot shorten or
+   * remove the bound, and `--check` cannot make unselected running checks look settled.
+   */
+  settledSince: number | null;
+  /** ci.stall.missingMinutes in ms: how long after that an expected check may still be missing. */
   missingMs: number;
   /** How long this gate has been answering null in this process. */
   heldMs: number;
@@ -45,10 +50,11 @@ export interface GateClock {
 
 /**
  * The gate's verdict on one loadPrStatus read, or null to keep polling. Pure.
- * Keep-polling is bounded (02 §11.1: a wait ends when CI finishes or stalls): once the wait's CI settled
- * more than `missingMs` ago and the gate has held for GATE_MIN_HOLD_MS, a gate still at CI_PENDING (a
- * missing expected check, or checks its GraphQL view still shows pending) or MERGEABLE_UNKNOWN ends
- * `stalled` (exit 14), naming what it waited on, instead of polling forever.
+ * Keep-polling is bounded (02 §11.1: a wait ends when CI finishes or stalls): once the gate's own CI view
+ * has had nothing pending for more than `missingMs` and the gate has held for GATE_MIN_HOLD_MS, a gate
+ * still at CI_PENDING for a missing expected check (`expected-missing`) or at MERGEABLE_UNKNOWN
+ * (`mergeable-unknown`) ends `stalled` (exit 14) instead of polling forever. A check still pending in that
+ * view keeps it polling: running checks end on their own (GitHub's job timeouts, the wait's stall rules).
  */
 export function gateVerdict(
   s: Pick<PrStatusState, 'snapshot' | 'ci' | 'evaluation'>,
@@ -65,9 +71,13 @@ export function gateVerdict(
     blockers: plan.blockers.map((b) => b.code),
     waivers: plan.waivers.map((w) => w.code),
   };
-  const settledFor = clock && clock.settledAt !== null ? clock.now - clock.settledAt : null;
+  const settledFor = clock && clock.settledSince !== null ? clock.now - clock.settledSince : null;
   const overdue =
-    clock !== undefined && settledFor !== null && settledFor > clock.missingMs && clock.heldMs >= GATE_MIN_HOLD_MS;
+    clock !== undefined &&
+    settledFor !== null &&
+    s.ci.pending.length === 0 &&
+    settledFor > clock.missingMs &&
+    clock.heldMs >= GATE_MIN_HOLD_MS;
   const stuck = (reason: string, stalled: StalledCheck[] = []): GateResult => ({
     outcome: 'stalled',
     reason,
@@ -78,19 +88,18 @@ export function gateVerdict(
   if (status('MERGEABLE_UNKNOWN') === 'fail') return overdue ? stuck('mergeable-unknown') : null;
   if (status('CI_PENDING') === 'fail' && !s.ci.truncated) {
     if (!overdue || !clock || settledFor === null) return null;
-    const entry = (name: string, state: StalledCheck['state']): StalledCheck => ({
-      name,
-      state,
-      forSec: Math.floor(settledFor / 1000),
-      thresholdSec: Math.round(clock.missingMs / 1000),
-      basis: STALL_BASIS.missing,
-    });
     const missing = s.ci.expectedMissing.filter((e) => e.state === 'missing');
-    const stalled = [
-      ...missing.map((e) => entry(e.name, 'missing')),
-      ...s.ci.pending.map((p) => entry(p.name, p.status === 'queued' ? 'queued' : 'running')),
-    ];
-    return stuck(missing.length > 0 ? 'expected-missing' : 'gate-pending', stalled);
+    if (missing.length === 0) return null;
+    return stuck(
+      'expected-missing',
+      missing.map((e) => ({
+        name: e.name,
+        state: 'missing' as const,
+        forSec: Math.floor(settledFor / 1000),
+        thresholdSec: Math.round(clock.missingMs / 1000),
+        basis: STALL_BASIS.missing,
+      })),
+    );
   }
   if (s.evaluation.ready) {
     const shared = s.ci.failing.length > 0 && status('CI_RED') === 'waived';
@@ -105,16 +114,53 @@ export function gateVerdict(
   };
 }
 
+/** One target's gate state: consecutive read failures and the local clocks behind its bound. */
+interface TargetGate {
+  failures: number;
+  heldSince: number | null;
+  settledSince: number | null;
+}
+
+/**
+ * The gate's per-target state (`ci wait 12 13 --until mergeable` shares one gate), keyed by repo, PR and
+ * head, so one PR's hold or settle time never counts for another. Exported for tests.
+ */
+export function createGateClocks() {
+  const byTarget = new Map<string, TargetGate>();
+  const get = (key: string): TargetGate => {
+    let g = byTarget.get(key);
+    if (!g) {
+      g = { failures: 0, heldSince: null, settledSince: null };
+      byTarget.set(key, g);
+    }
+    return g;
+  };
+  return {
+    get,
+    /** The GateClock for this read: `settled` is the gate's own view with nothing pending. */
+    clock(key: string, now: number, settled: boolean, missingMs: number): GateClock {
+      const g = get(key);
+      g.settledSince = settled ? (g.settledSince ?? now) : null;
+      return { now, settledSince: g.settledSince, missingMs, heldMs: g.heldSince === null ? 0 : now - g.heldSince };
+    },
+    /** After a verdict: null keeps the hold running, an answer resets it. */
+    answered(key: string, now: number, verdict: GateResult | null): void {
+      const g = get(key);
+      g.heldSince = verdict === null ? (g.heldSince ?? now) : null;
+    },
+  };
+}
+
 /**
  * The settle hook for `--until mergeable`. `compareMain` follows --no-compare-main; with --check the
  * wait's aged-out baselines cover only the considered checks, so the gate falls back to the grace rule.
  */
 export function createMergeGate(ctx: StreamContext, o: { compareMain: boolean; useAgedOut: boolean }): SettleHook {
-  let failures = 0;
-  /** When this gate started answering null (epoch ms); reset by any verdict. */
-  let heldSince: number | null = null;
-  return async ({ target, repo, headSha, agedOut, expected, checks, warn }) => {
+  const clocks = createGateClocks();
+  return async ({ target, repo, headSha, agedOut, expected, warn }) => {
     if (target.kind !== 'pr') throw new Error('unreachable: --until mergeable takes PR targets only');
+    const key = `${repoSlug(repo)}#${target.number}@${headSha}`;
+    const g = clocks.get(key);
     let state: PrStatusState;
     let missingMs = stallConfig().missingMinutes * 60_000;
     try {
@@ -134,11 +180,11 @@ export function createMergeGate(ctx: StreamContext, o: { compareMain: boolean; u
         expectedDefs: expected,
         configSource: source,
       });
-      failures = 0;
+      g.failures = 0;
     } catch (e) {
       rethrowControlFlow(e);
       // Like a failed tick: a gh failure is retried on the next poll, up to MAX_GATE_FAILURES in a row.
-      if (!(e instanceof GhFailure) || ++failures >= MAX_GATE_FAILURES) throw e;
+      if (!(e instanceof GhFailure) || ++g.failures >= MAX_GATE_FAILURES) throw e;
       warn({
         code: 'MERGE_GATE_RETRY',
         message: `The merge gate could not be read (${e.message}); retrying on the next poll.`,
@@ -147,13 +193,10 @@ export function createMergeGate(ctx: StreamContext, o: { compareMain: boolean; u
     }
     for (const w of state.warnings) warn(w);
     const now = ctx.clock.now();
-    const verdict = gateVerdict(state, headSha, {
-      now,
-      settledAt: settledAt(checks),
-      missingMs,
-      heldMs: heldSince === null ? 0 : now - heldSince,
-    });
-    heldSince = verdict === null ? (heldSince ?? now) : null;
+    // Settled as the gate sees it: its own unfiltered view (the wait's checks may be --check-filtered).
+    const settled = settledAt(state.snapshot.ci.checks) !== null;
+    const verdict = gateVerdict(state, headSha, clocks.clock(key, now, settled, missingMs));
+    clocks.answered(key, now, verdict);
     return verdict;
   };
 }
