@@ -396,6 +396,38 @@ test('CI_PENDING: pending with only a baseline check missing blocks (04: §11.2/
   assert.match(e.plan.blockers[0]?.message ?? '', /e2e not reported yet/);
 });
 
+test('CI_PENDING: a missing config-expected check names where ci.expected was read', () => {
+  const origin = {
+    label: 'the working tree at fb84c4e',
+    details: { kind: 'local', path: '/w/r/.github/ghx.json', commit: 'fb84c4e'.padEnd(40, '0'), dirty: false },
+  };
+  const missing = {
+    name: 'packaging snapshot',
+    workflow: 'Snapshot',
+    source: 'config' as const,
+    state: 'missing' as const,
+  };
+  const e = evaluate({
+    ci: ci({ state: 'pending', phase: 'partial', expectedMissing: [missing] }),
+    configOrigin: origin,
+  });
+  const b = e.plan.blockers.find((x) => x.code === 'CI_PENDING');
+  assert.equal(b?.overridable, false);
+  assert.equal(
+    b?.message,
+    'packaging snapshot not reported yet for 9f2c4e1; ci.expected from the working tree at fb84c4e.',
+  );
+  assert.deepEqual(b?.details?.config, origin.details);
+  assert.deepEqual(b?.details?.missingSources, [{ name: 'packaging snapshot', source: 'config' }]);
+  // A baseline-only gap is not the config's doing: the details name the source, the message does not.
+  const base = evaluate({
+    ci: ci({ state: 'pending', phase: 'partial', expectedMissing: [{ ...missing, source: 'baseline' }] }),
+    configOrigin: origin,
+  }).plan.blockers.find((x) => x.code === 'CI_PENDING');
+  assert.equal(base?.message, 'packaging snapshot not reported yet for 9f2c4e1.');
+  assert.deepEqual(base?.details?.config, origin.details);
+});
+
 test('CI_PENDING: a truncated check read blocks, even when every read check is red or green', () => {
   for (const c of [
     ci({ state: 'pending', phase: 'partial', truncated: true }),

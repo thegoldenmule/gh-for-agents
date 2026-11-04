@@ -88,6 +88,14 @@ export interface MergePolicyInput {
   now: number;
   /** `ci-gate` keeps only 02 §8.2 rows 6–12 (ci wait --until mergeable). */
   scope?: 'full' | 'ci-gate';
+  /** Where ci.expected was read (config/load.ts sourceLabel and describeSource), for CI_PENDING. */
+  configOrigin?: ConfigOrigin;
+}
+
+/** The config source as the CI_PENDING blocker names it: a phrase for the message and JSON for details. */
+export interface ConfigOrigin {
+  label: string;
+  details: Record<string, unknown>;
 }
 
 export interface MergeEvaluation {
@@ -258,9 +266,14 @@ function ciPending(i: MergePolicyInput): Result {
     ...(pendingState && ci.pending.length === 0 && missing.length === 0 ? ['checks not registered yet'] : []),
   ];
   const eta = ci.eta ? ` (ETA ~${Math.max(1, Math.ceil(ci.eta.seconds / 60))}m)` : '';
-  return fail(`${parts.join('; ')} for ${short(ci.headSha)}${eta}.`, {
+  // A config-expected check that never comes is often a stale ci.expected: name the file that expects it.
+  const origin = i.configOrigin;
+  const fromConfig = origin && missing.some((m) => m.source === 'config') ? `; ci.expected from ${origin.label}` : '';
+  return fail(`${parts.join('; ')} for ${short(ci.headSha)}${eta}${fromConfig}.`, {
     pending: ci.pending.map((p) => p.name),
     missing: missing.map((m) => m.name),
+    ...(missing.length ? { missingSources: missing.map((m) => ({ name: m.name, source: m.source })) } : {}),
+    ...(origin ? { config: origin.details } : {}),
     hint: `Wait for CI: ghx ci wait ${s.ref} --until mergeable (run it in the background).`,
   });
 }
