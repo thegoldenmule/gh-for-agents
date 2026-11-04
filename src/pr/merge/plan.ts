@@ -59,7 +59,7 @@ export function headMovedError(ref: string, expected: string, actual: string | n
 export async function planMerge(ctx: Context, flags: MergeFlags): Promise<MergeDecision> {
   // Bad overrides fail before any read (VALIDATION, exit 2).
   const overrides = parseOverrides(flags.override ?? [], flags.reason);
-  const { resolved, number, config, configMissing, warnings } = await prContext(ctx, flags.pr);
+  const { resolved, number, config, configSource, configMissing, warnings } = await prContext(ctx, flags.pr);
   for (const w of warnings) ctx.warn(w);
   const remaining =
     ctx.deadline === undefined ? Infinity : ctx.deadline - ctx.clock.monotonic() - PUT_MARGIN_MS - 10_000;
@@ -73,6 +73,7 @@ export async function planMerge(ctx: Context, flags: MergeFlags): Promise<MergeD
       repo: resolved.repo,
       number,
       config,
+      configSource,
       configMissing,
       mergeableBudgetMs: MERGE_MERGEABLE_BUDGET_MS,
       compareBudgetMs: Math.max(0, Math.min(COMPARE_BUDGET_MS, remaining)),

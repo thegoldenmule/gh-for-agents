@@ -6,6 +6,7 @@
 // itself is not completed. A PR that settles as no-checks while it conflicts with its base says so.
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { type ConfigSource, describeSource, sourceLabel } from '../../config/load.ts';
 import type { CiSection } from '../../config/sections/ci.ts';
 import type { StreamContext } from '../../core/command.ts';
 import { rethrowControlFlow } from '../../core/control-flow.ts';
@@ -19,6 +20,7 @@ import { type RepoRef, repoSlug } from '../../gh/types.ts';
 import { PR_CI_CACHE_NS, REQUIRED_TTL_MS, requiredCacheKey } from '../../pr/ci-summary.ts';
 import type {
   Check,
+  ConfigSourceInfo,
   ExpectedCheck,
   FailingJob,
   Outcome,
@@ -42,7 +44,13 @@ import { type ActionsJob, listRunJobs } from '../github.ts';
 import { invalidRunNext, invalidRunWarning, isInvalidRunCheck, WORKFLOW_INVALID_REASON } from '../invalid-runs.ts';
 import { isRed, summariseCi } from '../summary.ts';
 import { computeEta, type EtaEstimate } from './eta.ts';
-import { buildExpectedSet, configExpected, previousHeadCandidates, requiredChecks } from './expected.ts';
+import {
+  buildExpectedSet,
+  configExpected,
+  type ExpectedDef,
+  previousHeadCandidates,
+  requiredChecks,
+} from './expected.ts';
 import {
   fetchBaseline,
   fetchChangedFiles,
@@ -66,7 +74,14 @@ import {
 } from './machine.ts';
 import { createPoller, type Poller, type PullInfo, TickFailed, type TickResult } from './poller.ts';
 import { detectStalls, settledAt, stallConfig } from './stall.ts';
-import { createWaitStore, LEASE_GRACE_MS, type Lease, type WaitState, type WaitStore } from './state.ts';
+import {
+  ciConfigFingerprint,
+  createWaitStore,
+  LEASE_GRACE_MS,
+  type Lease,
+  type WaitState,
+  type WaitStore,
+} from './state.ts';
 import { aggregate, type CommandShape, compactTarget, fitDocument, identicalCommand, nextFor } from './summary.ts';
 import {
   boundKey,
@@ -140,6 +155,8 @@ export type SettleHook = (o: {
   checks: readonly Check[];
   /** Baseline checks this wait aged out (02 §11.3), for the gate's expected set. */
   agedOut: readonly string[];
+  /** The expected definitions this wait bound: the gate judges the same set (04, one check set). */
+  expected: readonly ExpectedDef[];
   /** The wait's warning sink (deduplicated and capped in the summary). */
   warn: (w: { code: string; message: string }) => void;
 }) => Promise<{
@@ -147,6 +164,7 @@ export type SettleHook = (o: {
   reason?: string;
   merge: NonNullable<TargetSummary['merge']>;
   next?: string[];
+  stalled?: StalledCheck[];
 } | null>;
 
 export type WaitEventOut = MachineEvent | WaitStartEvent | OtherEvent;
@@ -159,6 +177,7 @@ type WaitStartEvent = {
   counts: TargetSummary['ci']['counts'];
   expected: ExpectedCheck[];
   eta: EtaEstimate['eta'];
+  config?: ConfigSourceInfo;
 };
 type OtherEvent =
   | { type: 'diagnosis'; target: string; headSha: string; job: ReturnType<typeof eventDiagnosis> }
@@ -184,6 +203,10 @@ interface Run {
   store: WaitStore;
   cache: JsonCache;
   ci: CiConfig;
+  /** Where `ci` was read, for the `start` event. */
+  configSource: ConfigSource;
+  /** ciConfigFingerprint(ci): a stored state derived under another config is re-derived (bind). */
+  configFingerprint: string;
   poller: Poller;
   st: WaitState | null;
   /** A state loaded from disk for the latest binding (resume), until the first tick confirms it. */
@@ -309,7 +332,8 @@ export async function* runWait(
         details: { issues: [{ path: 'targets', code: 'duplicate', message: `${label} is listed twice` }] },
       });
     }
-    const ci = (await ctx.config({ ref: repo })).config.ci;
+    const loadedConfig = await ctx.config({ ref: repo });
+    const ci = loadedConfig.config.ci;
     const store = await createWaitStore({
       artifacts: ctx.artifacts,
       repo,
@@ -343,6 +367,8 @@ export async function* runWait(
       // pr status's namespace: the merge gate (M6.6) then reuses this wait's baselines and ETA samples.
       cache: await repoCache({ artifacts: ctx.artifacts, repo, clock, ns: PR_CI_CACHE_NS }),
       ci,
+      configSource: loadedConfig.source,
+      configFingerprint: ciConfigFingerprint(ci),
       poller: createPoller({
         gh: ctx.gh,
         repo,
@@ -526,7 +552,24 @@ export async function* runWait(
         r.waitStartedAt = loaded.state.waitStartedAt;
         r.restarts = loaded.state.restarts;
       }
-      return loaded.state;
+      const stored = loaded.state.configFingerprint;
+      if (stored !== undefined && stored !== r.configFingerprint) {
+        // Bound under another ci.expected / ci.ignore (another checkout, or an edit since): judge this
+        // run's config, as pr status and pr merge from the same cwd do. Observations, ETags and
+        // diagnoses stay; a stored answer may no longer hold.
+        warn({
+          code: 'WAIT_CONFIG_CHANGED',
+          message: `${r.label}: the saved wait state was derived from another ci.expected/ci.ignore than ${sourceLabel(r.configSource)}; re-deriving the expected checks.`,
+        });
+        const expected = await expectedDefs(r, sha, loaded.state.base);
+        return {
+          ...loaded.state,
+          configFingerprint: r.configFingerprint,
+          terminal: null,
+          machine: { ...loaded.state.machine, expected, othersSettledAt: null },
+        };
+      }
+      return stored === undefined ? { ...loaded.state, configFingerprint: r.configFingerprint } : loaded.state;
     }
     if (loaded.kind === 'discarded') {
       warn({
@@ -551,6 +594,7 @@ export async function* runWait(
       restarts: r.restarts,
       base,
       defaultBranch,
+      configFingerprint: r.configFingerprint,
       machine: initialState({ target: r.label, boundSha: sha, boundAt: clock.now(), expected }),
       poller: r.poller.state(),
       baselines: {},
@@ -946,6 +990,7 @@ export async function* runWait(
         counts: summariseCi({ headSha: st.boundSha, checks, ignored }).counts,
         expected: ob.expected,
         eta: estimate.eta,
+        config: describeSource(r.configSource) as ConfigSourceInfo,
       };
     }
     yield* ob.events;
@@ -968,11 +1013,13 @@ export async function* runWait(
               ciOutcome: d.outcome,
               checks,
               agedOut: st.machine.agedOut,
+              expected: st.machine.expected,
               warn,
             })
           : { outcome: d.outcome, reason: d.reason, merge: null };
         if (gated) {
-          finish(r, gated.outcome, gated.reason ?? d.reason, d, gated.merge ? gated : undefined);
+          const dd = 'stalled' in gated && gated.stalled ? { ...d, settled: false, stalled: gated.stalled } : d;
+          finish(r, gated.outcome, gated.reason ?? d.reason, dd, gated.merge ? gated : undefined);
           return;
         }
       } else {

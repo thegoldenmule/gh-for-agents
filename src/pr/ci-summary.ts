@@ -1,7 +1,10 @@
 // The shared CI-summary composition (04; 02 §4.3 steps 6–7), called by pr status, pr merge and ci wait
 // --until mergeable so merge.ready has one set of inputs.
-// - The expected set is ci wait's (04, one check set): required sources (cached, else read and cached),
-//   config and baseline, read via ci wait's helpers and cached under PR_CI_CACHE_NS.
+// - The expected set is derived as ci wait derives it: required sources (cached, else read and cached),
+//   config and baseline, read via ci wait's helpers and cached under PR_CI_CACHE_NS. `config` is this
+//   process's (the cwd working tree when it is the target's checkout), so two checkouts can disagree.
+//   The merge gate of ci wait --until mergeable therefore passes `expectedDefs`, the set the wait bound,
+//   and judges exactly that (04, one check set); pr status and pr merge derive their own.
 // - Baselines age to `absent` as in ci wait's machine (02 §11.3): only once everything else settled
 //   EXPECT_GRACE_MS ago, unless the caller passes `agedOut`. Quiet (that case, cache warm): no REST call,
 //   no baseline read, `eta: null`.
@@ -28,6 +31,7 @@ import {
   buildExpectedSet,
   type ConfigExpectedEntry,
   configExpected,
+  type ExpectedDef,
   expectedState,
   previousHeadCandidates,
   type RequiredSources,
@@ -88,6 +92,11 @@ export interface CiSummaryOptions {
   compareBudgetMs?: number;
   /** Baseline names a stateful caller (ci wait) has aged out itself; replaces the grace rule. */
   agedOut?: readonly string[];
+  /**
+   * The expected definitions a stateful caller (ci wait) bound: used as is instead of re-deriving them
+   * from this process's config, so the merge gate judges the set the wait settled on (04, one check set).
+   */
+  expectedDefs?: readonly ExpectedDef[];
   warn: (w: Warning) => void;
 }
 
@@ -179,6 +188,27 @@ async function expectedSet(o: CiSummaryOptions, graceOver: boolean): Promise<Exp
   });
   const defs = buildExpectedSet({ ...input, baseline });
   return expectedState(defs, checks, o.agedOut ?? []);
+}
+
+/**
+ * A caller's bound definitions matched against the checks: its `agedOut` when it passes one, else the
+ * grace rule (every missing baseline check is absent once everything else settled EXPECT_GRACE_MS ago).
+ */
+export function boundExpected(
+  defs: readonly ExpectedDef[],
+  checks: readonly Check[],
+  agedOut: readonly string[] | undefined,
+  graceOver: boolean,
+): ExpectedCheck[] {
+  if (agedOut) return expectedState(defs, checks, agedOut);
+  const head = expectedState(
+    defs.filter((d) => d.source !== 'baseline'),
+    checks,
+  );
+  const othersSettled =
+    checks.length > 0 && !checks.some((c) => c.bucket === 'pending') && !head.some((e) => e.state === 'missing');
+  const aged = othersSettled && graceOver ? defs.filter((d) => d.source === 'baseline').map((d) => d.name) : [];
+  return expectedState(defs, checks, aged);
 }
 
 async function etaOf(o: CiSummaryOptions, pending: readonly Check[]): Promise<CiSummary['eta']> {
@@ -315,7 +345,9 @@ export async function buildCiSummary(o: CiSummaryOptions): Promise<CiSummaryResu
   const pending = s.checks.filter((c) => c.bucket === 'pending');
   const at = settledAt(s.checks);
   const graceOver = at !== null && o.clock.now() - at >= EXPECT_GRACE_MS;
-  const expected = await expectedSet(o, graceOver);
+  const expected = o.expectedDefs
+    ? boundExpected(o.expectedDefs, s.checks, o.agedOut, graceOver)
+    : await expectedSet(o, graceOver);
   const summary = snapshotSummary(s, { expected, eta: pending.length > 0 ? await etaOf(o, pending) : null });
   const red = s.checks.filter(isRed);
   if (o.compareMain !== false && red.length > 0) {

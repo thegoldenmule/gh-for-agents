@@ -187,6 +187,16 @@ export const UntilMode = z.enum(['first-failure', 'settled', 'mergeable']);
 const T = { target: z.string() };
 
 /** 01's stream runner adds `seq` and `at` to every line. */
+/** Where a command read .github/ghx.json (config/load.ts describeSource). */
+export const ConfigSourceInfo = z.object({
+  kind: z.enum(['local', 'remote', 'default']),
+  path: z.string().optional(),
+  commit: z.string().optional().describe('local: HEAD of the checkout'),
+  dirty: z.boolean().optional().describe('local: the file differs from HEAD'),
+  repo: z.string().optional().describe('remote: owner/repo'),
+  ref: z.string().optional().describe('remote: the branch read'),
+});
+
 export const WaitEvent = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('start'),
@@ -197,6 +207,7 @@ export const WaitEvent = z.discriminatedUnion('type', [
     counts: CiCounts,
     expected: z.array(ExpectedCheck),
     eta: Eta.nullable(),
+    config: ConfigSourceInfo.optional().describe('Where ci.expected was read'),
   }),
   z.object({ type: z.literal('phase'), ...T, headSha: Sha, from: CiPhase, to: CiPhase }),
   z.object({
@@ -309,6 +320,7 @@ export type FailingJob = z.infer<typeof FailingJob>;
 export type DiagnosisJob = z.infer<typeof DiagnosisJob>;
 export type CompactDiagnosis = z.infer<typeof CompactDiagnosis>;
 export type WaitEvent = z.infer<typeof WaitEvent>;
+export type ConfigSourceInfo = z.infer<typeof ConfigSourceInfo>;
 export type Outcome = z.infer<typeof Outcome>;
 export type StalledCheck = z.infer<typeof StalledCheck>;
 export type TargetSummary = z.infer<typeof TargetSummary>;

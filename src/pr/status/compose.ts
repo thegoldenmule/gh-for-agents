@@ -4,6 +4,8 @@
 // Warnings are returned, never sent to ctx.warn: the runner would replace a command's own `warnings` list.
 // With a `deadline` (pr status), the mergeable retry and the main comparison are cut to fit it, each budget
 // taken from the time left when that step starts, so a slow PR ends with what is known instead of timing out.
+import type { ExpectedDef } from '../../ci/wait/expected.ts';
+import { type ConfigSource, describeSource, sourceLabel } from '../../config/load.ts';
 import type { ArtifactStore } from '../../core/artifacts.ts';
 import type { Clock } from '../../core/clock.ts';
 import type { Gh } from '../../gh/index.ts';
@@ -54,6 +56,10 @@ export interface LoadPrStatusOptions {
   scope?: 'full' | 'ci-gate';
   /** Baseline names ci wait has aged out itself (buildCiSummary's agedOut); default: the grace rule. */
   agedOut?: readonly string[];
+  /** Where `config` was read, named by the CI_PENDING blocker. */
+  configSource?: ConfigSource;
+  /** The expected definitions ci wait bound (buildCiSummary's expectedDefs); default: derived here. */
+  expectedDefs?: readonly ExpectedDef[];
 }
 
 export interface PrStatusState {
@@ -113,6 +119,7 @@ export async function loadPrStatus(o: LoadPrStatusOptions): Promise<PrStatusStat
     compareMain: o.compareMain !== false,
     ...(compareBudgetMs !== undefined ? { compareBudgetMs } : {}),
     ...(o.agedOut ? { agedOut: o.agedOut } : {}),
+    ...(o.expectedDefs ? { expectedDefs: o.expectedDefs } : {}),
     warn: (w) => ciWarnings.push(w),
   });
   const evaluation = evaluateMerge({
@@ -125,6 +132,9 @@ export async function loadPrStatus(o: LoadPrStatusOptions): Promise<PrStatusStat
     ...(o.request ? { request: o.request } : {}),
     now: o.clock.now(),
     ...(o.scope ? { scope: o.scope } : {}),
+    ...(o.configSource
+      ? { configOrigin: { label: sourceLabel(o.configSource), details: describeSource(o.configSource) } }
+      : {}),
   });
   return {
     snapshot,

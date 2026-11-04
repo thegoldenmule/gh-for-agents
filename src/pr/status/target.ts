@@ -1,4 +1,5 @@
 // Selector, repo and config for the PR read commands (02 §1.2, §4.2), shared by pr status and pr feedback.
+import type { ConfigSource } from '../../config/load.ts';
 import type { GhxConfig } from '../../config/schema.ts';
 import type { Context } from '../../core/command.ts';
 import { GhxError } from '../../core/errors.ts';
@@ -11,6 +12,8 @@ export interface PrReadContext {
   resolved: ResolvedRepo;
   number: number;
   config: GhxConfig;
+  /** Where `config` was read (the working tree at a commit, the default branch, or defaults). */
+  configSource: ConfigSource;
   /** No .github/ghx.json in the target repo: defaults are used and pr status adds the CONFIG_MISSING blocker. */
   configMissing: boolean;
   /** CWD_REPO_MISMATCH and CONFIG_MISSING, for the command's own warnings list. */
@@ -40,7 +43,14 @@ export async function prContext(ctx: Context, selector: string): Promise<PrReadC
       message: `${repoSlug(resolved.repo)} has no .github/ghx.json; defaults apply and merge readiness is blocked (CONFIG_MISSING).`,
     });
   }
-  return { resolved, number: target.number, config: loaded.config, configMissing, warnings };
+  return {
+    resolved,
+    number: target.number,
+    config: loaded.config,
+    configSource: loaded.source,
+    configMissing,
+    warnings,
+  };
 }
 
 /** Rethrow, giving a not-found for a cwd-inferred repo the 02 §1.2 rule 3 hint. */
