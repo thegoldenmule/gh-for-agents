@@ -116,6 +116,25 @@ export async function emitDocument(stdout: Sink, doc: unknown, o: OutputOptions)
 }
 
 /**
+ * The output with the run's context warnings (ctx.warn: CONFIG_DRIFT, redirects, …) joined to the
+ * command's own `warnings` (pr status's MERGEABLE_UNKNOWN, CONFIG_MISSING, …): context first, then the
+ * command's, each code+message once. Neither list replaces the other.
+ */
+export function withOutputWarnings(value: unknown, ctxWarnings: readonly Warning[]): Record<string, unknown> {
+  const v = value as Record<string, unknown>;
+  if (ctxWarnings.length === 0) return v;
+  const own = Array.isArray(v.warnings) ? (v.warnings as Warning[]) : [];
+  const seen = new Set<string>();
+  const merged = [...ctxWarnings, ...own].filter((w) => {
+    const k = `${w.code}\u0000${w.message}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return { ...v, warnings: merged };
+}
+
+/**
  * Warnings collected before a failure ride in the error envelope as `error.details.warnings` (02 §1.3),
  * after any the error itself carries; one under the error's own code is dropped. The envelope stays {error:{code, message, hint, details}}: a
  * top-level `warnings` beside `error` would break that strict shape, and emitDocument would then
@@ -340,7 +359,7 @@ export async function runCommandWith(
     if (!result.ok) throw result.e;
 
     const schema = spec.output.extend({ warnings: Warning.array().optional() }) as z.ZodObject;
-    const value = { ...(result.v as Record<string, unknown>), ...(warnings.length > 0 ? { warnings } : {}) };
+    const value = withOutputWarnings(result.v, warnings);
     const checked = schema.safeParse(value);
     if (!checked.success) {
       throw new GhxError('INTERNAL_OUTPUT_CONTRACT', `ghx ${name} produced output that violates its schema.`, {

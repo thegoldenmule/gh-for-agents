@@ -4,6 +4,7 @@
 // replies with fake.on() after install(); later rules win.
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Git } from '../../src/git/index.ts';
 import { FakeClock } from '../helpers/fake-clock.ts';
 import { FakeGh, type GhReply } from '../helpers/fake-gh.ts';
 import { runInProcess, scratchDir } from '../helpers/harness.ts';
@@ -167,12 +168,13 @@ export function install(fake: FakeGh = new FakeGh(), o: InstallOptions = {}): Fa
 }
 
 /** Run `ghx <argv>` against `fake` at NOW (or `clock`), with its own artifact dir. */
-export async function run(argv: string[], fake: FakeGh, o: { clock?: FakeClock; artifacts?: string } = {}) {
+export async function run(argv: string[], fake: FakeGh, o: { clock?: FakeClock; artifacts?: string; git?: Git } = {}) {
   const artifacts = o.artifacts ?? mkdtempSync(join(scratchDir(), 'pr-status-'));
   const r = await runInProcess(argv, {
     gh: fake,
     clock: o.clock ?? new FakeClock(NOW),
     env: { GHX_ARTIFACT_DIR: artifacts },
+    ...(o.git ? { git: o.git } : {}),
   });
   return { ...r, artifacts };
 }

@@ -27,6 +27,7 @@ import {
   type RunDeps,
   type RunOutcome,
   timeoutMsFor,
+  withOutputWarnings,
   withWarnings,
 } from './runner.ts';
 import { createDeadline, GRACE_MS } from './signals.ts';
@@ -271,10 +272,7 @@ export async function runStream(
           return { exitCode: signalExit() ?? code, forced: false };
         }
         if (step.r.done) {
-          const value = {
-            ...(step.r.value as Record<string, unknown>),
-            ...(built.warnings.length > 0 && mode === 'final' ? { warnings: built.warnings } : {}),
-          };
+          const value = mode === 'final' ? withOutputWarnings(step.r.value, built.warnings) : step.r.value;
           const checked = spec.summarySchema.extend({ warnings: Warning.array().optional() }).safeParse(value);
           if (!checked.success) {
             await terminalError(
