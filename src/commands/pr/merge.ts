@@ -3,10 +3,10 @@
 // REST PUT pulls/N/merge with {sha: H, merge_method}, never `gh pr merge`, so the head is pinned server-side.
 import { z } from 'zod';
 import { MergeMethod } from '../../config/sections/_shared.ts';
-import { defineCommand } from '../../core/command.ts';
+import { type Context, defineCommand } from '../../core/command.ts';
 import { DryRunHalt } from '../../gh/index.ts';
 import { afterMerge } from '../../pr/merge/branch.ts';
-import { planMerge } from '../../pr/merge/plan.ts';
+import { type MergeFlags, planMerge } from '../../pr/merge/plan.ts';
 import { putMerge } from '../../pr/merge/put.ts';
 import { PrMergeOutput } from '../../pr/merge/schema.ts';
 import { ShaInput } from '../../schemas/common.ts';
@@ -64,60 +64,66 @@ export default defineCommand({
       note: 'Merge, then delete the remote head branch',
     },
   ],
-  async run(input, ctx) {
-    const d = await planMerge(ctx, input);
-    const { plan, snapshot } = d;
-    const deleteBranch = input.deleteBranch ?? d.config.merge.deleteBranch;
-    const after = () => afterMerge({ ctx, repo: d.repo, snapshot, head: d.head, deleteBranch });
-    if (d.kind === 'already-merged') {
-      if (ctx.dryRun) {
-        ctx.preview({ wouldMerge: false, alreadyMerged: true, mergeCommit: d.mergeCommit, deleteBranch, plan });
-        // A branch delete halts at its DELETE; with nothing to send, halt with an empty wouldRun.
-        await after();
-        throw new DryRunHalt([], undefined);
-      }
-      const { deletedBranch, children } = await after();
-      return {
-        ref: snapshot.ref,
-        merged: true as const,
-        alreadyMerged: true,
-        recoveredFromTransient: false,
-        method: plan.method,
-        headSha: d.head,
-        mergeCommit: d.mergeCommit,
-        mergedAt: d.mergedAt,
-        deletedBranch,
-        children,
-        plan,
-        next: [`ghx ci wait branch:${snapshot.defaultBranch}@${d.mergeCommit}`],
-        warnings: [],
-      };
+  run: (input, ctx) => mergePr(input, ctx),
+});
+
+/** pr merge's body; pr land calls it with the expected set its wait judged (MergeFlags.expected). */
+export async function mergePr(
+  input: z.output<typeof Input> & Pick<MergeFlags, 'expected'>,
+  ctx: Context,
+): Promise<z.output<typeof PrMergeOutput>> {
+  const d = await planMerge(ctx, input);
+  const { plan, snapshot } = d;
+  const deleteBranch = input.deleteBranch ?? d.config.merge.deleteBranch;
+  const after = () => afterMerge({ ctx, repo: d.repo, snapshot, head: d.head, deleteBranch });
+  if (d.kind === 'already-merged') {
+    if (ctx.dryRun) {
+      ctx.preview({ wouldMerge: false, alreadyMerged: true, mergeCommit: d.mergeCommit, deleteBranch, plan });
+      // A branch delete halts at its DELETE; with nothing to send, halt with an empty wouldRun.
+      await after();
+      throw new DryRunHalt([], undefined);
     }
-    ctx.preview({ wouldMerge: true, deleteBranch, plan });
-    const outcome = await putMerge({
-      ctx,
-      repo: d.repo,
-      number: snapshot.number,
-      ref: snapshot.ref,
-      base: snapshot.base.ref,
-      plan,
-    });
-    const { mergeCommit } = outcome;
     const { deletedBranch, children } = await after();
     return {
       ref: snapshot.ref,
       merged: true as const,
-      alreadyMerged: outcome.alreadyMerged,
-      recoveredFromTransient: outcome.recoveredFromTransient,
+      alreadyMerged: true,
+      recoveredFromTransient: false,
       method: plan.method,
       headSha: d.head,
-      mergeCommit,
-      mergedAt: outcome.mergedAt,
+      mergeCommit: d.mergeCommit,
+      mergedAt: d.mergedAt,
       deletedBranch,
       children,
       plan,
-      next: [`ghx ci wait branch:${snapshot.defaultBranch}@${mergeCommit}`],
+      next: [`ghx ci wait branch:${snapshot.defaultBranch}@${d.mergeCommit}`],
       warnings: [],
     };
-  },
-});
+  }
+  ctx.preview({ wouldMerge: true, deleteBranch, plan });
+  const outcome = await putMerge({
+    ctx,
+    repo: d.repo,
+    number: snapshot.number,
+    ref: snapshot.ref,
+    base: snapshot.base.ref,
+    plan,
+  });
+  const { mergeCommit } = outcome;
+  const { deletedBranch, children } = await after();
+  return {
+    ref: snapshot.ref,
+    merged: true as const,
+    alreadyMerged: outcome.alreadyMerged,
+    recoveredFromTransient: outcome.recoveredFromTransient,
+    method: plan.method,
+    headSha: d.head,
+    mergeCommit,
+    mergedAt: outcome.mergedAt,
+    deletedBranch,
+    children,
+    plan,
+    next: [`ghx ci wait branch:${snapshot.defaultBranch}@${mergeCommit}`],
+    warnings: [],
+  };
+}

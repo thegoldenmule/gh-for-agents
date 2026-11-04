@@ -5,7 +5,8 @@
 // wait's diagnosis, or the merge refusal as `error`, with that error's exit code. Placement follows ci
 // wait: the main thread runs it in the background, a subagent in the foreground with --foreground.
 import { z } from 'zod';
-import { runWait } from '../../ci/wait/driver.ts';
+import { runWait, type SettleHook } from '../../ci/wait/driver.ts';
+import type { ExpectedDef } from '../../ci/wait/expected.ts';
 import { createMergeGate } from '../../ci/wait/mergeable.ts';
 import { compactTarget, fitDocument, shellArg } from '../../ci/wait/summary.ts';
 import { MergeMethod } from '../../config/sections/_shared.ts';
@@ -18,7 +19,7 @@ import { planMerge } from '../../pr/merge/plan.ts';
 import { PrMergeOutput } from '../../pr/merge/schema.ts';
 import { TargetSummary, WaitEvent } from '../../schemas/ci.ts';
 import { Sha, ShaInput } from '../../schemas/common.ts';
-import mergeCommand from './merge.ts';
+import { mergePr } from './merge.ts';
 
 const Input = z.strictObject({
   pr: z.string().min(1).describe('PR: 3198, #3198, owner/repo#3198 or a PR URL'),
@@ -79,6 +80,9 @@ export type LandSummary = z.infer<typeof LandSummary>;
 
 type Flags = z.output<typeof Input>;
 
+/** The expected set the merge gate judged, last seen (driver SettleHook). */
+type Judged = { defs: readonly ExpectedDef[]; agedOut: readonly string[] };
+
 /** The identical command, for `pending` and `interrupted`. */
 function landCommand(i: Flags): string {
   const parts = ['ghx', 'pr', 'land', shellArg(i.pr)];
@@ -108,20 +112,22 @@ function waitNext(t: TargetSummary, again: string): string[] {
   return [...new Set(out)];
 }
 
-async function merge(i: Flags, t: TargetSummary, ctx: StreamContext) {
+async function merge(i: Flags, t: TargetSummary, ctx: StreamContext, expected: Judged | null) {
   const flags = {
     pr: t.target,
     expectHead: t.headSha ?? undefined,
     method: i.method,
     override: i.override,
     reason: i.reason,
+    // The set the gate judged ready: the merge must not re-derive another one (one check set).
+    ...(expected ? { expected } : {}),
   };
   if (ctx.dryRun) {
     // A stream command cannot halt at a mutation: plan it (every check, no PUT) and say what would be sent.
     const d = await planMerge(ctx, flags);
     return { kind: 'dry' as const, plan: d.plan, already: d.kind === 'already-merged' };
   }
-  const out = await mergeCommand.run({ ...flags, deleteBranch: i.deleteBranch }, ctx);
+  const out = await mergePr({ ...flags, deleteBranch: i.deleteBranch }, ctx);
   return { kind: 'merged' as const, out: PrMergeOutput.parse(out) };
 }
 
@@ -168,7 +174,12 @@ export default defineStreamCommand({
   exitCode: (s) => s.exitCode as ExitCode,
   async *run(input, ctx) {
     const again = landCommand(input);
-    const gate = createMergeGate(ctx, { compareMain: true, useAgedOut: true });
+    const mergeGate = createMergeGate(ctx, { compareMain: true, useAgedOut: true });
+    let judged: Judged | null = null;
+    const gate: SettleHook = (a) => {
+      judged = { defs: a.expected, agedOut: a.agedOut };
+      return mergeGate(a);
+    };
     const waited = yield* runWait(
       {
         targets: [input.pr],
@@ -202,7 +213,7 @@ export default defineStreamCommand({
       doc = { ...base, outcome: 'not-merged', exitCode: waited.exitCode, reason: t.reason, next: waitNext(t, again) };
     } else {
       try {
-        const m = await merge(input, t, ctx);
+        const m = await merge(input, t, ctx, judged);
         doc =
           m.kind === 'dry'
             ? {

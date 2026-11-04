@@ -150,3 +150,32 @@ test('a follower still following at its self-return reports whom it follows', as
   assert.match(r2.json.results[0].reason, /^foreground-self-return; following pid \d+$/);
   assert.equal(one.isDone(), false, 'the leader keeps waiting');
 });
+
+test('a follower under another ci.expected does not adopt the leader’s answer: it takes over and re-derives', async () => {
+  // The incident's setup: one checkout leads with one config, another follows with a newer one.
+  const { clock, sim, a, b } = world();
+  const base = { version: 1, components: { x: {} } };
+  sim.o.config = { ...base, ci: { expected: [{ name: 'unit', workflow: 'CI' }] } };
+  greenAt(sim, a, b, 4 * MIN);
+  const one = startWait(sim, ['o/r#7']);
+  await clock.advance(30_000);
+  sim.o.config = {
+    ...base,
+    ci: {
+      expected: [
+        { name: 'unit', workflow: 'CI' },
+        { name: 'packaging snapshot', workflow: 'CI' },
+      ],
+    },
+  };
+  const two = startWait(sim, ['o/r#7'], { artifacts: one.artifacts });
+  await clock.runUntil(() => one.isDone() && two.isDone(), { stepMs: 5_000, maxMs: 60 * MIN });
+  const [r1, r2] = [await one.p, await two.p];
+  assert.equal(r1.exitCode, EXIT.OK, r1.stdout);
+  assert.equal(r2.exitCode, EXIT.CI_STALLED, r2.stdout);
+  assert.deepEqual(
+    r2.json.results[0].stalled.map((s: { name: string }) => s.name),
+    ['packaging snapshot'],
+  );
+  assert.ok(codes(r2).includes('WAIT_CONFIG_CHANGED'), r2.stdout);
+});

@@ -2,6 +2,8 @@
 // pr status composition (mergeable bound 30 s), pin H to the evaluated head, and decide. All checks run and
 // every violation is reported together (MERGE_BLOCKED); a stale --expect-head is HEAD_MOVED with the plan
 // in details; a PR already merged at H is a success with nothing to send.
+
+import type { ExpectedDef } from '../../ci/wait/expected.ts';
 import type { Context } from '../../core/command.ts';
 import { GhxError } from '../../core/errors.ts';
 import type { RepoRef } from '../../gh/types.ts';
@@ -23,6 +25,11 @@ export interface MergeFlags {
   method?: MergeMethod | undefined;
   override?: readonly string[] | undefined;
   reason?: string | undefined;
+  /**
+   * pr land: the expected set its wait bound and judged mergeable (and the baselines it aged out), so the
+   * merge judges the same set instead of re-deriving one (one check set, 04). Not a CLI flag.
+   */
+  expected?: { defs: readonly ExpectedDef[]; agedOut: readonly string[] } | undefined;
 }
 
 interface Planned {
@@ -75,6 +82,7 @@ export async function planMerge(ctx: Context, flags: MergeFlags): Promise<MergeD
       config,
       configSource,
       configMissing,
+      ...(flags.expected ? { expectedDefs: flags.expected.defs, agedOut: flags.expected.agedOut } : {}),
       mergeableBudgetMs: MERGE_MERGEABLE_BUDGET_MS,
       compareBudgetMs: Math.max(0, Math.min(COMPARE_BUDGET_MS, remaining)),
       request: {

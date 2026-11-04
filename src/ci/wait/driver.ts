@@ -539,6 +539,17 @@ export async function* runWait(
     r.lease = null;
   };
 
+  /** WAIT_CONFIG_CHANGED, once per target per process. */
+  const configWarned = new Set<string>();
+  function configChanged(r: Run, what: string): void {
+    if (configWarned.has(r.label)) return;
+    configWarned.add(r.label);
+    warn({
+      code: 'WAIT_CONFIG_CHANGED',
+      message: `${r.label}: ${what} another ci.expected/ci.ignore than ${sourceLabel(r.configSource)}; re-deriving the expected checks from this one.`,
+    });
+  }
+
   /** A fresh binding: the expected set (required, config, baseline), read once and stored. */
   async function bind(r: Run, sha: string, t: TickResult): Promise<WaitState> {
     // An unpinned branch target's state lives under its pinned key, the target its `next` names.
@@ -553,14 +564,11 @@ export async function* runWait(
         r.restarts = loaded.state.restarts;
       }
       const stored = loaded.state.configFingerprint;
-      if (stored !== undefined && stored !== r.configFingerprint) {
-        // Bound under another ci.expected / ci.ignore (another checkout, or an edit since): judge this
-        // run's config, as pr status and pr merge from the same cwd do. Observations, ETags and
-        // diagnoses stay; a stored answer may no longer hold.
-        warn({
-          code: 'WAIT_CONFIG_CHANGED',
-          message: `${r.label}: the saved wait state was derived from another ci.expected/ci.ignore than ${sourceLabel(r.configSource)}; re-deriving the expected checks.`,
-        });
+      if (stored !== r.configFingerprint) {
+        // Bound under another ci.expected / ci.ignore (another checkout, or an edit since), or saved before
+        // the fingerprint was recorded (unknown): judge this run's config, as pr status and pr merge from
+        // the same cwd do. Observations, ETags and diagnoses stay; a stored answer may no longer hold.
+        if (stored !== undefined) configChanged(r, 'the saved wait state was derived from');
         const expected = await expectedDefs(r, sha, loaded.state.base);
         return {
           ...loaded.state,
@@ -569,7 +577,7 @@ export async function* runWait(
           machine: { ...loaded.state.machine, expected, othersSettledAt: null },
         };
       }
-      return stored === undefined ? { ...loaded.state, configFingerprint: r.configFingerprint } : loaded.state;
+      return loaded.state;
     }
     if (loaded.kind === 'discarded') {
       warn({
@@ -1148,6 +1156,13 @@ export async function* runWait(
     if (loaded.kind !== 'hit') return false;
     const t = loaded.state.terminal;
     if (t === null || loaded.state.savedAt < since || !answers(r, t)) return false;
+    // A leader that judged another ci.expected/ci.ignore (another checkout) did not answer this wait's
+    // question: keep following, then take over and re-derive (bind) once it is gone.
+    const fp = loaded.state.configFingerprint;
+    if (fp !== r.configFingerprint) {
+      configChanged(r, 'the wait it follows judged');
+      return false;
+    }
     r.st = loaded.state;
     r.summary = t.summary;
     r.following = null;
