@@ -29,6 +29,7 @@ Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then co
 
 - stdout is one JSON document. Errors are `{"error":{"code","message","hint","details"}}` with a non-zero exit. Follow `hint`; don't retry blindly. Big outputs (logs, diffs) come back as file paths: read the file.
 - With several PRs, `pr status` exits 7 if some `results[]` are `error`; the rest are still read.
+- In the repo's own checkout, ghx reads `.github/ghx.json` from the working tree. `CONFIG_DRIFT` means that file differs from the base branch's and the checkout is behind it: pull before trusting `CI_PENDING`, `stalled` or other blockers.
 
 ### Exit codes
 
@@ -48,7 +49,7 @@ Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then co
 | 11 | `ci wait`: red, but every failure is also red on main | Before merging, `ghx ci wait <pr> --until mergeable` |
 | 12 | `ci wait`: the head moved, or the PR closed or merged | Re-read with `ghx pr status` |
 | 13 | `ci wait`: no checks registered | `merge-conflict`: merge the base and push; else `ghx ci retrigger <pr>` |
-| 14 | `ci wait`: a check stalled | Read `stalled`; `ghx ci rerun`, or wait again |
+| 14 | `ci wait`: a check stalled, or an expected one never came | Read `stalled`. `state: missing`: check `ci.expected` (pull on `CONFIG_DRIFT`); else `ghx ci rerun`, or wait again |
 | 15 | `ci wait`: returned before CI settled; state is cached | Re-run the identical command (main thread: in the background) |
 | 130, 143 | Interrupted | Re-run if still needed |
 

@@ -492,7 +492,8 @@ export function loadConfig(o: { target: ResolvedRepo; git: Git; gh: Gh; need: Co
 ```
 1. If the cwd toplevel's resolved repo equals the target, read the local working-copy file. Uncommitted edits count, which is how you iterate on policy.
 2. Otherwise, when `--repo` or a URL points elsewhere (§4.1 cross-repo, sektar), fetch `GET repos/{o}/{r}/contents/.github/ghx.json` from the default branch (a read call; base64 decode).
-3. Local wins whenever it applies, and the two are never merged. `source` is reported in `ghx doctor` and in `details` of config errors.
+3. Local wins whenever it applies, and the two are never merged. `source` is reported in `ghx doctor` and in `details` of config errors. A local `source` also records `commit` (HEAD) and `dirty` (the file differs from HEAD's).
+   - **Drift.** From git alone (no network), when the file differs from the default branch's remote-tracking copy (`<remote>/HEAD`, else `<remote>/main` or `/master`, for the remote that is the target) and HEAD is behind that branch, the command warns `CONFIG_DRIFT` with both commits and the counts: the checkout is stale, so its `ci.expected` and policy may name what the base no longer has. A branch on top of the base (behind 0) that edits the file is the edit under review and is not drift. A missing ref or an unanswerable git call skips the check quietly.
 4. `need: 'required'` and absent: `CONFIG_MISSING`. `need: 'optional'` and absent: defaults. **Invalid is always an error, whatever the need.** A broken policy file is never skipped silently (brief 3 and 6).
 
 **Errors**, each with `details.source`:
