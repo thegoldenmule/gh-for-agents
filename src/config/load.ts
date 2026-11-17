@@ -10,13 +10,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { ConfigNeed, Warning } from '../core/command.ts';
-import { GhxError, mapZodIssues } from '../core/errors.ts';
+import { GhxError, type IssueDetail, mapZodIssues } from '../core/errors.ts';
 import { suggest } from '../core/suggest.ts';
 import { type Gh, GhFailure } from '../gh/index.ts';
 import { tryParseRepo } from '../gh/refs.ts';
 import type { ResolvedRepo } from '../gh/repo.ts';
 import { type RepoRef, repoSlug, sameRepo } from '../gh/types.ts';
 import type { Git } from '../git/index.ts';
+import { templateIssues, templateText } from '../render/template.ts';
 import { parseJsonWithPosition } from '../util/json.ts';
 import { CONFIG_PATH, CONFIG_VERSION, ConfigSchema, defaultConfig, type GhxConfig } from './schema.ts';
 
@@ -88,12 +89,14 @@ export function parseConfigText(text: string, source: ConfigSource): GhxConfig {
     );
   }
   const r = ConfigSchema.safeParse(parsed.value);
-  if (!r.success) {
-    const issues = mapZodIssues(r.error, {
-      schema: ConfigSchema,
-      input: parsed.value,
-      suggest: (w, c) => suggest(w, c),
-    });
+  const issues = r.success
+    ? crossSectionIssues(r.data, parsed.value)
+    : mapZodIssues(r.error, {
+        schema: ConfigSchema,
+        input: parsed.value,
+        suggest: (w, c) => suggest(w, c),
+      });
+  if (!r.success || issues.length > 0) {
     const first = issues.find((i) => i.suggestion !== undefined) ?? issues[0];
     throw new GhxError(
       'CONFIG_INVALID',
@@ -107,6 +110,25 @@ export function parseConfigText(text: string, source: ConfigSource): GhxConfig {
     );
   }
   return r.data;
+}
+
+/**
+ * Rules across sections, on a config that parsed (08 §2): the PR body template, which may name declared data
+ * keys, and `render.mode` beside `render.prBody` (mode has a default, so only the raw file tells).
+ */
+function crossSectionIssues(config: GhxConfig, raw: unknown): IssueDetail[] {
+  const render = (raw as { render?: Record<string, unknown> } | null)?.render;
+  if (config.render.prBody === undefined) return [];
+  const out: IssueDetail[] = [];
+  if (render?.mode !== undefined) {
+    out.push({
+      path: 'render.mode',
+      code: 'render.prBody.conflicts_mode',
+      message: 'render.mode picks a built-in template and render.prBody replaces it; set one of them',
+    });
+  }
+  out.push(...templateIssues(templateText(config.render), Object.keys(config.data.fields)));
+  return out;
 }
 
 // Synchronous, like the wait state and cache reads: an async read is a threadpool hop that tests driving a

@@ -9,7 +9,7 @@ import type { ResolvedRepo } from '../../gh/repo.ts';
 import { repoSlug } from '../../gh/types.ts';
 import { newId } from '../../meta/ids.ts';
 import { type PrBlockRead, readPrBlock } from '../../meta/schemas.ts';
-import { parsePrBody, prBodyDrift, renderPrBody, toPrBlock } from '../../render/pr-body.ts';
+import { readBody, renderOptions, renderPrBody, toPrBlock } from '../../render/pr-body.ts';
 import { normalizeComponents, structureIssues } from '../create/check.ts';
 import { resolveComponent } from '../create/components.ts';
 import { EDIT_EXAMPLE_HINT } from '../create/example.ts';
@@ -180,51 +180,51 @@ export async function planEdit(env: EditEnv): Promise<EditPlan> {
   }
 
   // UI edits (02 §3 DESCRIPTION_DRIFT): visible prose or title edited outside ghx that the patch would
-  // silently overwrite with the block's copy. The trailer is derived, so it is simply re-rendered.
+  // silently overwrite with the block's copy. The trailer and data are derived, so they are re-rendered.
+  const render = renderOptions(config);
   if (block !== null) {
-    const parsedBody = parsePrBody(pr.body, { footer: config.render.footer });
-    const bodyDrift = prBodyDrift(pr.body, block, config.render, pr.title);
-    const drift: DriftField[] = bodyDrift.filter(
+    const reading = readBody(pr.body, block, render, pr.title);
+    const drift: DriftField[] = reading.drift.filter(
       (f): f is 'title' | 'description' => f === 'title' || f === 'description',
     );
-    if (bodyDrift.includes('trailer')) {
+    if (reading.drift.includes('trailer')) {
       warnings.push({
         code: 'TRAILER_UI_EDIT_DISCARDED',
         message: `The trailer line of ${ref} was edited outside ghx; it is derived from the block, so the edit re-renders it. Put lasting changes in the patch (risk, components, testing, revertPolicy).`,
       });
     }
     const footer = config.render.footer?.replace(/\r\n?/g, '\n').trim() || null;
-    // The tail after the trailer is the footer the PR was rendered with. The block does not record it, so
-    // a render.footer change since then (or a PR rendered with none) must not read as a UI edit: a single
-    // footer-shaped line is taken as the old footer and replaced, with a warning so that a one-line UI
-    // addition there is not lost silently. Anything longer is still `appended`.
-    const tail = parsedBody.trailer === null ? null : parsedBody.footer;
-    if (tail !== null && tail !== footer) {
-      if (footerShaped(tail)) {
-        warnings.push({
-          code: 'FOOTER_REPLACED',
-          message: `The line after the trailer ('${tail}') is not the current render.footer; it is taken as an earlier footer and ${footer === null ? 'dropped (render.footer is null)' : 'replaced by the current one'}.`,
-        });
-      } else {
-        drift.push('appended');
-      }
+    // The block does not record the footer the PR was rendered with, so a render.footer change since then
+    // (or a PR rendered with none) must not read as a UI edit: a single footer-shaped line at the end is taken
+    // as the old footer and replaced, with a warning so that a one-line UI addition there is not lost silently.
+    if (reading.oldFooter !== null) {
+      warnings.push({
+        code: 'FOOTER_REPLACED',
+        message: `The line after the trailer ('${reading.oldFooter}') is not the current render.footer; it is taken as an earlier footer and ${footer === null ? 'dropped (render.footer is null)' : 'replaced by the current one'}.`,
+      });
+    }
+    if (reading.appended !== null) drift.push('appended');
+    if (reading.layoutChanged) {
+      warnings.push({
+        code: 'TEMPLATE_CHANGED',
+        message: `${ref} was rendered by ${typeof block.layout === 'string' ? `another template (${block.layout})` : 'the layout before body templates'}; the edit re-renders it with the current one.`,
+      });
     }
     const unresolved = drift.filter((f) => f === 'appended' || patch[f] === undefined);
     if (unresolved.length > 0) {
-      const visible = parsedBody.description;
       if (!discardUiEdits) {
         throw new GhxError(
           'DESCRIPTION_DRIFT',
           `The visible ${unresolved.join(' and ')} of ${ref} ${unresolved.length === 1 ? 'was' : 'were'} edited outside ghx.`,
           {
             hint: unresolved.includes('appended')
-              ? 'Text was added after the trailer; move what matters into "description" in the patch, then pass --discard-ui-edits.'
+              ? 'Text was added outside the description; move what matters into "description" or "data" in the patch, then pass --discard-ui-edits.'
               : `Include ${unresolved.map((f) => `"${f}"`).join(' and ')} in the patch (the current visible text is in details), or pass --discard-ui-edits.`,
             details: {
               drift: unresolved,
-              visible,
+              visible: reading.description,
               title: pr.title,
-              ...(unresolved.includes('appended') ? { appended: parsedBody.footer } : {}),
+              ...(unresolved.includes('appended') ? { appended: reading.appended } : {}),
             },
           },
         );
@@ -346,7 +346,7 @@ export async function planEdit(env: EditEnv): Promise<EditPlan> {
   // Render. rev+1 only when the block or body changes, so re-running the same edit is a no-op.
   const blockId = block?.id ?? newId('pr', ctx.random);
   let rev = block === null ? 1 : block.rev + 1;
-  let body = renderPrBody(toPrBlock(full, { id: blockId, rev, alsoTouched }), config.render);
+  let body = renderPrBody(toPrBlock(full, { id: blockId, rev, alsoTouched }), render);
   if (block !== null && sameAsBefore(full, alsoTouched, block, config, pr.body)) {
     rev = block.rev;
     body = pr.body;
@@ -492,15 +492,10 @@ function sameAsBefore(
 ): boolean {
   try {
     const meta = { id: block.id, rev: block.rev, gen: block.gen, alsoTouched };
-    return renderPrBody(toPrBlock(input, meta), config.render) === body;
+    return renderPrBody(toPrBlock(input, meta), renderOptions(config)) === body;
   } catch (e) {
     // An old gen the strict encoder rejects (INTERNAL) means the block is rewritten anyway.
     if (e instanceof GhxError) return false;
     throw e;
   }
-}
-
-/** One line that render.footer could have produced (02 §15: at most 500 chars, no HTML comment). */
-function footerShaped(text: string): boolean {
-  return text !== '' && !text.includes('\n') && [...text].length <= 500 && !text.includes('<!--');
 }

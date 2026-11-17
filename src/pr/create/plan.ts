@@ -7,7 +7,7 @@ import { suggest } from '../../core/suggest.ts';
 import type { ResolvedRepo } from '../../gh/repo.ts';
 import { repoSlug, sameRepo } from '../../gh/types.ts';
 import { newId } from '../../meta/ids.ts';
-import { renderPrBody, toPrBlock } from '../../render/pr-body.ts';
+import { renderOptions, renderPrBody, toPrBlock } from '../../render/pr-body.ts';
 import { normalizeComponents, normalizeInput, structureIssues } from './check.ts';
 import type { PrCreateOutput, PrCreatePreview } from './output.ts';
 import { changedFiles, defaultBranchOf, type Preflight, PUSH_PERMISSIONS, runPreflight } from './preflight.ts';
@@ -314,7 +314,10 @@ export function renderPlan(
 ): { input: PrCreateInput; body: string } {
   const input =
     stackedOn === undefined ? plan.input : { ...plan.input, refs: { ...(plan.input.refs ?? {}), stackedOn } };
-  const body = renderPrBody(toPrBlock(input, { id: plan.blockId, alsoTouched: plan.alsoTouched }), config.render);
+  const body = renderPrBody(
+    toPrBlock(input, { id: plan.blockId, alsoTouched: plan.alsoTouched }),
+    renderOptions(config),
+  );
   return { input, body };
 }
 

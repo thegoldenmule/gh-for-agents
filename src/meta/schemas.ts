@@ -74,6 +74,11 @@ export const PrBlock = z.strictObject({
   refs: Refs.optional(),
   /** Agent data (08 §1); absent when empty. */
   data: Data.refine((d) => Object.keys(d).length > 0, 'empty data is omitted').optional(),
+  /** The template the body was rendered with (08 §2): the first 8 hex chars of its sha256. */
+  layout: z
+    .string()
+    .regex(/^[0-9a-f]{8}$/)
+    .optional(),
 });
 
 export const ReviewBlock = z.strictObject({
@@ -150,6 +155,8 @@ export const PrBlockRead = z.looseObject({
   refs: RefsRead.optional(),
   /** Agent data (08 §1). Any value: a malformed one never invalidates the block (pr status: DATA_INVALID). */
   data: z.unknown().optional(),
+  /** Absent on bodies written before 08 (parsed as the fixed legacy layout). */
+  layout: z.string().optional(),
 });
 
 export const ReviewBlockRead = z.looseObject({

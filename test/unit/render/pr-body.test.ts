@@ -1,5 +1,6 @@
-// PR body rendering (02 §2.2, §14.2; 03 §5.1 golden files). Each case is a PrCreateInput in
-// test/fixtures/render/<case>.input.json and its exact body in <case>.body.md.
+// PR body rendering (02 §2.2, §14.2, 08 §2; 03 §5.1 golden files). Each case is a PrCreateInput in
+// test/fixtures/render/<case>.input.json and its exact body in <case>.body.md. legacy/<case>.body.md is the
+// body the same input got before 08 (no sections, no layout), which parsePrBody still reads.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,12 +18,14 @@ import {
   parsePrBody,
   prBodyDrift,
   type RenderOptions,
+  readBody as readBodyOf,
   renderHowToTest,
   renderPrBody,
   renderTrailer,
   testSummary,
   toPrBlock,
 } from '../../../src/render/pr-body.ts';
+import { layoutOf, templateText } from '../../../src/render/template.ts';
 import { Gen, PrBlockId } from '../../../src/schemas/common.ts';
 import { VERSION } from '../../../src/version.ts';
 
@@ -53,7 +56,10 @@ const CASES: { input: string; body: string; render: RenderOptions }[] = [
   },
   { input: 'footer-null.input.json', body: 'footer-null.body.md', render: { mode: 'trailer', footer: null } },
   { input: 'unicode-title.input.json', body: 'unicode-title.body.md', render: TRAILER },
+  { input: 'data-mixed.input.json', body: 'data-mixed.body.md', render: TRAILER },
 ];
+/** The cases that have a pre-08 body in legacy/. */
+const LEGACY = CASES.filter((c) => c.input !== 'data-mixed.input.json');
 
 const readInput = (f: string) => PrCreateInput.parse(JSON.parse(readFileSync(join(FIX, f), 'utf8')));
 const readBody = (f: string) => readFileSync(join(FIX, f), 'utf8');
@@ -64,6 +70,7 @@ const PrBlockForTest = PrCreateInput.omit({ base: true, head: true, draft: true 
   id: PrBlockId,
   gen: Gen,
   rev: z.number().int().min(1),
+  layout: z.string().optional(),
 });
 
 describe('golden bodies', () => {
@@ -78,7 +85,7 @@ describe('golden bodies', () => {
       // The block round-trips through the codec, and the visible text is everything before it.
       const d = decode<PrBlockData>(body, { 1: PrBlockForTest });
       assert.equal(d.status, 'ok');
-      if (d.status === 'ok') assert.deepEqual(d.data, block);
+      if (d.status === 'ok') assert.deepEqual(d.data, { ...block, layout: layoutOf(templateText(c.render)) });
       assert.equal(strip(body), body.slice(0, body.lastIndexOf('\n\n<!-- ghx:v1 ')));
       assert.ok(body.length <= MAX_BODY_CHARS);
     });
@@ -179,10 +186,11 @@ describe('trailer', () => {
     );
   });
 
-  test('the trailer is one line and there are no sections or test logs', () => {
+  test('brief sections: Summary first, the trailer one line, no collapsed test logs', () => {
     for (const c of CASES.filter((x) => x.render.mode === 'trailer')) {
       const visible = strip(readBody(c.body));
-      assert.doesNotMatch(visible, /^#/m);
+      assert.match(visible, /^## Summary\n\n/);
+      assert.doesNotMatch(visible, /^## How to test/m);
       assert.doesNotMatch(visible, /<details/);
       assert.equal(visible.split('\n').filter((l) => l.startsWith('Risk: ')).length, 1);
     }
@@ -247,11 +255,11 @@ test('the render config defaults to trailer mode with the Claude Code footer', (
   assert.equal(ConfigSchema.parse({ version: 1, components: { x: {} }, render: { footer: null } }).render.footer, null);
 });
 
-describe('parsePrBody', () => {
-  for (const c of CASES) {
-    test(`round-trips ${c.body}`, () => {
+describe('parsePrBody (legacy bodies, written before 08)', () => {
+  for (const c of LEGACY) {
+    test(`round-trips legacy/${c.body}`, () => {
       const block = toPrBlock(readInput(c.input), META);
-      const body = renderPrBody(block, c.render);
+      const body = readBody(`legacy/${c.body}`);
       const p = parsePrBody(body, { footer: c.render.footer });
       assert.equal(p.description, block.description);
       assert.equal(p.trailer, renderTrailer(block));
@@ -272,14 +280,14 @@ describe('parsePrBody', () => {
 
   test('CRLF from a UI edit is normalised, so an unchanged body has no drift', () => {
     const block = toPrBlock(readInput('tests-mixed.input.json'), META);
-    const body = renderPrBody(block, TRAILER).replace(/\n/g, '\r\n');
+    const body = readBody('legacy/tests-mixed.body.md').replace(/\n/g, '\r\n');
     assert.equal(parsePrBody(body).description, block.description);
     assert.deepEqual(prBodyDrift(body, block, TRAILER), []);
   });
 
   test('drift: an edited description, an edited trailer and a changed title', () => {
     const block = toPrBlock(readInput('worked-example-3301.input.json'), META);
-    const body = renderPrBody(block, TRAILER);
+    const body = readBody('legacy/worked-example-3301.body.md');
     const edited = body.replace(block.description, 'Rewritten in the GitHub UI.');
     assert.equal(parsePrBody(edited).description, 'Rewritten in the GitHub UI.');
     assert.deepEqual(prBodyDrift(edited, block, TRAILER), ['description']);
@@ -331,5 +339,80 @@ describe('alsoTouched (06)', () => {
       assert.deepEqual(read.block.alsoTouched, ['ci', 'vetra']);
       assert.deepEqual(prBodyDrift(body, read.block, TRAILER, block.title), []);
     }
+  });
+});
+
+describe('readBody (templated bodies, 08 §2)', () => {
+  const lenient = (body: string) => {
+    const r = readPrBlock(body);
+    assert.equal(r.status, 'ok');
+    return r.status === 'ok' ? r.block : (undefined as never);
+  };
+  const clean = { drift: [], appended: null, oldFooter: null, layoutChanged: false };
+
+  for (const c of CASES) {
+    test(`an unchanged ${c.body} reads clean`, () => {
+      const block = toPrBlock(readInput(c.input), META);
+      const body = renderPrBody(block, c.render);
+      assert.deepEqual(readBodyOf(body, lenient(body), c.render, block.title), {
+        description: block.description,
+        ...clean,
+      });
+      const crlf = body.replace(/\n/g, '\r\n');
+      assert.deepEqual(readBodyOf(crlf, lenient(body), c.render).drift, []);
+    });
+  }
+
+  const block = toPrBlock(readInput('data-mixed.input.json'), META);
+  const body = renderPrBody(block, TRAILER);
+  const read = lenient(body);
+
+  test('a UI-edited description is located and reported', () => {
+    const edited = body.replace(block.description, 'Rewritten in the GitHub UI.\n\nWith a second paragraph.');
+    const r = readBodyOf(edited, read, TRAILER);
+    assert.equal(r.description, 'Rewritten in the GitHub UI.\n\nWith a second paragraph.');
+    assert.deepEqual(r.drift, ['description']);
+    assert.equal(r.appended, null);
+  });
+
+  test('an edited trailer is trailer drift, not appended text', () => {
+    const r = readBodyOf(body.replace('Risk: medium', 'Risk: medium (I think)'), read, TRAILER);
+    assert.deepEqual(r.drift, ['trailer']);
+    assert.equal(r.appended, null);
+    assert.equal(r.description, block.description);
+  });
+
+  test('text a human added (after the footer, or in the data list) is appended', () => {
+    const after = body.replace(`${DEFAULT_FOOTER}\n\n`, `${DEFAULT_FOOTER}\n\nA reviewer's note.\n\n`);
+    assert.equal(readBodyOf(after, read, TRAILER).appended, "A reviewer's note.");
+    assert.deepEqual(readBodyOf(after, read, TRAILER).drift, []);
+    const data = body.replace('- ticket: `ENG-1234`', '- ticket: `ENG-1234`\n- extra: by hand');
+    assert.match(readBodyOf(data, read, TRAILER).appended ?? '', /extra: by hand/);
+  });
+
+  test('a body rendered with another footer: the last line is the old footer', () => {
+    const old = renderPrBody(block, { ...TRAILER, footer: 'Made by a bot.' });
+    const r = readBodyOf(old, lenient(old), TRAILER);
+    assert.equal(r.oldFooter, 'Made by a bot.');
+    assert.equal(r.appended, null);
+    assert.deepEqual(r.drift, []);
+  });
+
+  test('another template: layout drift; anchors still checked', () => {
+    const details = renderPrBody(block, { mode: 'details', footer: DEFAULT_FOOTER });
+    const r = readBodyOf(details, lenient(details), TRAILER);
+    assert.deepEqual(r.drift, ['layout']);
+    assert.equal(r.layoutChanged, true);
+    assert.equal(r.description, block.description);
+    const edited = readBodyOf(details.replace(block.description, 'UI text.'), lenient(details), TRAILER);
+    assert.deepEqual(edited.drift, ['description', 'layout']);
+  });
+
+  test('a legacy body: parsed as before, layoutChanged, never layout drift', () => {
+    const legacy = readBody('legacy/worked-example-3301.body.md');
+    const r = readBodyOf(legacy, lenient(legacy), TRAILER);
+    assert.deepEqual(r.drift, []);
+    assert.equal(r.layoutChanged, true);
+    assert.equal(r.description, lenient(legacy).description);
   });
 });

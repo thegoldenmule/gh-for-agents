@@ -240,21 +240,30 @@ Network warnings:
 
 ### 2.2 Rendering
 
-`render.mode` defaults to `trailer`:
+The body is a template filled from the block (08 §2), then `render.footer`, then the block. `render.mode` picks a built-in template and defaults to `trailer`; `render.prBody` replaces it with the project's own:
 
 ```
-{description}
+## Summary
 
-Risk: {risk} · Components: {c1, c2} · Revert: {revertPolicy} · Tests: {P}/{N} pass ({kinds}){ · Stacked on #X}{ · Split from #Y}{ · Closes #Z…}
+{{description}}
+
+{{trailer}}
+
+## Data
+
+{{data}}
 
 {render.footer, default "🤖 Generated with [Claude Code](https://claude.com/claude-code)"}
 
 <!-- ghx:v1 {pr block} -->
 ```
 
+- `{{trailer}}` is `Risk: {risk} · Components: {c1, c2} · Revert: {revertPolicy} · Tests: {P}/{N} pass ({kinds}){ · Stacked on #X}{ · Split from #Y}{ · Closes #Z…}`.
 - Results other than pass are appended, e.g. `2/3 pass, 1 not-run`.
 - `Closes` and stack refs go in the visible trailer, so GitHub auto-closes and humans can read them (§4.1).
-- `details` mode adds a collapsed "How to test" list.
+- `details` mode adds a "How to test" section with the per-test list.
+- A section whose placeholders all render empty is dropped with its heading, so a PR without data has no Data section.
+- The block records `layout`, the template's hash, so drift detection knows which template wrote the body.
 - The body is asserted to be ≤65,536 chars.
 
 ### 2.3 Output
@@ -1298,6 +1307,8 @@ This passes validation:
 ### 14.2 Rendered body (#3301)
 
 ```markdown
+## Summary
+
 The primary write path in reactor-client signed actions without binding documentId, so a signature made for one document also verified on another.
 signAction now always binds the target documentId, and verify rejects unbound candidates instead of accepting them.
 
@@ -1305,7 +1316,7 @@ Risk: medium · Components: reactor, shared · Revert: revert-safe · Tests: 3/3
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
-<!-- ghx:v1 {"t":"pr","id":"p_k3m9qa","gen":"ghx/0.1.0","rev":1,"title":"fix(reactor): bind documentId when signing actions on the write path","description":"The primary write path in reactor-client signed actions without binding documentId, so a signature made for one document also verified on another.\nsignAction now always binds the target documentId, and verify rejects unbound candidates instead of accepting them.","testing":[{"kind":"unit","command":"pnpm --filter @powerhousedao/reactor test -- signature","result":"pass","notes":"4 new cases: unbound and cross-document signatures"},{"kind":"integration","command":"pnpm --filter @powerhousedao/reactor-api test","result":"pass"},{"kind":"typecheck","command":"pnpm tsc -b","result":"pass"}],"risk":"medium","riskNote":"Clients that sign without a documentId now get a verification error instead of silent acceptance.","components":["reactor","shared"],"revertPolicy":"revert-safe","refs":{"closes":["#2894"]}} -->
+<!-- ghx:v1 {"t":"pr","id":"p_k3m9qa","gen":"ghx/0.1.0","rev":1,"title":"fix(reactor): bind documentId when signing actions on the write path","description":"The primary write path in reactor-client signed actions without binding documentId, so a signature made for one document also verified on another.\nsignAction now always binds the target documentId, and verify rejects unbound candidates instead of accepting them.","testing":[{"kind":"unit","command":"pnpm --filter @powerhousedao/reactor test -- signature","result":"pass","notes":"4 new cases: unbound and cross-document signatures"},{"kind":"integration","command":"pnpm --filter @powerhousedao/reactor-api test","result":"pass"},{"kind":"typecheck","command":"pnpm tsc -b","result":"pass"}],"risk":"medium","riskNote":"Clients that sign without a documentId now get a verification error instead of silent acceptance.","components":["reactor","shared"],"revertPolicy":"revert-safe","refs":{"closes":["#2894"]},"layout":"67f58f98"} -->
 ```
 
 ### 14.3 Review, fix and other feedback

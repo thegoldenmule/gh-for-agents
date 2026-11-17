@@ -8,10 +8,10 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { DEFAULT_FOOTER } from '../../src/config/sections/render.ts';
 import { buildGraphqlArgs } from '../../src/gh/graphql.ts';
-import { readPrBlock } from '../../src/meta/schemas.ts';
+import { encodeBlock, readPrBlock } from '../../src/meta/schemas.ts';
 import { buildPreflightQuery, preflightVars } from '../../src/pr/create/preflight.ts';
 import { SNAPSHOT_QUERY } from '../../src/pr/edit/snapshot.ts';
-import { renderPrBody, toPrBlock } from '../../src/render/pr-body.ts';
+import { renderPrBody, renderTrailer, toPrBlock } from '../../src/render/pr-body.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 import { argvKey, GH_FIXTURE_ROOT } from '../helpers/fixture-match.ts';
@@ -479,4 +479,16 @@ test('08: an edit cannot drop a field .github/ghx.json requires', async () => {
     [['data.ticket', 'data.required']],
   );
   s.gh.expectNoMutations();
+});
+
+test('08: a body written before templates is re-rendered with the current one, warning TEMPLATE_CHANGED', async () => {
+  // The pre-08 layout: description, trailer, footer, block (no layout recorded).
+  const block = toPrBlock(CONTENT as never, { id: BLOCK_ID, rev: 1 });
+  const legacy = [CONTENT.description, renderTrailer(block), DEFAULT_FOOTER, encodeBlock(block)].join('\n\n');
+  const s = editScene({ pr: { body: legacy } });
+  const r = await run(s.gh, { description: NEW_DESCRIPTION });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.ok(codes(r).includes('TEMPLATE_CHANGED'), JSON.stringify(r.json.warnings));
+  assert.equal(s.patched[0]?.body, bodyOf({ ...CONTENT, description: NEW_DESCRIPTION }, 2));
+  assert.match(String(s.patched[0]?.body), /^## Summary\n\n/);
 });

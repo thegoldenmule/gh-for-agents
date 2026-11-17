@@ -31,7 +31,8 @@ export const PrMeta = z.object({
   data: z.record(z.string(), z.unknown()),
 });
 
-export const DriftField = z.enum(['title', 'description', 'trailer']);
+/** `layout`: the body was rendered by another template than the current one (08 §2); the next edit re-renders it. */
+export const DriftField = z.enum(['title', 'description', 'trailer', 'layout']);
 
 export const PrStatusOutput = z.object({
   ref: PrRef,

@@ -39,7 +39,7 @@ test('happy path: config, preflight, compare, POST via --input -, read-back; not
   const body = String(sent.body);
   assert.ok(
     body.startsWith(
-      `${INPUT.description}\n\nRisk: low · Components: app · Revert: revert-safe · Tests: 1/1 pass (unit)\n\n`,
+      `## Summary\n\n${INPUT.description}\n\nRisk: low · Components: app · Revert: revert-safe · Tests: 1/1 pass (unit)\n\n`,
     ),
   );
   assert.match(body, /<!-- ghx:v1 \{.*"id":"p_[0-9a-hjkmnp-tv-z]{6}".*\} -->$/);
@@ -404,7 +404,7 @@ test('a harness footer at the end of the description is stripped with FOOTER_STR
     r.json.warnings.map((w: { code: string }) => w.code),
     ['FOOTER_STRIPPED'],
   );
-  assert.ok(r.json.preview.body.startsWith(`${INPUT.description}\n\nRisk: low`), r.json.preview.body);
+  assert.ok(r.json.preview.body.startsWith(`## Summary\n\n${INPUT.description}\n\nRisk: low`), r.json.preview.body);
   assert.equal(r.json.preview.body.split('Generated with').length, 2, 'only the rendered footer remains');
 });
 

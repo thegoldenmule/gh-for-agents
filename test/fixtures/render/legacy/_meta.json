@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "source": "synthetic",
+    "note": "PR bodies as ghx rendered them before 08 (no sections, no layout in the block): ../<case>.input.json rendered with the old trailer/details layout. parsePrBody and readBody still read them; never regenerate."
+  }
+}

@@ -1,4 +1,6 @@
-// `render` (02 §15). Owned by M9 (pr create): render.mode, render.footer, render.descriptionMaxChars.
+// `render` (02 §15, 08 §2): render.mode, render.prBody, render.footer, render.descriptionMaxChars.
+// The template's own rules (placeholders, required ones, data keys) need the data section, so they run after
+// the parse (templateIssues in src/config/load.ts).
 import { z } from 'zod';
 
 /** The attribution footer under every ghx PR body (02 §2.2). */
@@ -6,8 +8,10 @@ export const DEFAULT_FOOTER = '🤖 Generated with [Claude Code](https://claude.
 
 export const RenderSection = z
   .strictObject({
-    /** `trailer`: description, one trailer line, footer. `details` adds a collapsed "How to test" list. */
+    /** The built-in template: `trailer` (Summary, Data) or `details` (adds How to test). Not with prBody. */
     mode: z.enum(['trailer', 'details']).prefault('trailer'),
+    /** The project's PR body template (08 §2), as a string or a list of lines; replaces `mode`. */
+    prBody: z.union([z.string().min(1), z.array(z.string())]).optional(),
     /** The line under the body; null for none. */
     footer: z
       .string()

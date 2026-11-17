@@ -1,0 +1,8 @@
+The primary write path in reactor-client signed actions without binding documentId, so a signature made for one document also verified on another.
+signAction now always binds the target documentId, and verify rejects unbound candidates instead of accepting them.
+
+Risk: medium · Components: reactor, shared · Revert: revert-safe · Tests: 3/3 pass (unit, integration, typecheck) · Closes #2894
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+<!-- ghx:v1 {"components":["reactor","shared"],"description":"The primary write path in reactor-client signed actions without binding documentId, so a signature made for one document also verified on another.\nsignAction now always binds the target documentId, and verify rejects unbound candidates instead of accepting them.","gen":"ghx/0.1.0","id":"p_k3m9qa","refs":{"closes":["#2894"]},"rev":1,"revertPolicy":"revert-safe","risk":"medium","riskNote":"Clients that sign without a documentId now get a verification error instead of silent acceptance.","t":"pr","testing":[{"command":"pnpm --filter @powerhousedao/reactor test -- signature","kind":"unit","notes":"4 new cases: unbound and cross-document signatures","result":"pass"},{"command":"pnpm --filter @powerhousedao/reactor-api test","kind":"integration","result":"pass"},{"command":"pnpm tsc -b","kind":"typecheck","result":"pass"}],"title":"fix(reactor): bind documentId when signing actions on the write path"} -->

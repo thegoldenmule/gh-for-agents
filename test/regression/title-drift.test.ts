@@ -25,7 +25,7 @@ test('R11: title and body reach GitHub byte-identical, on stdin only', async () 
   assert.ok(post?.stdin);
   const sent = JSON.parse(post.stdin);
   assert.equal(sent.title, TRICKY.title);
-  assert.ok(String(sent.body).startsWith(`${TRICKY.description}\n\n`));
+  assert.ok(String(sent.body).startsWith(`## Summary\n\n${TRICKY.description}\n\n`));
   assert.equal(r.json.body, sent.body, 'the rendered body is exactly what was sent');
   for (const c of s.gh.calls) {
     for (const a of c.argv) {

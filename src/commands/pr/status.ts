@@ -13,6 +13,7 @@ import { statusOutput } from '../../pr/status/output.ts';
 import { PrStatusCommandOutput, type PrStatusOutput, STATUS_MAX_PRS } from '../../pr/status/schema.ts';
 import { prContext, rethrowNotFound } from '../../pr/status/target.ts';
 import { fitStatus, fitStatuses } from '../../pr/status/truncate.ts';
+import { renderOptions } from '../../render/pr-body.ts';
 
 const Input = z.strictObject({
   pr: z
@@ -119,5 +120,5 @@ async function readStatus(
   } catch (e) {
     rethrowNotFound(e, resolved, number, 'status');
   }
-  return statusOutput(state, { footer: config.render.footer, warnings });
+  return statusOutput(state, { render: renderOptions(config), warnings });
 }

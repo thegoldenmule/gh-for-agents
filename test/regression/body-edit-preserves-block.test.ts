@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readPrBlock } from '../../src/meta/schemas.ts';
-import { parsePrBody, renderTrailer } from '../../src/render/pr-body.ts';
+import { readBody, renderTrailer } from '../../src/render/pr-body.ts';
 import { BLOCK_ID, bodyOf, CONTENT, editScene, editSequence, RENDER } from '../commands/pr-edit-scene.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import type { FakeGh } from '../helpers/fake-gh.ts';
@@ -28,17 +28,19 @@ test('a description edit keeps one block: same id, rev 1 → 2, other fields kep
   const read = readPrBlock(body);
   assert.equal(read.status, 'ok');
   if (read.status !== 'ok') return;
-  const { t, id, gen: _gen, rev, description, ...rest } = read.block;
+  const { t, id, gen: _gen, rev, description, layout, ...rest } = read.block;
+  assert.match(String(layout), /^[0-9a-f]{8}$/);
   assert.equal(t, 'pr');
   assert.equal(id, BLOCK_ID);
   assert.equal(rev, 2);
   assert.equal(description, NEW);
   const { description: _old, ...kept } = CONTENT;
   assert.deepEqual(rest, kept);
-  const parsed = parsePrBody(body, { footer: RENDER.footer });
-  assert.equal(parsed.description, NEW);
-  assert.equal(parsed.trailer, renderTrailer(read.block));
-  assert.equal(parsed.footer, RENDER.footer);
+  const reading = readBody(body, read.block, RENDER);
+  assert.equal(reading.description, NEW);
+  assert.deepEqual(reading.drift, []);
+  assert.ok(body.includes(`\n\n${renderTrailer(read.block)}\n\n`));
+  assert.ok(body.includes(`\n\n${RENDER.footer}\n\n<!-- ghx:v1 `));
 });
 
 test('a UI-edited description plus a patch without description is DESCRIPTION_DRIFT (exit 9), no PATCH', async () => {

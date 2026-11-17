@@ -1,7 +1,7 @@
 // PrStatusOutput from a loaded PR state (02 §4.1), before the size budget (./truncate.ts) is applied.
 import type { PrBlockRead, PrBlockResult } from '../../meta/schemas.ts';
 import { mergeStateOf } from '../../policy/merge.ts';
-import { parsePrBody, prBodyDrift } from '../../render/pr-body.ts';
+import { parsePrBody, type RenderOptions, readBody } from '../../render/pr-body.ts';
 import type { Warning } from '../../schemas/common.ts';
 import type { PrStatusState } from './compose.ts';
 import type { PrMeta, PrStatusOutput } from './schema.ts';
@@ -57,8 +57,8 @@ export function metaErrorOf(m: PrBlockResult): PrStatusOutput['metaError'] {
 }
 
 export interface StatusOutputOptions {
-  /** render.footer, so the footer is not reported as description text or drift. */
-  footer: string | null;
+  /** The render options (renderOptions(config)): the template and footer the body is read against. */
+  render: RenderOptions;
   /** Command-level warnings (CWD_REPO_MISMATCH, CONFIG_MISSING), listed first. */
   warnings?: readonly Warning[];
 }
@@ -68,6 +68,7 @@ export function statusOutput(s: PrStatusState, o: StatusOutputOptions): PrStatus
   const meta = snap.meta;
   const f = snap.feedback;
   const gated = meta.status === 'ok' ? gatedMeta(meta.block, snap.author, snap.authorTrusted === true) : null;
+  const reading = meta.status === 'ok' ? readBody(snap.body, meta.block, o.render, snap.title) : null;
   return {
     ref: snap.ref,
     url: snap.url,
@@ -82,9 +83,9 @@ export function statusOutput(s: PrStatusState, o: StatusOutputOptions): PrStatus
     head: { ref: snap.head.ref, sha: snap.head.sha },
     changes: snap.changes,
     description: {
-      text: parsePrBody(snap.body, { footer: o.footer }).description,
+      text: reading?.description ?? parsePrBody(snap.body, { footer: o.render.footer }).description,
       structured: meta.status === 'ok',
-      drift: meta.status === 'ok' ? prBodyDrift(snap.body, meta.block, { footer: o.footer }, snap.title) : [],
+      drift: reading?.drift ?? [],
     },
     meta: gated?.meta ?? null,
     metaError: metaErrorOf(meta),

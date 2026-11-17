@@ -36,6 +36,7 @@ export function createRulesSummary(config: CreateRulesConfig): string[] {
     `components: up to ${MAX_COMPONENTS} names from .github/ghx.json; ghx adds the ones the diff touches${floors.length > 0 ? `; risk floors: ${floors.join(', ')}` : ''}${aliases.length > 0 ? `; aliases: ${aliases.join(', ')}` : ''}`,
     "optional: base (default branch), head (current branch), draft, refs {closes, related, stackedOn, …} ('#N' or 'owner/repo#N')",
     dataRulesSummary(config),
+    `body: ghx renders it from ${config.render.prBody !== undefined ? "this repo's template (render.prBody)" : `the built-in '${config.render.mode}' template`}, with your description, the trailer and data; preview it with --dry-run`,
   ];
 }
 
