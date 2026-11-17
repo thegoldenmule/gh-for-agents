@@ -247,6 +247,20 @@ interface Run {
   defaultLooked: boolean;
 }
 
+/**
+ * When a wait started at `startedMono` self-returns `pending` (clock.monotonic()): after
+ * FOREGROUND_RETURN_MS under --foreground, after UNATTENDED_RETURN_MS in an unattended session, never
+ * otherwise. pr land's merge queue wait shares it, counted from the start of the whole command.
+ */
+export function selfReturnAt(ctx: Pick<StreamContext, 'env'>, foreground: boolean, startedMono: number): number {
+  const attended = ctx.env.CLAUDE_CODE_SESSION_ATTENDED === '1';
+  const offset = ctx.env.GHX_TEST_HOOKS === '1' ? Number(ctx.env.GHX_TEST_CLOCK_OFFSET_MS ?? 0) || 0 : 0;
+  return Math.min(
+    attended ? Number.POSITIVE_INFINITY : startedMono + UNATTENDED_RETURN_MS - offset,
+    foreground ? startedMono + FOREGROUND_RETURN_MS - offset : Number.POSITIVE_INFINITY,
+  );
+}
+
 export async function* runWait(
   o: WaitOptions,
   ctx: StreamContext,
@@ -254,13 +268,9 @@ export async function* runWait(
 ): AsyncGenerator<WaitEventOut, WaitSummary, void> {
   const clock = ctx.clock;
   const attended = ctx.env.CLAUDE_CODE_SESSION_ATTENDED === '1';
-  const offset = ctx.env.GHX_TEST_HOOKS === '1' ? Number(ctx.env.GHX_TEST_CLOCK_OFFSET_MS ?? 0) || 0 : 0;
   const startedMono = clock.monotonic();
   const foreground = o.foreground === true;
-  const returnAt = Math.min(
-    attended ? Number.POSITIVE_INFINITY : startedMono + UNATTENDED_RETURN_MS - offset,
-    foreground ? startedMono + FOREGROUND_RETURN_MS - offset : Number.POSITIVE_INFINITY,
-  );
+  const returnAt = selfReturnAt(ctx, foreground, startedMono);
   /** A foreground call's diagnosis never runs far past the return (the Bash tool kills it at its cap). */
   const diagnoseBy = foreground ? returnAt + FOREGROUND_TICK_MARGIN_MS : Number.POSITIVE_INFINITY;
 

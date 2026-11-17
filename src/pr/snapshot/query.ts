@@ -43,14 +43,23 @@ function connection(name: ConnectionName, after: boolean): string {
   return `${name}(${args}){${PAGE} nodes{${c.nodes}}}`;
 }
 
+/**
+ * The merge queue of the PR's base branch (PullRequest.mergeQueue is null without one) and the PR's entry
+ * in it. Field and enum names were read from the live schema (GraphQL introspection).
+ */
+export const MERGE_QUEUE_FIELDS =
+  'isMergeQueueEnabled isInMergeQueue mergeQueueEntry{state position enqueuedAt} ' +
+  'mergeQueue{url configuration{mergeMethod}}';
+
 /** Q1. The CI selection needs `$number` and `$after`; Q1 passes `after: null`. */
 export const Q1_QUERY =
   'query($owner:String!,$name:String!,$number:Int!,$after:String){viewer{login} ' +
   'repository(owner:$owner,name:$name){mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed deleteBranchOnMerge ' +
-  'viewerPermission defaultBranchRef{name} pullRequest(number:$number){number url title body state isDraft createdAt updatedAt ' +
+  'viewerPermission defaultBranchRef{name} pullRequest(number:$number){id number url title body state isDraft createdAt updatedAt ' +
   `${ACTOR} authorAssociation baseRefName baseRefOid headRefName headRefOid isCrossRepository ` +
   'headRepository{nameWithOwner} changedFiles additions deletions commitCount:commits{totalCount} ' +
   'mergeable mergeStateStatus reviewDecision mergedAt mergeCommit{oid} ' +
+  `${MERGE_QUEUE_FIELDS} ` +
   `commits(last:1){nodes{commit{${CI_COMMIT_FIELDS}}}} ` +
   `${(Object.keys(CONNECTIONS) as ConnectionName[]).map((n) => connection(n, false)).join(' ')}}}}`;
 
@@ -99,7 +108,18 @@ export type TimelineNode = z.infer<typeof TimelineNode>;
 
 const Actor = z.looseObject({ __typename: z.string().optional(), login: z.string() });
 
+/** MergeQueueEntry: state is QUEUED, AWAITING_CHECKS, MERGEABLE, UNMERGEABLE or LOCKED (a string: a new value must not fail the read). */
+export const RawQueueEntry = z.object({
+  state: z.string(),
+  position: z.number().int(),
+  enqueuedAt: z.string().nullable().optional(),
+});
+export type RawQueueEntry = z.infer<typeof RawQueueEntry>;
+
 export const Q1Pr = z.object({
+  // The node id, for the enqueuePullRequest mutation. Optional, like the merge queue fields below, so
+  // replies recorded before ghx read them stay valid; absent reads as "no merge queue".
+  id: z.string().optional(),
   number: z.number().int(),
   url: z.string(),
   title: z.string(),
@@ -126,6 +146,17 @@ export const Q1Pr = z.object({
   reviewDecision: z.string().nullable(),
   mergedAt: z.string().nullable(),
   mergeCommit: z.object({ oid: z.string() }).nullable(),
+  isMergeQueueEnabled: z.boolean().optional(),
+  isInMergeQueue: z.boolean().optional(),
+  mergeQueueEntry: RawQueueEntry.nullable().optional(),
+  mergeQueue: z
+    .object({
+      url: z.string().nullable().optional(),
+      // MERGE, SQUASH or REBASE (PullRequestMergeMethod).
+      configuration: z.object({ mergeMethod: z.string().nullable().optional() }).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
   commits: z.object({ nodes: z.array(z.object({ commit: CiCommit }).nullable()) }),
   comments: conn(RawIssueComment),
   reviews: conn(RawReview),

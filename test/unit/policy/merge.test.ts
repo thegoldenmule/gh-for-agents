@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ERROR_CODES } from '../../../src/core/errors.ts';
 import { CI_GATE_CODES, MERGE_CHECKS } from '../../../src/policy/checks.ts';
-import { mergeBlockedError, mergeStateOf } from '../../../src/policy/merge.ts';
+import { ENQUEUE_MUTATION, mergeBlockedError, mergeStateOf } from '../../../src/policy/merge.ts';
 import { parseOverrides } from '../../../src/policy/overrides.ts';
 import * as policySchemas from '../../../src/policy/schemas.ts';
 import { MergePlan, MergeState } from '../../../src/policy/schemas.ts';
@@ -166,7 +166,9 @@ test('the base case is mergeable and the plan validates; the request pins the he
     path: 'repos/powerhouse-inc/powerhouse/pulls/3301/merge',
     body: { sha: snapshot().head.sha, merge_method: 'merge' },
   });
-  assert.equal(assertExportable(policySchemas), 5);
+  assert.equal(e.plan.via, 'merge');
+  assert.equal(mergeStateOf(snapshot(), e).queue, null, 'no merge queue on the base branch');
+  assert.equal(assertExportable(policySchemas), 7);
 });
 
 test('exit class: all state-class blockers give 9; any policy-class blocker gives 6', () => {
@@ -624,5 +626,123 @@ test('scope ci-gate: BLOCKED caused by CHANGES_REQUESTED (out of scope) stays bl
   assert.deepEqual(
     evaluate(over).plan.blockers.map((b) => b.code),
     ['CHANGES_REQUESTED'],
+  );
+});
+
+// ── The merge queue ─────────────────────────────────────────────────────────
+const QUEUE = {
+  required: true,
+  method: 'rebase' as const,
+  url: 'https://github.com/powerhouse-inc/powerhouse/queue/main',
+};
+const queued = (entry: { state: string; position: number } | null = null) => ({
+  nodeId: 'PR_kwDOAbCdEf5gHiJk',
+  mergeQueue: { ...QUEUE, entry: entry ? { ...entry, enqueuedAt: '2026-10-22T09:15:01Z' } : null },
+});
+const rebase = config({ merge: { method: 'merge', allowedMethods: ['merge', 'rebase'] } });
+
+test('a merge queue on the base branch: the plan goes through the queue, pinned by expectedHeadOid', () => {
+  const e = evaluate({ config: rebase, request: { method: 'rebase' }, snapshot: queued() });
+  assert.equal(e.ready, true);
+  MergePlan.parse(e.plan);
+  assert.equal(e.plan.via, 'queue');
+  assert.equal(e.plan.method, 'rebase');
+  assert.deepEqual(e.plan.request, {
+    method: 'POST',
+    path: 'graphql',
+    body: {
+      query: ENQUEUE_MUTATION,
+      variables: { input: { pullRequestId: 'PR_kwDOAbCdEf5gHiJk', expectedHeadOid: snapshot().head.sha } },
+    },
+  });
+  assert.match(ENQUEUE_MUTATION, /enqueuePullRequest\(input:\$input\)/);
+  assert.equal(e.plan.checks.find((c) => c.code === 'METHOD_NOT_ALLOWED')?.message, "method rebase, the merge queue's");
+});
+
+test("METHOD_NOT_ALLOWED: the queue decides the method, so a request for another one is refused, naming the queue's", () => {
+  const implicit = evaluate({ config: rebase, snapshot: queued() });
+  assert.deepEqual(
+    implicit.plan.blockers.map((b) => b.code),
+    ['METHOD_NOT_ALLOWED'],
+  );
+  assert.match(implicit.plan.blockers[0]?.message ?? '', /the merge queue for main merges with rebase/);
+  assert.equal(implicit.plan.blockers[0]?.details?.queueMethod, 'rebase');
+  assert.equal(
+    implicit.plan.blockers[0]?.details?.hint,
+    'The merge queue decides how it merges: pass --method rebase.',
+  );
+  assert.equal(implicit.exitClass, 'policy');
+  // The queue's method is still a ghx policy question: it must be in merge.allowedMethods and explicit.
+  const notAllowed = evaluate({ request: { method: 'rebase' }, snapshot: queued() });
+  assert.match(notAllowed.plan.blockers[0]?.message ?? '', /rebase is not in merge\.allowedMethods/);
+  const squash = evaluate({
+    config: config({ merge: { method: 'merge', allowedMethods: ['merge', 'squash'] } }),
+    request: { method: 'squash' },
+    snapshot: queued(),
+  });
+  assert.match(String(squash.plan.blockers[0]?.details?.hint), /pass --method rebase and ask the user to allow it/);
+});
+
+test("a merge queue: the repo's merge buttons do not apply, and an unreported queue method cannot be checked", () => {
+  const off = { ...snapshot().repoSettings, rebaseMergeAllowed: false };
+  const viaQueue = evaluate({
+    config: rebase,
+    request: { method: 'rebase' },
+    snapshot: { ...queued(), repoSettings: off },
+  });
+  assert.equal(viaQueue.ready, true);
+  const direct = evaluate({ config: rebase, request: { method: 'rebase' }, snapshot: { repoSettings: off } });
+  assert.match(direct.plan.blockers[0]?.message ?? '', /the repo does not allow rebase merges/);
+  const unknown = evaluate({ snapshot: { ...queued(), mergeQueue: { ...QUEUE, method: null, entry: null } } });
+  assert.equal(unknown.ready, true);
+  assert.match(unknown.plan.checks.find((c) => c.code === 'METHOD_NOT_ALLOWED')?.message ?? '', /not reported/);
+});
+
+test('in the merge queue: the queue decides, so UNKNOWN, BEHIND and BLOCKED on the PR itself do not block', () => {
+  for (const state of [
+    merge({ mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN', settled: false }),
+    merge({ mergeStateStatus: 'BEHIND' }),
+    merge({ mergeStateStatus: 'BLOCKED' }),
+  ]) {
+    const out = evaluate({ config: rebase, request: { method: 'rebase' }, snapshot: { ...queued(), merge: state } });
+    assert.equal(out.ready, false, `${state.mergeStateStatus} blocks a PR that is not queued`);
+    const e = evaluate({
+      config: rebase,
+      request: { method: 'rebase' },
+      snapshot: { ...queued({ state: 'AWAITING_CHECKS', position: 1 }), merge: state },
+    });
+    assert.equal(e.ready, true, state.mergeStateStatus);
+    assert.equal(e.plan.checks.find((c) => c.code === 'BLOCKED_BY_PROTECTION')?.status, 'skipped');
+  }
+  // A conflict is still a conflict: the queue will drop it.
+  const dirty = merge({ mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' });
+  const e = evaluate({
+    config: rebase,
+    request: { method: 'rebase' },
+    snapshot: { ...queued({ state: 'QUEUED', position: 1 }), merge: dirty },
+  });
+  assert.deepEqual(
+    e.plan.blockers.map((b) => b.code),
+    ['MERGE_CONFLICT'],
+  );
+});
+
+test('mergeStateOf: merge.queue says the base needs the queue and where the PR is in it', () => {
+  const s = snapshot(queued({ state: 'AWAITING_CHECKS', position: 2 }));
+  const state = mergeStateOf(s, evaluate({ config: rebase, request: { method: 'rebase' }, snapshot: s }));
+  MergeState.parse(state);
+  assert.deepEqual(state.queue, {
+    required: true,
+    method: 'rebase',
+    queued: true,
+    state: 'AWAITING_CHECKS',
+    position: 2,
+    enqueuedAt: '2026-10-22T09:15:01Z',
+    url: QUEUE.url,
+  });
+  const idle = mergeStateOf(snapshot(queued()), evaluate({ snapshot: queued() }));
+  assert.deepEqual(
+    [idle.queue?.required, idle.queue?.queued, idle.queue?.state, idle.queue?.position],
+    [true, false, null, null],
   );
 });

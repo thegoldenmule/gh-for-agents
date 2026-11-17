@@ -15,6 +15,7 @@ import { MERGE_MERGEABLE_BUDGET_MS, type PrSnapshot } from '../snapshot/index.ts
 import { loadPrStatus } from '../status/compose.ts';
 import { prContext, rethrowNotFound } from '../status/target.ts';
 import { readMergePull } from './pull.ts';
+import type { QueueEntry, QueueTarget, QueueWait } from './queue.ts';
 
 /** Time kept back from the deadline before the PUT, so the merge and its verification never hit it. */
 export const PUT_MARGIN_MS = 30_000;
@@ -30,6 +31,11 @@ export interface MergeFlags {
    * merge judges the same set instead of re-deriving one (one check set, 04). Not a CLI flag.
    */
   expected?: { defs: readonly ExpectedDef[]; agedOut: readonly string[] } | undefined;
+  /**
+   * pr land: wait for the merge queue once the PR is in it (src/pr/merge/queue.ts waitForQueue), so the
+   * merge ends merged, not queued. Not a CLI flag: pr merge itself returns as soon as the PR is queued.
+   */
+  awaitQueue?: ((o: QueueTarget & { entry: QueueEntry | null }) => Promise<QueueWait>) | undefined;
 }
 
 interface Planned {
@@ -44,6 +50,10 @@ interface Planned {
 
 export type MergeDecision =
   | (Planned & { kind: 'merge' })
+  /** The base branch has a merge queue: add the PR to it (plan.via is 'queue'). */
+  | (Planned & { kind: 'enqueue' })
+  /** The PR is already in the merge queue at the evaluated head: nothing to send. */
+  | (Planned & { kind: 'queued'; entry: NonNullable<NonNullable<PrSnapshot['mergeQueue']>['entry']> })
   | (Planned & { kind: 'already-merged'; mergeCommit: string; mergedAt: string });
 
 const short = (sha: string) => sha.slice(0, 7);
@@ -121,6 +131,9 @@ export async function planMerge(ctx: Context, flags: MergeFlags): Promise<MergeD
     }
     return { ...base, kind: 'already-merged', mergeCommit, mergedAt };
   }
+  // Already in the merge queue at the evaluated head: GitHub accepted it, and the queue decides from here.
+  const entry = snapshot.state === 'OPEN' ? snapshot.mergeQueue?.entry : null;
+  if (entry) return { ...base, kind: 'queued', entry };
   if (!evaluation.ready) throw mergeBlockedError(evaluation);
-  return { ...base, kind: 'merge' };
+  return { ...base, kind: plan.via === 'queue' ? 'enqueue' : 'merge' };
 }

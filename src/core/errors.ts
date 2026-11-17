@@ -124,6 +124,9 @@ export const ERROR_CODES = {
   NO_FLAKY_CANDIDATES: { exit: ExitCode.STATE },
   HEAD_BRANCH_MISSING: { exit: ExitCode.STATE },
   MERGEABLE_UNKNOWN: { exit: ExitCode.STATE },
+  // pr land: the merge queue removed the PR without merging it (its merge group failed, a conflict, or
+  // someone removed it); details.{reason, removedBy, removedAt, lastState}.
+  MERGE_QUEUE_DROPPED: { exit: ExitCode.STATE },
   // ci rerun on a head whose only red is a run GitHub rejected before any job ran: fix the file, push.
   WORKFLOW_INVALID: { exit: ExitCode.STATE },
 

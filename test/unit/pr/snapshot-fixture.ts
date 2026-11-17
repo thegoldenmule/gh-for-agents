@@ -150,3 +150,75 @@ export const isQ1 = (argv: string[]) => queryOf(argv).includes('viewer{login}');
 export const isMergeable = (argv: string[]) => queryOf(argv).includes('{state headRefOid mergeable mergeStateStatus}');
 export const isQ2 = (argv: string[]) => queryOf(argv).includes('{repository(owner:$owner,name:$name){__typename');
 export const isPrCommits = (argv: string[]) => queryOf(argv).includes('commits(first:100,after:$after){totalCount');
+
+// ── The merge queue (GitHub rulesets' "Require merge queue") ────────────────
+export const PR_NODE_ID = 'PR_kwDOAbCdEf5gHiJk';
+export const QUEUE_URL = 'https://github.com/powerhouse-inc/powerhouse/queue/main';
+export const ENQUEUED_AT = '2026-10-22T09:15:01Z';
+
+export interface QueueEntryFixture {
+  state: string;
+  position: number;
+  enqueuedAt?: string | null;
+}
+
+const entryJson = (e: QueueEntryFixture | null | undefined) => (e ? { enqueuedAt: ENQUEUED_AT, ...e } : null);
+
+/** The Q1 fields of a PR whose base branch has a merge queue (REBASE unless `method` says otherwise). */
+export function queueFields(o: { method?: string | null; entry?: QueueEntryFixture | null } = {}) {
+  return {
+    id: PR_NODE_ID,
+    isMergeQueueEnabled: true,
+    isInMergeQueue: !!o.entry,
+    mergeQueueEntry: entryJson(o.entry),
+    mergeQueue: { url: QUEUE_URL, configuration: { mergeMethod: o.method === undefined ? 'REBASE' : o.method } },
+  };
+}
+
+/** The enqueuePullRequest mutation: GraphQL over stdin (`--input -`), unlike every read. */
+export const isEnqueue = (argv: string[], stdin?: string) =>
+  argv.includes('graphql') && argv.includes('--input') && (stdin === undefined || stdin.includes('enqueuePullRequest'));
+export const isQueueRead = (argv: string[]) => queryOf(argv).includes('REMOVED_FROM_MERGE_QUEUE_EVENT');
+
+export function enqueueReply(entry: QueueEntryFixture | null = { state: 'QUEUED', position: 1 }) {
+  return ok({ data: { enqueuePullRequest: { mergeQueueEntry: entryJson(entry) } } });
+}
+
+/** A GraphQL refusal as `gh api graphql --include` reports it: HTTP 200, errors in the body, exit 1. */
+export function graphqlRefusal(message: string, type = 'UNPROCESSABLE') {
+  return {
+    ...ok({ data: { enqueuePullRequest: null }, errors: [{ type, path: ['enqueuePullRequest'], message }] }),
+    exitCode: 1,
+    stderr: `gh: ${message}\n`,
+  };
+}
+
+/** The queue read (src/pr/merge/queue.ts QUEUE_QUERY): the PR as the merge queue wait sees it. */
+export function queueReadReply(
+  o: {
+    state?: string;
+    head?: string;
+    entry?: QueueEntryFixture | null;
+    mergeCommit?: string | null;
+    mergedAt?: string | null;
+    removed?: { createdAt: string; reason?: string | null; actor?: { login: string } | null } | null;
+  } = {},
+) {
+  return ok({
+    data: {
+      repository: {
+        pullRequest: {
+          state: o.state ?? 'OPEN',
+          headRefOid: o.head ?? HEAD,
+          mergedAt: o.mergedAt ?? null,
+          mergeCommit: o.mergeCommit ? { oid: o.mergeCommit } : null,
+          isInMergeQueue: !!o.entry,
+          mergeQueueEntry: entryJson(o.entry),
+          timelineItems: {
+            nodes: o.removed ? [{ __typename: 'RemovedFromMergeQueueEvent', ...o.removed }] : [],
+          },
+        },
+      },
+    },
+  });
+}

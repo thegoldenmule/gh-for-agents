@@ -17,9 +17,11 @@ import {
   isQ2,
   OLD_HEAD,
   prCommitsReply,
+  QUEUE_URL,
   q1Pr,
   q1Reply,
   q2Reply,
+  queueFields,
   REPO,
   snapshotConfig,
 } from './snapshot-fixture.ts';
@@ -367,4 +369,40 @@ test('rollup pages beyond the first are read with the CI module query; a push be
   // completeRollup writes the CI_SHA_MISMATCH message; the snapshot does not repeat it.
   assert.equal(s2.warnings.filter((w) => w.code === 'CI_SHA_MISMATCH').length, 1);
   assert.match(s2.warnings.find((w) => w.code === 'CI_SHA_MISMATCH')?.message ?? '', /is for eeeeeee, not the head/);
+});
+
+test('the merge queue: Q1 asks for it, and the snapshot carries the queue, its method and the PR entry', async () => {
+  for (const f of [
+    'pullRequest(number:$number){id number',
+    'isMergeQueueEnabled isInMergeQueue mergeQueueEntry{state position enqueuedAt}',
+    'mergeQueue{url configuration{mergeMethod}}',
+  ]) {
+    assert.ok(Q1_QUERY.includes(f), f);
+  }
+  const read = async (pr: unknown) => {
+    const env = ciEnv();
+    env.fake.on(isQ1, q1Reply(pr));
+    env.fake.on(isQ2, q2Reply({ children: { nodes: [] } }));
+    return fetch(env);
+  };
+  const none = await read(q1Pr());
+  assert.equal(none.mergeQueue, null, 'a reply without the fields (or with no queue) reads as no merge queue');
+  assert.equal(none.nodeId, undefined);
+  const off = await read(
+    q1Pr({ id: 'PR_x', isMergeQueueEnabled: false, isInMergeQueue: false, mergeQueueEntry: null, mergeQueue: null }),
+  );
+  assert.equal(off.mergeQueue, null);
+  assert.equal(off.nodeId, 'PR_x');
+  const idle = await read(q1Pr(queueFields()));
+  assert.deepEqual(idle.mergeQueue, { required: true, method: 'rebase', url: QUEUE_URL, entry: null });
+  assert.equal(idle.nodeId, queueFields().id);
+  const inQueue = await read(q1Pr(queueFields({ method: 'SQUASH', entry: { state: 'AWAITING_CHECKS', position: 2 } })));
+  assert.deepEqual(inQueue.mergeQueue, {
+    required: true,
+    method: 'squash',
+    url: QUEUE_URL,
+    entry: { state: 'AWAITING_CHECKS', position: 2, enqueuedAt: '2026-10-22T09:15:01Z' },
+  });
+  // A method this ghx does not know reads as null: never a guess.
+  assert.equal((await read(q1Pr(queueFields({ method: 'FAST_FORWARD' })))).mergeQueue?.method, null);
 });

@@ -12,15 +12,22 @@ import { FakeClock } from '../helpers/fake-clock.ts';
 import { fakeGit } from '../helpers/fake-git.ts';
 import { runInProcess, scratchDir } from '../helpers/harness.ts';
 import {
+  ENQUEUED_AT,
+  enqueueReply,
+  isEnqueue,
   isMergeable,
   isPrCommits,
   isQ1,
   isQ2,
+  isQueueRead,
   mergeableReply,
   prCommitsReply,
+  type QueueEntryFixture,
   q1Pr,
   q1Reply,
   q2Reply,
+  queueFields,
+  queueReadReply,
 } from '../unit/pr/snapshot-fixture.ts';
 import { drive, endpoint, forbidden, GitHubSim, type ProcResultLike, type SimJob, sha } from './ci-wait-world.ts';
 import { httpReply } from './ci-why-world.ts';
@@ -35,13 +42,22 @@ const reply = (r: { exitCode: number; stdout: string; stderr: string }): ProcRes
 const isPut = (argv: string[]) => argv.includes('PUT') && endpoint(argv) === 'repos/o/r/pulls/7/merge';
 
 /** The PR snapshot's GraphQL mirrored from the sim (as in ci-wait-mergeable.test.ts), plus the merge PUT. */
-function world(o: { merge?: [string, string]; jobs?: SimJob[]; repo?: Record<string, unknown> } = {}) {
+function world(
+  o: {
+    merge?: [string, string];
+    jobs?: SimJob[];
+    repo?: Record<string, unknown>;
+    /** More Q1 pull request fields, read at each call (the merge queue's). */
+    pr?: () => Record<string, unknown>;
+    config?: Record<string, unknown>;
+  } = {},
+) {
   const clock = new FakeClock();
   const t: SimJob = { id: 21, runId: 600, name: 'test', status: 'in_progress', startedAt: 0 };
   const sim = new GitHubSim(
     clock,
     { pr: { state: 'open', head: H }, checks: { [H]: o.jobs ?? [t] } },
-    { config: CONFIG },
+    { config: o.config ?? CONFIG },
   );
   const [mergeable, mergeStateStatus] = o.merge ?? ['MERGEABLE', 'CLEAN'];
   sim.override(isQ1, () => {
@@ -79,6 +95,7 @@ function world(o: { merge?: [string, string]; jobs?: SimJob[]; repo?: Record<str
         state: st.pr.merged ? 'MERGED' : 'OPEN',
         mergeable,
         mergeStateStatus,
+        ...o.pr?.(),
       },
       { contexts },
     );
@@ -381,4 +398,209 @@ test('a required check missing from the bound set is added back at the gate and 
     ['build'],
   );
   assert.equal(puts(sim), 0, 'never merged on the bound set alone');
+});
+
+// ── The merge queue ─────────────────────────────────────────────────────────
+const REBASE = { ...CONFIG, merge: { method: 'merge', allowedMethods: ['merge', 'rebase'] } };
+
+/**
+ * A base branch with a merge queue (rebase). The enqueue mutation puts the PR in the queue; from then on
+ * `after(ms since the enqueue)` scripts what the queue does: keep it, merge it, or drop it.
+ */
+function queueWorld(
+  after: (ms: number) => 'queued' | 'limbo' | 'merged' | 'dropped' | 'pushed',
+  o: {
+    removed?: { reason: string | null; actor: { login: string } | null };
+    entry?: QueueEntryFixture | null;
+    /** The removal event GitHub shows while the PR is out of the queue but not merged yet. */
+    limboRemoved?: { reason: string | null; actor: { login: string } | null };
+  } = {},
+) {
+  const q: { entry: QueueEntryFixture | null; at: number | null; enqueues: number } = {
+    entry: o.entry ?? null,
+    at: o.entry ? 0 : null,
+    enqueues: 0,
+  };
+  const w = world({ config: REBASE, pr: () => queueFields({ entry: q.entry }) });
+  const { sim, clock } = w;
+  /** Advance the scripted queue to now. */
+  const step = () => {
+    if (q.at === null || q.entry === null) return 'out' as const;
+    const what = after(clock.monotonic() - q.at);
+    if (what === 'merged' && !sim.stateAt().pr.merged) {
+      sim.at(clock.monotonic(), (s) => ({ ...s, pr: { ...s.pr, state: 'closed', merged: true, mergeCommit: MC } }));
+    }
+    if (what === 'pushed' && sim.stateAt().pr.head !== NEW) {
+      sim.at(clock.monotonic(), (s) => ({ ...s, pr: { ...s.pr, head: NEW }, checks: { ...s.checks, [NEW]: [] } }));
+    }
+    if (what !== 'queued' && what !== 'limbo') q.entry = null;
+    return what;
+  };
+  sim.override(isEnqueue, () => {
+    q.enqueues++;
+    q.entry = { state: 'QUEUED', position: 1 };
+    q.at = clock.monotonic();
+    return reply(enqueueReply(q.entry));
+  });
+  sim.override(isQueueRead, () => {
+    // limbo: the entry is gone but the PR does not read as merged yet (the two are not updated together).
+    const limbo = step() === 'limbo';
+    const st = sim.stateAt();
+    const removedAt = sim.iso(clock.monotonic()) as string;
+    return reply(
+      queueReadReply({
+        state: st.pr.merged ? 'MERGED' : 'OPEN',
+        head: st.pr.head,
+        entry: q.entry === null || limbo ? null : { ...q.entry, state: 'AWAITING_CHECKS' },
+        mergeCommit: st.pr.merged ? MC : null,
+        mergedAt: st.pr.merged ? removedAt : null,
+        removed:
+          limbo && o.limboRemoved
+            ? { createdAt: removedAt, ...o.limboRemoved }
+            : q.at !== null && q.entry === null && !st.pr.merged && o.removed
+              ? { createdAt: removedAt, ...o.removed }
+              : null,
+      }),
+    );
+  });
+  return { ...w, q };
+}
+
+test('a merge queue: green, enqueued pinned to the judged head, then land waits until the queue has merged it', async () => {
+  const { sim, t, q } = queueWorld((ms) => (ms < 3 * MIN ? 'queued' : 'merged'));
+  green(sim, t, 2 * MIN);
+  const r = await land(sim, ['o/r#7', '--method', 'rebase']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  const s = LandSummary.parse(r.json);
+  assert.equal(s.outcome, 'merged');
+  assert.equal(s.headSha, H);
+  assert.equal(s.merge?.merged, true);
+  assert.equal(s.merge?.queued, false);
+  assert.equal(s.merge?.alreadyMerged, false);
+  assert.equal(s.merge?.mergeCommit, MC);
+  assert.equal(s.merge?.method, 'rebase');
+  assert.equal(s.merge?.queue?.alreadyQueued, false);
+  assert.equal(s.merge?.queue?.state, null, 'it left the queue by merging');
+  assert.equal(s.merge?.plan.via, 'queue');
+  assert.deepEqual(s.merge?.plan.request.body.variables, {
+    input: { pullRequestId: queueFields().id, expectedHeadOid: H },
+  });
+  assert.equal(q.enqueues, 1);
+  assert.equal(puts(sim), 0, 'never the REST merge GitHub refuses on a queued branch');
+  assert.ok(sim.clock.monotonic() >= 5 * MIN, 'it waited for the queue, not just for the enqueue');
+  assert.deepEqual(s.next, [`ghx ci wait branch:main@${MC}`]);
+});
+
+test('one read showing the PR open and out of the queue is not a drop: the next read shows it merged', async () => {
+  const { sim, t, q } = queueWorld((ms) => (ms < MIN ? 'queued' : ms < MIN + 10_000 ? 'limbo' : 'merged'));
+  green(sim, t, 2 * MIN);
+  const r = await land(sim, ['o/r#7', '--method', 'rebase']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  const s = LandSummary.parse(r.json);
+  assert.equal(s.outcome, 'merged');
+  assert.equal(s.merge?.mergeCommit, MC);
+  assert.equal(q.enqueues, 1);
+});
+
+test('GitHub records the removal with reason "merged" before the PR reads as merged: land keeps waiting, then merged', async () => {
+  // Seen live: a successful queue merge leaves a RemovedFromMergeQueueEvent (reason "merged") too.
+  const { sim, t } = queueWorld((ms) => (ms < MIN ? 'queued' : ms < MIN + 40_000 ? 'limbo' : 'merged'), {
+    limboRemoved: { reason: 'merged', actor: null },
+  });
+  green(sim, t, 2 * MIN);
+  const r = await land(sim, ['o/r#7', '--method', 'rebase']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  const s = LandSummary.parse(r.json);
+  assert.equal(s.outcome, 'merged');
+  assert.equal(s.merge?.queue?.enqueuedAt, ENQUEUED_AT, 'when it was queued is kept once merged');
+});
+
+test('a merge queue drops the PR: outcome queue-dropped, MERGE_QUEUE_DROPPED (exit 9) with the reason GitHub recorded', async () => {
+  const { sim, t, q } = queueWorld((ms) => (ms < 2 * MIN ? 'queued' : 'dropped'), {
+    removed: { reason: 'FAILED_CHECKS', actor: { login: 'github-merge-queue' } },
+  });
+  green(sim, t, 2 * MIN);
+  const r = await land(sim, ['o/r#7', '--method', 'rebase']);
+  assert.equal(r.exitCode, EXIT.STATE, r.stdout);
+  const s = LandSummary.parse(r.json);
+  assert.equal(s.outcome, 'queue-dropped');
+  assert.equal(s.reason, 'MERGE_QUEUE_DROPPED');
+  assert.equal(s.error?.code, 'MERGE_QUEUE_DROPPED');
+  assert.match(
+    s.error?.message ?? '',
+    /removed from the merge queue by github-merge-queue without merging: FAILED_CHECKS/,
+  );
+  assert.match(s.error?.hint ?? '', /ghx pr status o\/r#7/);
+  assert.equal(s.error?.details?.reason, 'FAILED_CHECKS');
+  assert.equal(s.error?.details?.lastState, 'AWAITING_CHECKS');
+  assert.equal(s.merge, null);
+  assert.deepEqual(s.next, ['ghx pr status o/r#7']);
+  assert.equal(q.enqueues, 1);
+  assert.equal(puts(sim), 0);
+});
+
+test('a push while queued takes the PR out of the queue: HEAD_MOVED (exit 9), not queue-dropped', async () => {
+  const { sim, t } = queueWorld((ms) => (ms < MIN ? 'queued' : 'pushed'));
+  green(sim, t, 2 * MIN);
+  const r = await land(sim, ['o/r#7', '--method', 'rebase']);
+  assert.equal(r.exitCode, EXIT.STATE, r.stdout);
+  const s = LandSummary.parse(r.json);
+  assert.equal(s.outcome, 'not-merged');
+  assert.equal(s.error?.code, 'HEAD_MOVED');
+  assert.equal(s.error?.details?.actual, NEW);
+});
+
+test('--foreground in the queue: pending (exit 15, in-merge-queue); the identical re-run resumes the wait without a second enqueue', async () => {
+  const { sim, t, q } = queueWorld((ms) => (ms < 12 * MIN ? 'queued' : 'merged'));
+  green(sim, t, 2 * MIN);
+  const artifacts = mkdtempSync(join(scratchDir(), 'land-'));
+  const argv = ['pr', 'land', 'o/r#7', '--method', 'rebase', '--foreground'];
+  const first = await runIn(sim, argv, artifacts);
+  assert.equal(first.exitCode, EXIT.CI_PENDING_RESUME, first.stdout);
+  const a = LandSummary.parse(first.json);
+  assert.equal(a.outcome, 'pending');
+  assert.equal(a.reason, 'in-merge-queue');
+  assert.equal(a.merge?.queued, true);
+  assert.equal(a.merge?.merged, false);
+  assert.equal(a.merge?.queue?.state, 'AWAITING_CHECKS');
+  assert.deepEqual(a.next, ['ghx pr land o/r#7 --method rebase --foreground']);
+  assert.match(JSON.stringify(first.json.warnings), /WAIT_FOREGROUND_RETURN.*still in the merge queue/);
+  assert.ok(sim.clock.monotonic() <= 9 * MIN + 30_000, 'returned under the Bash cap');
+
+  const second = await runIn(sim, argv, artifacts);
+  assert.equal(second.exitCode, EXIT.OK, second.stdout);
+  const b = LandSummary.parse(second.json);
+  assert.equal(b.outcome, 'merged');
+  assert.equal(b.merge?.mergeCommit, MC);
+  assert.equal(b.merge?.queue?.alreadyQueued, true, 'the re-run found it queued and only waited');
+  assert.equal(q.enqueues, 1);
+  assert.equal(puts(sim), 0);
+});
+
+test('--dry-run with a merge queue: would-queue, the plan is the enqueue, nothing is sent', async () => {
+  const { sim, t, q } = queueWorld(() => 'queued');
+  green(sim, t, 2 * MIN);
+  const r = await land(sim, ['o/r#7', '--method', 'rebase', '--dry-run']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  const s = LandSummary.parse(r.json);
+  assert.equal(s.outcome, 'would-queue');
+  assert.equal(s.plan?.via, 'queue');
+  assert.equal(s.plan?.request.method, 'POST');
+  assert.deepEqual(s.next, ['ghx pr land o/r#7 --method rebase']);
+  assert.equal(q.enqueues, 0);
+  assert.deepEqual(sim.mutations(), []);
+});
+
+test("a merge queue with another method than the one asked for: MERGE_BLOCKED (exit 6) naming the queue's; nothing sent", async () => {
+  const { sim, t, q } = queueWorld(() => 'queued');
+  green(sim, t, 2 * MIN);
+  const r = await land(sim, ['o/r#7']);
+  assert.equal(r.exitCode, EXIT.POLICY, r.stdout);
+  const s = LandSummary.parse(r.json);
+  assert.equal(s.outcome, 'not-merged');
+  assert.equal(s.error?.code, 'MERGE_BLOCKED');
+  assert.match(JSON.stringify(s.error?.details), /METHOD_NOT_ALLOWED/);
+  assert.match(s.error?.hint ?? '', /--method rebase/);
+  assert.equal(q.enqueues, 0);
+  assert.equal(puts(sim), 0);
 });

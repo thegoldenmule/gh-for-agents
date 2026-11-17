@@ -62,8 +62,13 @@ function githubMessage(e: GhFailure): string {
   return e.message;
 }
 
-/** MERGE_BLOCKED for a refusal GitHub reported at the PUT, with the plan updated to say so. */
-function blockedAtPut(plan: MergePlan, code: string, message: string, details: Record<string, unknown>): GhxError {
+/** MERGE_BLOCKED for a refusal GitHub reported at the PUT (or the enqueue), with the plan updated to say so. */
+export function blockedAtPut(
+  plan: MergePlan,
+  code: string,
+  message: string,
+  details: Record<string, unknown>,
+): GhxError {
   const spec = checkSpec(code);
   const blocker: Violation = { code, message, overridable: spec?.overridable ?? false, details };
   const failed = plan.checks.some((c) => c.code === code);

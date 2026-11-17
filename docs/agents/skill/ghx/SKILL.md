@@ -79,8 +79,8 @@ Spawning a subagent for PR work? Paste the [coordinator PR template](https://git
 - `ghx pr edit` (write): Patch a ghx PR: re-validated, block rev+1, retarget or draft toggle, exact read-back
 - `ghx pr feedback` (read): All PR feedback (reviews, findings, comments, bots), filterable; full bodies in a file
 - `ghx pr impact` (read): Read components and the risk floor from any PR’s changed paths
-- `ghx pr land` (write): Wait until mergeable, then merge pinned to that head (run like ci wait)
-- `ghx pr merge` (write): Merge when policy allows, pinned to the evaluated head; every blocker reported together
+- `ghx pr land` (write): Wait until mergeable, then merge (or queue) pinned to that head; run like ci wait
+- `ghx pr merge` (write): Merge (or add to the merge queue) when policy allows, pinned to the evaluated head
 - `ghx pr ready` (write): Mark a PR ready for review, or back to draft with --undo; any PR, no ghx block needed
 - `ghx pr resolve` (write): Set the status of findings or preconditions (append-only event; resolves the review thread)
 - `ghx pr review` (write): Post a review: verdict, inline findings in the diff, hidden blocks, pinned to the head

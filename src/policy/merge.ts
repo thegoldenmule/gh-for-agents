@@ -14,7 +14,7 @@ import type { Warning } from '../schemas/common.ts';
 import { riskRank, type Severity, severityRank, type Violation } from '../schemas/pr.ts';
 import { CI_GATE_CODES, CONFIG_MISSING_CHECK, checkSpec, MERGE_CHECKS, type MergeCheckCode } from './checks.ts';
 import { type Overrides, parseOverrides } from './overrides.ts';
-import type { MergePlan, MergeState, PlanCheck, PlanCheckStatus } from './schemas.ts';
+import type { MergePlan, MergeQueueState, MergeState, PlanCheck, PlanCheckStatus } from './schemas.ts';
 import { isShared, type SharedRedMode, sharedRedWaived } from './shared-red.ts';
 
 export type MergeMethod = 'merge' | 'squash' | 'rebase';
@@ -37,6 +37,7 @@ export type PolicySnapshot = Pick<
   | 'repo'
   | 'ref'
   | 'number'
+  | 'nodeId'
   | 'title'
   | 'body'
   | 'author'
@@ -45,6 +46,7 @@ export type PolicySnapshot = Pick<
   | 'base'
   | 'head'
   | 'merge'
+  | 'mergeQueue'
   | 'viewer'
   | 'repoSettings'
   | 'meta'
@@ -181,6 +183,30 @@ function methodNotAllowed(i: MergePolicyInput): Result {
   }
   // 02 §8.2 row 5 and brief 6: squash or rebase only when explicitly asked for with --method.
   if (m !== 'merge' && i.request?.method !== m) why.push(`${m} needs an explicit --method ${m}`);
+  const queue = queueOf(i.snapshot);
+  if (queue) {
+    // The queue merges with its own configured method, whatever the request says: a request for another
+    // one would be silently ignored, so it is refused instead. The repo's merge buttons do not apply.
+    const q = queue.method;
+    if (q !== null && q !== m) why.push(`the merge queue for ${i.snapshot.base.ref} merges with ${q}`);
+    if (why.length === 0) {
+      return pass(
+        q === null ? `method ${m}; the merge queue's method is not reported` : `method ${m}, the merge queue's`,
+      );
+    }
+    return fail(`Method ${m} is not allowed: ${why.join('; ')}.`, {
+      method: m,
+      ...(q !== null ? { queueMethod: q } : {}),
+      hint:
+        q === null || q === m
+          ? i.config.merge.allowedMethods.includes(m)
+            ? `Pass --method ${m}.`
+            : 'Ask the user to allow it in merge.allowedMethods.'
+          : `The merge queue decides how it merges: pass --method ${q}${
+              i.config.merge.allowedMethods.includes(q) ? '' : ' and ask the user to allow it in merge.allowedMethods'
+            }.`,
+    });
+  }
   if (!i.snapshot.repoSettings[REPO_SETTING[m]]) why.push(`the repo does not allow ${m} merges`);
   if (why.length === 0) return pass(`method ${m}`);
   return fail(`Method ${m} is not allowed: ${why.join('; ')}.`, {
@@ -191,6 +217,14 @@ function methodNotAllowed(i: MergePolicyInput): Result {
         : 'Merge with the default method (omit --method), or ask the user to allow it in merge.allowedMethods.',
   });
 }
+
+/** The base branch's merge queue when merges must go through it, else null. */
+function queueOf(s: PolicySnapshot): NonNullable<PolicySnapshot['mergeQueue']> | null {
+  return s.mergeQueue?.required ? s.mergeQueue : null;
+}
+
+/** The PR's entry in the merge queue, when it is in one. */
+const queuedEntry = (s: PolicySnapshot) => s.mergeQueue?.entry ?? null;
 
 function mergeableUnknown(s: PolicySnapshot): Result {
   const unknown = [
@@ -451,9 +485,27 @@ function mergeWarnings(i: MergePolicyInput, findingWarning: Violation | null): V
 }
 
 // ── Assembly ──────────────────────────────────────────────────────────────
+/**
+ * The mutation that adds a PR to its base branch's merge queue, pinned like the REST merge: GitHub refuses
+ * it unless the head is still `expectedHeadOid`. EnqueuePullRequestInput also takes `jump`, never sent.
+ */
+export const ENQUEUE_MUTATION =
+  'mutation($input:EnqueuePullRequestInput!){enqueuePullRequest(input:$input){' +
+  'mergeQueueEntry{state position enqueuedAt}}}';
+
 function requestOf(i: MergePolicyInput): MergePlan['request'] {
   const s = i.snapshot;
   const m = method(i);
+  if (queueOf(s)) {
+    return {
+      method: 'POST',
+      path: 'graphql',
+      body: {
+        query: ENQUEUE_MUTATION,
+        variables: { input: { pullRequestId: s.nodeId ?? null, expectedHeadOid: s.head.sha } },
+      },
+    };
+  }
   const body: Record<string, unknown> = { sha: s.head.sha, merge_method: m };
   if (m === 'squash') {
     body.commit_title = `${s.title} (#${s.number})`;
@@ -467,6 +519,10 @@ export function evaluateMerge(i: MergePolicyInput): MergeEvaluation {
   const s = i.snapshot;
   const open = s.state === 'OPEN';
   const notOpen = skip(`PR is ${s.state}`);
+  // GitHub took the PR into the merge queue: the queue re-checks it against the base and merges or drops
+  // it, so what GitHub reports about the PR's own merge state meanwhile is not a reason to refuse.
+  const inQueue = queuedEntry(s) !== null;
+  const queued = skip('in the merge queue, which decides');
   // The engine re-validates: an override built by hand (not by parseOverrides) must not slip through with
   // an empty reason or a non-overridable code. VALIDATION, as at the flags.
   const given = i.request?.overrides;
@@ -488,9 +544,9 @@ export function evaluateMerge(i: MergePolicyInput): MergeEvaluation {
     ['AUTHOR_NOT_VIEWER', authorNotViewer(s, i.config)],
     ['NO_MERGE_PERMISSION', noMergePermission(s)],
     ['METHOD_NOT_ALLOWED', methodNotAllowed(i)],
-    ['MERGEABLE_UNKNOWN', open ? mergeableUnknown(s) : notOpen],
+    ['MERGEABLE_UNKNOWN', !open ? notOpen : inQueue ? queued : mergeableUnknown(s)],
     ['MERGE_CONFLICT', open ? mergeConflict(s) : notOpen],
-    ['BEHIND_BASE', open ? behindBase(s) : notOpen],
+    ['BEHIND_BASE', !open ? notOpen : inQueue ? queued : behindBase(s)],
     ['CI_PENDING', ciPending(i)],
     ['CI_NO_CHECKS', ciNoChecks(i)],
     ['CI_RED', ciRed(i)],
@@ -507,7 +563,7 @@ export function evaluateMerge(i: MergePolicyInput): MergeEvaluation {
   const explained = (['CI_PENDING', 'CI_NO_CHECKS', 'CI_RED', 'CHANGES_REQUESTED'] as const).some(
     (code) => inScope(code) && stillFails(code),
   );
-  results.set('BLOCKED_BY_PROTECTION', open ? blockedByProtection(s, explained) : notOpen);
+  results.set('BLOCKED_BY_PROTECTION', !open ? notOpen : inQueue ? queued : blockedByProtection(s, explained));
   if (i.scope === 'repository-gate') {
     results.set('AUTHOR_NOT_VIEWER', skip('CI checks repository policy rather than the merging user’s identity.'));
     results.set('NO_MERGE_PERMISSION', skip('A read-only CI token does not perform the merge.'));
@@ -579,6 +635,7 @@ export function evaluateMerge(i: MergePolicyInput): MergeEvaluation {
       ref: s.ref,
       headSha: s.head.sha,
       method: method(i),
+      via: queueOf(s) ? 'queue' : 'merge',
       allowed,
       checks,
       blockers,
@@ -607,6 +664,22 @@ export function mergeStateOf(s: PolicySnapshot, e: MergeEvaluation): MergeState 
     warnings: e.warnings,
     mergedAt: s.merge.mergedAt,
     mergeCommit: s.merge.mergeCommit,
+    queue: queueStateOf(s),
+  };
+}
+
+/** pr status's `merge.queue`: null when the base branch has no merge queue. */
+export function queueStateOf(s: Pick<PolicySnapshot, 'mergeQueue'>): MergeQueueState | null {
+  const q = s.mergeQueue;
+  if (!q) return null;
+  return {
+    required: q.required,
+    method: q.method,
+    queued: q.entry !== null,
+    state: q.entry?.state ?? null,
+    position: q.entry?.position ?? null,
+    enqueuedAt: q.entry?.enqueuedAt ?? null,
+    url: q.url,
   };
 }
 

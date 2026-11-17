@@ -39,11 +39,39 @@ export { Stack } from './stack.ts';
 export const REVIEW_DECISIONS = ['APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED'] as const;
 export type ReviewDecision = (typeof REVIEW_DECISIONS)[number];
 
+/** The merge queue of the PR's base branch, and the PR's entry in it. */
+export interface MergeQueueSnapshot {
+  /** The base branch merges only through its queue (PullRequest.isMergeQueueEnabled). */
+  required: boolean;
+  /** The queue's merge method (it decides how the PR is merged); null when GitHub does not report it. */
+  method: 'merge' | 'squash' | 'rebase' | null;
+  url: string | null;
+  /** The PR's entry; null when it is not in the queue. `state` is GitHub's MergeQueueEntryState. */
+  entry: { state: string; position: number; enqueuedAt: string | null } | null;
+}
+
+const QUEUE_METHODS = { MERGE: 'merge', SQUASH: 'squash', REBASE: 'rebase' } as const;
+
+/** Null when the base branch has no merge queue (or the reply predates the fields). */
+export function mergeQueueOf(pr: Q1Result['pr']): MergeQueueSnapshot | null {
+  if (pr.isMergeQueueEnabled !== true && !pr.mergeQueueEntry) return null;
+  const method = pr.mergeQueue?.configuration?.mergeMethod ?? '';
+  const e = pr.mergeQueueEntry ?? null;
+  return {
+    required: pr.isMergeQueueEnabled === true,
+    method: QUEUE_METHODS[method as keyof typeof QUEUE_METHODS] ?? null,
+    url: pr.mergeQueue?.url ?? null,
+    entry: e ? { state: e.state, position: e.position, enqueuedAt: e.enqueuedAt ?? null } : null,
+  };
+}
+
 export interface PrSnapshot {
   repo: RepoRef;
   /** owner/repo#N. */
   ref: string;
   number: number;
+  /** The PR's GraphQL node id (the enqueuePullRequest mutation takes it). Optional: hand-built snapshots. */
+  nodeId?: string;
   url: string;
   title: string;
   body: string;
@@ -76,6 +104,11 @@ export interface PrSnapshot {
     /** Mergeable re-queries made. */
     retries: number;
   };
+  /**
+   * The base branch's merge queue; null without one. Optional so hand-built snapshots stay valid; absent
+   * counts as no queue.
+   */
+  mergeQueue?: MergeQueueSnapshot | null;
   /** permission: Repository.viewerPermission on the base repo (null: not reported). */
   viewer: { login: string; permission: string | null };
   repoSettings: Q1Result['repoSettings'];
@@ -285,6 +318,7 @@ export async function fetchPrSnapshot(o: FetchPrSnapshotOptions): Promise<PrSnap
     repo: o.repo,
     ref: formatPrRef(o.repo, pr.number),
     number: pr.number,
+    ...(pr.id ? { nodeId: pr.id } : {}),
     url: pr.url,
     title: pr.title,
     body: pr.body,
@@ -317,6 +351,7 @@ export async function fetchPrSnapshot(o: FetchPrSnapshotOptions): Promise<PrSnap
       mergeCommit: pr.mergeCommit?.oid ?? null,
       retries,
     },
+    mergeQueue: mergeQueueOf(pr),
     viewer: { login: q1.viewerLogin, permission: q1.viewerPermission },
     repoSettings: q1.repoSettings,
     meta,

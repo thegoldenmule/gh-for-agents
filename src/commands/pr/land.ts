@@ -4,8 +4,11 @@
 // policy checks. It never merges on red CI, a conflict, a moved head or a policy refusal: it returns the
 // wait's diagnosis, or the merge refusal as `error`, with that error's exit code. Placement follows ci
 // wait: the main thread runs it in the background, a subagent in the foreground with --foreground.
+// Where the base branch has a merge queue, the merge step adds the PR to the queue (pinned to the same head)
+// and land keeps waiting, under the same self-return rules, until the queue has merged it (`merged`) or
+// dropped it (`queue-dropped`, exit 9). A re-run finds the PR in the queue and resumes that wait.
 import { z } from 'zod';
-import { runWait, type SettleHook } from '../../ci/wait/driver.ts';
+import { runWait, type SettleHook, selfReturnAt } from '../../ci/wait/driver.ts';
 import type { ExpectedDef } from '../../ci/wait/expected.ts';
 import { createMergeGate } from '../../ci/wait/mergeable.ts';
 import { compactTarget, fitDocument, shellArg } from '../../ci/wait/summary.ts';
@@ -16,6 +19,7 @@ import { ExitCode as Exit, type ExitCode } from '../../core/exit.ts';
 import { DEFAULT_MAX_BYTES } from '../../core/output.ts';
 import { MergePlan } from '../../policy/schemas.ts';
 import { planMerge } from '../../pr/merge/plan.ts';
+import { waitForQueue } from '../../pr/merge/queue.ts';
 import { PrMergeOutput } from '../../pr/merge/schema.ts';
 import { TargetSummary, WaitEvent } from '../../schemas/ci.ts';
 import { Sha, ShaInput } from '../../schemas/common.ts';
@@ -26,7 +30,9 @@ const Input = z.strictObject({
   expectHead: ShaInput.optional().describe(
     'Land only this head (7–40 hex): wait for the PR to reach it; default the local HEAD when on the PR branch and pushed',
   ),
-  method: MergeMethod.optional().describe('merge (default: merge.method); squash or rebase only when config allows'),
+  method: MergeMethod.optional().describe(
+    'merge (default: merge.method); squash or rebase only when config allows. With a merge queue: must be its method',
+  ),
   override: z
     .array(z.string().min(1))
     .optional()
@@ -57,23 +63,37 @@ const LandError = z.object({
 export const LandSummary = z.object({
   ref: z.string().describe('owner/repo#N'),
   outcome: z
-    .enum(['merged', 'already-merged', 'would-merge', 'not-merged', 'pending', 'interrupted'])
+    .enum([
+      'merged',
+      'already-merged',
+      'would-merge',
+      'would-queue',
+      'not-merged',
+      'queue-dropped',
+      'pending',
+      'interrupted',
+    ])
     .describe(
-      'merged; already-merged (at the evaluated head); would-merge (--dry-run); not-merged (see reason, wait, error); pending (exit 15: re-run the identical command); interrupted',
+      'merged (directly, or by the merge queue: merge.queue is set); already-merged (at the evaluated head); ' +
+        'would-merge (--dry-run); would-queue (--dry-run: it would be added to the merge queue); not-merged ' +
+        '(see reason, wait, error); queue-dropped (the merge queue removed it without merging: see error); ' +
+        'pending (exit 15: re-run the identical command; reason in-merge-queue once it is queued); interrupted',
     ),
   exitCode: z.number().int(),
   reason: z
     .string()
     .nullable()
     .describe(
-      "Why it did not merge: the wait's reason (first-failure, settled, merge-blocked, …) or the merge error code",
+      "Why it did not merge: the wait's reason (first-failure, settled, merge-blocked, …), in-merge-queue, or the merge error code",
     ),
   headSha: Sha.nullable().describe('The head the wait judged and the merge was pinned to'),
   wait: TargetSummary.nullable().describe('The ci wait --until mergeable result: CI, diagnosis, merge gate'),
-  merge: PrMergeOutput.nullable().describe('The pr merge result, once merged'),
-  plan: MergePlan.nullable().describe('--dry-run: the merge that would be sent'),
+  merge: PrMergeOutput.nullable().describe(
+    'The pr merge result, once merged; while pending in the merge queue, queued: true with the queue entry',
+  ),
+  plan: MergePlan.nullable().describe('--dry-run: the merge (or, via: queue, the enqueue) that would be sent'),
   error: LandError.nullable().describe(
-    'The merge refusal (MERGE_BLOCKED, HEAD_MOVED, …), with its exit code as exitCode',
+    'The merge refusal (MERGE_BLOCKED, HEAD_MOVED, MERGE_QUEUE_DROPPED, …), with its exit code as exitCode',
   ),
   diagnosisPath: z.string().nullable(),
   eventsPath: z.string(),
@@ -115,7 +135,7 @@ function waitNext(t: TargetSummary, again: string): string[] {
   return [...new Set(out)];
 }
 
-async function merge(i: Flags, t: TargetSummary, ctx: StreamContext, expected: Judged | null) {
+async function merge(i: Flags, t: TargetSummary, ctx: StreamContext, expected: Judged | null, returnAt: number) {
   const flags = {
     pr: t.target,
     expectHead: t.headSha ?? undefined,
@@ -128,23 +148,35 @@ async function merge(i: Flags, t: TargetSummary, ctx: StreamContext, expected: J
   if (ctx.dryRun) {
     // A stream command cannot halt at a mutation: plan it (every check, no PUT) and say what would be sent.
     const d = await planMerge(ctx, flags);
-    return { kind: 'dry' as const, plan: d.plan, already: d.kind === 'already-merged' };
+    return { kind: 'dry' as const, plan: d.plan, decision: d.kind };
   }
-  const out = await mergePr({ ...flags, deleteBranch: i.deleteBranch }, ctx);
+  const out = await mergePr(
+    {
+      ...flags,
+      deleteBranch: i.deleteBranch,
+      // Queued is not landed: wait for the merge queue too, until this call's self-return.
+      awaitQueue: (q) => waitForQueue({ ...q, returnAt }),
+    },
+    ctx,
+  );
   return { kind: 'merged' as const, out: PrMergeOutput.parse(out) };
 }
 
 export default defineStreamCommand({
   name: ['pr', 'land'],
-  summary: 'Wait until mergeable, then merge pinned to that head (run like ci wait)',
+  summary: 'Wait until mergeable, then merge (or queue) pinned to that head; run like ci wait',
   description:
     'ci wait --until mergeable, then pr merge, in one call. The wait binds one head (--expect-head, or the ' +
     'local HEAD when the cwd is on the PR branch and pushed) and stops with exit 12 if the head moves; the ' +
     "merge is pinned to that head and runs pr merge's policy checks. Never merges on red CI (exit 10, with " +
     'the diagnosis), no checks or a conflict (13), a stall (14), a moved head (12) or a merge refusal ' +
-    '(error: MERGE_BLOCKED exit 9 or 6, HEAD_MOVED 9). Run it like ci wait: in the background on the main ' +
-    'thread; in a subagent in the foreground with --foreground (the ghx hook arranges both), re-running ' +
-    'the identical command on exit 15. --dry-run waits, then plans the merge without sending it.',
+    '(error: MERGE_BLOCKED exit 9 or 6, HEAD_MOVED 9). Where the base branch has a merge queue, the PR is ' +
+    'added to the queue pinned to that head, and land waits until the queue has merged it (outcome merged, ' +
+    'merge.queue set) or removed it (outcome queue-dropped, error MERGE_QUEUE_DROPPED, exit 9); --method ' +
+    "must name the queue's method. Run it like ci wait: in the background on the main thread; in a " +
+    'subagent in the foreground with --foreground (the ghx hook arranges both), re-running the identical ' +
+    'command on exit 15 (it resumes the queue wait too). --dry-run waits, then plans the merge (or the ' +
+    'enqueue: outcome would-queue) without sending it.',
   kind: 'write',
   input: Input,
   positionals: ['pr'],
@@ -165,6 +197,9 @@ export default defineStreamCommand({
     'wait.diagnosis.jobs.firstError',
     'wait.merge.blockers',
     'merge.mergeCommit',
+    'merge.queued',
+    'merge.queue.state',
+    'merge.queue.position',
     'merge.headBranch.state',
     'error.code',
     'error.message',
@@ -178,6 +213,8 @@ export default defineStreamCommand({
   exitCode: (s) => s.exitCode as ExitCode,
   async *run(input, ctx) {
     const again = landCommand(input);
+    // One self-return for the whole call: the CI wait and the merge queue wait share the 9 minutes.
+    const returnAt = selfReturnAt(ctx, input.foreground, ctx.clock.monotonic());
     const mergeGate = createMergeGate(ctx, { compareMain: true, useAgedOut: true });
     let judged: Judged | null = null;
     const gate: SettleHook = (a) => {
@@ -217,36 +254,64 @@ export default defineStreamCommand({
       doc = { ...base, outcome: 'not-merged', exitCode: waited.exitCode, reason: t.reason, next: waitNext(t, again) };
     } else {
       try {
-        const m = await merge(input, t, ctx, judged);
-        doc =
-          m.kind === 'dry'
-            ? {
-                ...base,
-                outcome: m.already ? 'already-merged' : 'would-merge',
-                exitCode: Exit.OK,
-                reason: null,
-                plan: m.plan,
-                next: m.already ? [] : [again],
-              }
-            : {
-                ...base,
-                outcome: m.out.alreadyMerged ? 'already-merged' : 'merged',
-                exitCode: Exit.OK,
-                reason: null,
-                merge: m.out,
-                next: m.out.next,
-              };
+        const m = await merge(input, t, ctx, judged, returnAt);
+        if (m.kind === 'dry') {
+          const already = m.decision === 'already-merged';
+          const queue = m.decision === 'enqueue' || m.decision === 'queued';
+          doc = {
+            ...base,
+            outcome: already ? 'already-merged' : queue ? 'would-queue' : 'would-merge',
+            exitCode: Exit.OK,
+            reason: m.decision === 'queued' ? 'already-queued' : null,
+            plan: m.plan,
+            next: already ? [] : [again],
+          };
+        } else if (m.out.queued) {
+          // The self-return came while the PR is in the merge queue: the identical command resumes the wait.
+          if (input.foreground) {
+            ctx.warn({
+              code: 'WAIT_FOREGROUND_RETURN',
+              message:
+                `Returned before the Bash tool's 10-minute cap; ${t.target} is still in the merge queue. Re-run ` +
+                `the identical command in the foreground (next[0]) to keep waiting: ${again}`,
+            });
+          }
+          doc = {
+            ...base,
+            outcome: 'pending',
+            exitCode: Exit.CI_PENDING_RESUME,
+            reason: 'in-merge-queue',
+            merge: m.out,
+            next: [again],
+          };
+        } else {
+          doc = {
+            ...base,
+            outcome: m.out.alreadyMerged ? 'already-merged' : 'merged',
+            exitCode: Exit.OK,
+            reason: null,
+            merge: m.out,
+            next: m.out.next,
+          };
+        }
       } catch (e) {
         if (!(e instanceof GhxError)) throw e;
         const { error } = toErrorObject(e);
-        doc = {
-          ...base,
-          outcome: 'not-merged',
-          exitCode: e.exitCode,
-          reason: e.code,
-          error,
-          next: error.hint ? [] : [`ghx pr status ${t.target}`],
-        };
+        if (e.code === 'INTERRUPTED') {
+          // A signal during the merge queue wait: nothing is lost, the PR stays queued.
+          const signal = (e.details as { signal?: string } | null | undefined)?.signal ?? 'SIGTERM';
+          doc = { ...base, outcome: 'interrupted', exitCode: e.exitCode, reason: `signal ${signal}`, next: [again] };
+        } else {
+          const dropped = e.code === 'MERGE_QUEUE_DROPPED';
+          doc = {
+            ...base,
+            outcome: dropped ? 'queue-dropped' : 'not-merged',
+            exitCode: e.exitCode,
+            reason: e.code,
+            error,
+            next: dropped || !error.hint ? [`ghx pr status ${t.target}`] : [],
+          };
+        }
       }
     }
     // One document within 16 KB: the wait's detail is cut first (its full form is in diagnosisPath).

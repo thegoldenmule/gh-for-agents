@@ -12,8 +12,17 @@ import { EXIT } from '../contract/exit-table.ts';
 import { FakeClock } from '../helpers/fake-clock.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 import { scratchDir } from '../helpers/harness.ts';
-import { isMergeable, isQ1, mergeableReply, q1Reply, REPO } from '../unit/pr/snapshot-fixture.ts';
-import { install, NOW, REF, run, workedPr } from './pr-status-world.ts';
+import {
+  ENQUEUED_AT,
+  isMergeable,
+  isQ1,
+  mergeableReply,
+  QUEUE_URL,
+  q1Reply,
+  queueFields,
+  REPO,
+} from '../unit/pr/snapshot-fixture.ts';
+import { CONFIG, install, NOW, REF, run, workedPr } from './pr-status-world.ts';
 
 const GOLDEN = JSON.parse(
   readFileSync(join(import.meta.dirname, '..', 'fixtures', 'golden', 'pr-status-3301.json'), 'utf8'),
@@ -90,6 +99,43 @@ test('pull-only access: merge.ready false with the non-overridable NO_MERGE_PERM
     r.json.merge.blockers.map((b: { code: string; overridable: boolean }) => [b.code, b.overridable]),
     [['NO_MERGE_PERMISSION', false]],
   );
+});
+
+test('a base branch with a merge queue: merge.queue says so, with the method and where the PR is in it', async () => {
+  const config = { ...CONFIG, merge: { method: 'rebase', allowedMethods: ['merge', 'rebase'] } };
+  const idle = install(undefined, { pr: workedPr(queueFields()), config });
+  const a = await run(['pr', 'status', REF], idle);
+  assert.equal(a.exitCode, EXIT.OK, a.stdout);
+  assert.deepEqual(a.json.merge.queue, {
+    required: true,
+    method: 'rebase',
+    queued: false,
+    state: null,
+    position: null,
+    enqueuedAt: null,
+    url: QUEUE_URL,
+  });
+  // merge.method rebase is the config default, but rebase needs an explicit --method: pr status says so.
+  assert.deepEqual(
+    a.json.merge.blockers.map((b: { code: string }) => b.code),
+    ['METHOD_NOT_ALLOWED'],
+  );
+
+  const queued = install(undefined, {
+    pr: workedPr(queueFields({ entry: { state: 'AWAITING_CHECKS', position: 2 } })),
+    config: { ...CONFIG, merge: { method: 'merge', allowedMethods: ['merge', 'rebase'] } },
+  });
+  const b = await run(['pr', 'status', REF, '--brief'], queued);
+  assert.equal(b.exitCode, EXIT.OK, b.stdout);
+  assert.deepEqual(b.json.merge.queue, {
+    required: true,
+    method: 'rebase',
+    queued: true,
+    state: 'AWAITING_CHECKS',
+    position: 2,
+    enqueuedAt: ENQUEUED_AT,
+    url: QUEUE_URL,
+  });
 });
 
 test('--no-compare-main leaves sameOnMain null, so the red check blocks as CI_RED', async () => {
