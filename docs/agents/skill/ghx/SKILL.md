@@ -19,7 +19,7 @@ description: Use for any GitHub PR or CI task (status, why CI failed, waiting fo
 
 - Prose (PR bodies, comments, reviews) goes in JSON. Write it to a file with the Write tool, then run `ghx <cmd> --input path.json`. Don't build bodies with heredocs, `echo` or `$(…)`.
 - Start from `ghx pr create --example` (this repo's components and the rules), edit it, run `ghx pr create --input pr.json`. Validation runs before any write and reports every issue at once, so no dry-run first. ghx fills `base`, `head` and the components the diff touches, and adds the Claude Code footer itself: don't add one.
-- `ghx pr edit <pr> --input patch.json` takes only the fields to change (`ghx pr edit --example`). To wait for green and merge: `ghx pr land <pr>`.
+- `ghx pr edit <pr> --input patch.json` takes only the fields to change (`ghx pr edit --example`). To wait for green and merge: `ghx pr land <pr>` (where the base branch has a merge queue, it queues the PR and waits for the queue to merge it; `--method` must be the queue's, shown in `ghx pr status` `merge.queue`).
 - Extra facts go in `data` (`{"ticket": "ENG-12"}`), not in the description: ghx lists them in the body and `pr status` returns them as `meta.data`. `--example` shows the fields the repo requires; add any others you need. `pr edit` merges `data` by key (`null` deletes).
 - Warnings such as `FIELD_RENAMED`, `TITLE_PERIOD_REMOVED`, `COMPONENT_ALIAS` or `REDIRECTED` mean ghx fixed your input or ran the right command. It worked; use the form the warning names next time.
 
@@ -52,7 +52,7 @@ Run `ghx ci wait <pr>` with the Bash tool and `run_in_background: true`. Then co
 | 6 | A ghx policy refused the write | Ask the user, or `--override CODE --reason "…"` |
 | 7 | gh or API failure after retries, permission, rate limit | Retry later, or fix access |
 | 8 | Deadline exceeded | Retry |
-| 9 | GitHub state forbids it now: head moved, conflict, CI pending | Change the state, then retry |
+| 9 | GitHub state forbids it now: head moved, conflict, CI pending, dropped from the merge queue | Change the state, then retry |
 | 10 | `ci wait`: CI is red | Fix it from the diagnosis, or `ghx ci rerun <pr> --flaky`. `workflow-invalid`: fix the workflow file |
 | 11 | `ci wait`: red, but every failure is also red on main | Before merging, `ghx ci wait <pr> --until mergeable` |
 | 12 | `ci wait`: the head moved, or the PR closed or merged | Re-read with `ghx pr status` |

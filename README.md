@@ -86,8 +86,8 @@ These are the v1 commands, specified in [02-api](docs/plans/02-api.md).
 | `pr feedback` | Merges feedback from all three GitHub sources into one list, with bots kept separate. |
 | `pr comment`, `pr review` | Post structured comments and reviews. |
 | `pr resolve` | Records a status on feedback items, such as addressed or wontfix. |
-| `pr merge` | Merges according to the repo's policy, with the head SHA pinned. Overrides need a reason. |
-| `pr land` | Waits until the PR is mergeable, then merges it pinned to that head. Never merges on red CI. |
+| `pr merge` | Merges according to the repo's policy, with the head SHA pinned. Overrides need a reason. Where the base branch has a merge queue, adds the PR to the queue instead, pinned the same way. |
+| `pr land` | Waits until the PR is mergeable, then merges it pinned to that head. Never merges on red CI. With a merge queue, waits until the queue has merged the PR or dropped it. |
 | `ci why` | Diagnoses a failing run in one call, including runs still in progress. Takes a PR, `run:<id>`, or `branch:main` for every failing workflow on main's head. |
 | `ci wait` | Waits for CI to finish, then prints one JSON summary. The caller never sets a duration. Takes PRs, `branch:<name>[@sha]` or `run:<id>`. |
 | `ci rerun`, `ci retrigger` | Rerun failed jobs (of a PR's head or of `run:<id>`), or trigger CI again. |
@@ -180,6 +180,15 @@ foreground with `--foreground`, which returns within 9 minutes (exit 15 if CI
 hasn't settled; it re-runs the identical command, which resumes). A second wait
 on the same PR follows the first instead of polling again. `ghx pr land <pr>`
 waits until the PR is mergeable and then merges it.
+
+Where the base branch has a merge queue (a ruleset's "Require merge queue"),
+GitHub refuses a direct merge, so `ghx pr merge` adds the PR to the queue
+instead, pinned to the evaluated head, and reports `queued: true`. `ghx pr land`
+then keeps waiting until the queue has merged the PR (`outcome: merged`) or
+removed it (`outcome: queue-dropped`, exit 9), with the same `--foreground` and
+exit 15 behavior. The queue decides how it merges, so `--method` must name the
+queue's method; `ghx pr status` shows it in `merge.queue`, with the PR's state
+and position in the queue.
 
 ### Ticket titles and defect references
 
