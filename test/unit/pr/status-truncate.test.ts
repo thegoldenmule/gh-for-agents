@@ -9,7 +9,7 @@ import { fieldTree, parseFields, projectDocument } from '../../../src/core/field
 import { byteLength, DEFAULT_MAX_BYTES } from '../../../src/core/output.ts';
 import type { BotItem, Comment, Finding } from '../../../src/feedback/schemas.ts';
 import { PrStatusOutput } from '../../../src/pr/status/schema.ts';
-import { fitStatus } from '../../../src/pr/status/truncate.ts';
+import { capFeedback, fitStatus } from '../../../src/pr/status/truncate.ts';
 
 const GOLDEN = PrStatusOutput.parse(
   JSON.parse(readFileSync(join(import.meta.dirname, '..', '..', 'fixtures', 'golden', 'pr-status-3301.json'), 'utf8')),
@@ -68,6 +68,101 @@ function bigPr(): PrStatusOutput {
   doc.feedback.findings = [...doc.feedback.findings, unverified];
   return doc;
 }
+
+test('evidence is capped with finding prose while full feedback stays unchanged', () => {
+  const doc = structuredClone(GOLDEN);
+  const finding = doc.feedback.findings[0] as Finding;
+  finding.source = 'acceptanceCheck';
+  finding.evidence = { source: 'Ticket', quote: 'q'.repeat(1000), url: 'https://tracker.example/ENG-123' };
+  const out = capFeedback(doc.feedback, { finding: 600, comment: 500, summary: 400 });
+  assert.equal(out.findings[0]?.source, 'acceptanceCheck');
+  assert.equal(out.findings[0]?.evidence?.quote.length, 600);
+  assert.equal(out.findings[0]?.evidence?.url, finding.evidence.url);
+  assert.equal(out.findings[0]?.truncated, true);
+  assert.equal(finding.evidence.quote.length, 1000);
+  const full = capFeedback(doc.feedback, { finding: 2000, comment: 2000, summary: 2000 });
+  assert.equal(full.findings[0]?.evidence?.quote.length, 1000);
+});
+
+test('evidence respects status byte budgets and projections without losing open finding ids', () => {
+  const doc = bigPr();
+  for (const finding of doc.feedback.findings) {
+    finding.evidence = { source: 'Ticket', quote: 'q'.repeat(1000), url: 'https://tracker.example/ENG-123' };
+  }
+  const out = fitStatus(doc);
+  assert.ok(byteLength(JSON.stringify(out)) <= DEFAULT_MAX_BYTES);
+  assert.deepEqual(out.openFindings, doc.openFindings);
+  for (const finding of doc.feedback.findings.filter((f) => f.status === 'open' || f.statusEvent?.verified === null)) {
+    assert.ok(out.feedback.findings.some((f) => f.id === finding.id));
+  }
+  const project = (value: unknown) =>
+    projectDocument(value, fieldTree(parseFields(['feedback.findings.evidence.quote'])));
+  const selected = fitStatus(doc, 1800, project);
+  assert.ok(byteLength(JSON.stringify(project(selected))) <= 1800);
+  assert.equal(doc.feedback.findings[0]?.evidence?.quote.length, 1000);
+});
+
+test('large evidence on protected findings is dropped whole without dropping their actionable fields', () => {
+  const doc = structuredClone(GOLDEN);
+  const template = doc.feedback.findings[0] as Finding;
+  const evidence = { source: 'Ticket', quote: 'q'.repeat(600), url: `https://example.com/${'x'.repeat(2000)}` };
+  doc.feedback.findings = Array.from({ length: 5 }, (_, i) => ({
+    ...template,
+    id: `f_aaaaa${i}`,
+    status: i === 0 ? 'addressed' : 'open',
+    statusEvent: i === 0 ? { ...template.statusEvent!, verified: null } : null,
+    body: 'A finding.',
+    evidence,
+  }));
+  doc.feedback.comments = [];
+  doc.feedback.bots = [];
+  doc.openFindings = doc.feedback.findings.map((f) => f.id);
+  doc.feedback.counts.findingsTotal = doc.feedback.findings.length;
+  doc.feedback.counts.findingsOpen = doc.feedback.findings.length;
+
+  const out = fitStatus(doc);
+  assert.ok(byteLength(JSON.stringify(out)) <= DEFAULT_MAX_BYTES);
+  assert.deepEqual(out.openFindings, doc.openFindings);
+  assert.equal(out.feedback.findings.length, doc.feedback.findings.length);
+  const omitted = out.feedback.findings.filter((f) => f.evidence === undefined);
+  assert.ok(omitted.length > 0);
+  assert.equal(out.feedback.counts.omitted, omitted.length);
+  assert.ok(out.warnings.some((w) => w.code === 'FEEDBACK_OMITTED' && /items shortened/.test(w.message)));
+  out.feedback.findings.forEach((finding, i) => {
+    const { evidence: actualEvidence, truncated, ...actual } = finding;
+    const { evidence: _evidence, truncated: _truncated, ...expected } = doc.feedback.findings[i]!;
+    assert.deepEqual(actual, expected);
+    if (actualEvidence === undefined) assert.equal(truncated, true);
+    else assert.deepEqual(actualEvidence, evidence);
+  });
+  assert.ok(doc.feedback.findings.every((f) => f.evidence === evidence));
+
+  const selectedUrls = (value: unknown) =>
+    projectDocument(value, fieldTree(parseFields(['feedback.findings.evidence.url'])));
+  const projected = fitStatus(doc, 2100, selectedUrls);
+  assert.ok(byteLength(JSON.stringify(selectedUrls(projected))) <= 2100);
+  assert.equal(projected.feedback.counts.omitted, projected.feedback.findings.filter((f) => !f.evidence).length);
+  for (const finding of projected.feedback.findings) {
+    assert.ok(finding.evidence === undefined || finding.evidence.url === evidence.url);
+  }
+
+  // Cutting unselected evidence cannot help an irreducible projection of protected finding bodies.
+  const selectedBodies = (value: unknown) => projectDocument(value, fieldTree(parseFields(['feedback.findings.body'])));
+  const bodies = fitStatus(doc, 20, selectedBodies);
+  assert.ok(bodies.feedback.findings.every((f) => f.evidence?.url === evidence.url));
+  assert.equal(bodies.feedback.counts.omitted, 0);
+  assert.ok(!bodies.warnings.some((w) => w.code === 'FEEDBACK_OMITTED'));
+
+  const selectedFlags = (value: unknown) =>
+    projectDocument(value, fieldTree(parseFields(['feedback.findings.truncated'])));
+  const flags = fitStatus(doc, 20, selectedFlags);
+  assert.ok(flags.feedback.findings.every((f) => f.evidence?.url === evidence.url));
+  assert.deepEqual(
+    flags.feedback.findings.map((f) => f.truncated),
+    doc.feedback.findings.map((f) => f.truncated),
+  );
+  assert.equal(flags.feedback.counts.omitted, 0);
+});
 
 test('a 300-comment PR fits under 16,384 bytes once whole entries are dropped', () => {
   const doc = bigPr();

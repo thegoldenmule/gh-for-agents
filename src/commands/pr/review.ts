@@ -18,6 +18,7 @@ import { assertOpen, idAllocator, readPrForWrite, resolveTarget } from '../../pr
 import { PrReviewInput, reviewRules } from '../../pr/feedback-writes/review-schema.ts';
 import { renderInlineFinding, renderReviewBody } from '../../render/review.ts';
 import { FindingId, PrRef, ReviewId, Sha, ShaInput } from '../../schemas/common.ts';
+import { hasFindingLocation } from '../../schemas/evidence.ts';
 import { Severity, Verdict } from '../../schemas/pr.ts';
 import { VERSION } from '../../version.ts';
 
@@ -71,7 +72,9 @@ export default defineCommand({
   description:
     'Write {verdict, summary, scope?, findings[]} with your file tool and pass --input review.json. A finding ' +
     'goes inline only inside a diff hunk (else in the body, FINDING_NOT_INLINE). On your own PR the verdict ' +
-    'posts as COMMENT (VERDICT_DOWNGRADED). --expect-head pins the head (HEAD_MOVED).',
+    'posts as COMMENT (VERDICT_DOWNGRADED). source optionally identifies the reviewer/check. A finding without ' +
+    'path and line requires evidence {source, quote, url?} and goes in the review body with its own id. ' +
+    '--expect-head pins the head (HEAD_MOVED).',
   kind: 'write',
   input: Input,
   output: Output,
@@ -119,20 +122,22 @@ export default defineCommand({
       });
     }
 
-    const files = await ctx.gh.api(
-      {
-        path: `repos/{owner}/{repo}/pulls/${t.number}/files`,
-        repo: t.repo,
-        paginate: { maxPages: FILE_PAGES, perPage: 100 },
-      },
-      z.array(PrFile),
-      { notFound: 'PR_NOT_FOUND' },
-    );
+    const files = input.findings.some(hasFindingLocation)
+      ? await ctx.gh.api(
+          {
+            path: `repos/{owner}/{repo}/pulls/${t.number}/files`,
+            repo: t.repo,
+            paginate: { maxPages: FILE_PAGES, perPage: 100 },
+          },
+          z.array(PrFile),
+          { notFound: 'PR_NOT_FOUND' },
+        )
+      : { notModified: false as const, data: [], truncated: false };
     if (files.notModified) throw new GhxError('INTERNAL', 'GET pulls/files returned 304.');
     const byPath = new Map(files.data.map((f) => [f.filename, f]));
     const issues: IssueDetail[] = [];
     input.findings.forEach((f, i) => {
-      if (!byPath.has(f.path) && !files.truncated) {
+      if (hasFindingLocation(f) && !byPath.has(f.path) && !files.truncated) {
         issues.push({
           path: `findings[${i}].path`,
           code: 'finding.path_not_in_pr',
@@ -152,16 +157,17 @@ export default defineCommand({
         gen,
         review: reviewId,
         severity: f.severity,
-        path: f.path,
-        line: f.line,
+        ...(hasFindingLocation(f) ? { path: f.path, line: f.line, side: f.side } : {}),
         ...(f.endLine !== undefined && f.endLine !== f.line ? { endLine: f.endLine } : {}),
-        side: f.side,
         alsoAt: f.alsoAt,
         title: f.title,
         body: f.body,
         ...(f.suggestion !== undefined ? { suggestion: f.suggestion } : {}),
+        ...(f.source !== undefined ? { source: f.source } : {}),
+        ...(f.evidence !== undefined ? { evidence: f.evidence } : {}),
         commit: head,
       };
+      if (!hasFindingLocation(f)) return { block, inline: false };
       const file = byPath.get(f.path);
       const inline = file !== undefined && inHunk(parseHunks(file.patch), f.side, f.line, block.endLine ?? f.line);
       if (!inline) {
@@ -208,6 +214,7 @@ export default defineCommand({
     const comments = blocks
       .filter((b) => b.inline)
       .map(({ block: f }) => {
+        if (!hasFindingLocation(f)) throw new GhxError('INTERNAL', 'An inline finding has no location.');
         const text = renderInlineFinding(f);
         assertBodySize(text, `inline finding ${f.id}`);
         return f.endLine !== undefined

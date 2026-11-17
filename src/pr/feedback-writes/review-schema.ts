@@ -4,18 +4,22 @@
 import { z } from 'zod';
 import type { IssueDetail } from '../../core/errors.ts';
 import { Body, OneLine, RepoPath } from '../../schemas/common.ts';
+import { DataKey } from '../../schemas/data.ts';
+import { Evidence } from '../../schemas/evidence.ts';
 import { Location, Severity, Side, Verdict } from '../../schemas/pr.ts';
 
 export const FindingInput = z.strictObject({
   severity: Severity,
-  path: RepoPath,
-  line: z.number().int().positive(),
+  path: RepoPath.optional(),
+  line: z.number().int().positive().optional(),
   endLine: z.number().int().positive().optional(),
   side: Side.default('RIGHT'),
   alsoAt: z.array(Location).max(10).default([]),
   title: OneLine(100),
   body: Body(2000, 30),
   suggestion: z.string().max(2000).optional(),
+  source: DataKey.optional(),
+  evidence: Evidence.optional(),
 });
 
 export const PrReviewInput = z.strictObject({
@@ -50,7 +54,29 @@ export function reviewRules(r: PrReviewInput): IssueDetail[] {
   }
   const seen = new Set<string>();
   r.findings.forEach((f, i) => {
-    if (f.endLine !== undefined && f.endLine < f.line) {
+    if ((f.path === undefined) !== (f.line === undefined)) {
+      issues.push({
+        path: `findings[${i}]`,
+        code: 'finding.location',
+        message: 'path and line must be provided together',
+      });
+    } else if (f.path === undefined) {
+      if (f.evidence === undefined) {
+        issues.push({
+          path: `findings[${i}].evidence`,
+          code: 'finding.evidence_required',
+          message: 'a finding without a path and line requires evidence',
+        });
+      }
+      if (f.endLine !== undefined || f.alsoAt.length > 0 || f.suggestion !== undefined || f.side !== 'RIGHT') {
+        issues.push({
+          path: `findings[${i}]`,
+          code: 'finding.location_fields',
+          message: 'endLine, side, alsoAt and suggestion require a path and line',
+        });
+      }
+    }
+    if (f.endLine !== undefined && f.line !== undefined && f.endLine < f.line) {
       issues.push({
         path: `findings[${i}].endLine`,
         code: 'finding.range',
@@ -62,7 +88,7 @@ export function reviewRules(r: PrReviewInput): IssueDetail[] {
       issues.push({
         path: `findings[${i}]`,
         code: 'finding.duplicate',
-        message: `repeats ${f.path}:${f.line} "${f.title}"`,
+        message: `repeats ${f.path !== undefined ? `${f.path}:${f.line}` : 'an unlocated finding'} "${f.title}"`,
       });
     }
     seen.add(key);

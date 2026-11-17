@@ -2,6 +2,7 @@
 // schemas in their output, so nothing here may use a transform (test/registry.test.ts).
 import { z } from 'zod';
 import { Author, Iso, Sha } from '../schemas/common.ts';
+import { EvidenceRead } from '../schemas/evidence.ts';
 import {
   CommentKind,
   ConditionRead,
@@ -25,6 +26,8 @@ export const Finding = z.object({
   alsoAt: z.array(z.object({ path: z.string(), line: z.number() })),
   title: z.string(),
   body: z.string(),
+  source: z.string().optional(),
+  evidence: EvidenceRead.optional(),
   truncated: z.boolean(),
   /** False for a finding carried in the review body (not placeable in the diff). */
   inline: z.boolean(),

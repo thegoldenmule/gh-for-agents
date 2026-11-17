@@ -18,7 +18,8 @@ import {
   Sha,
   type Warning,
 } from '../schemas/common.ts';
-import { Data } from '../schemas/data.ts';
+import { Data, DataKey } from '../schemas/data.ts';
+import { Evidence, EvidenceRead, validFindingLocation } from '../schemas/evidence.ts';
 import {
   CONDITION_TYPES,
   CommentKind,
@@ -93,22 +94,26 @@ export const ReviewBlock = z.strictObject({
 });
 
 /** No status field: a finding starts open; status changes are `resolve` comment events (02 §9.4). */
-export const FindingBlock = z.strictObject({
-  t: z.literal('finding'),
-  id: FindingId,
-  gen: Gen,
-  review: ReviewId,
-  severity: Severity,
-  path: RepoPath,
-  line: Line,
-  endLine: Line.optional(),
-  side: Side,
-  alsoAt: z.array(Location).max(10),
-  title: Text,
-  body: Text,
-  suggestion: z.string().optional(),
-  commit: Sha,
-});
+export const FindingBlock = z
+  .strictObject({
+    t: z.literal('finding'),
+    id: FindingId,
+    gen: Gen,
+    review: ReviewId,
+    severity: Severity,
+    path: RepoPath.optional(),
+    line: Line.optional(),
+    endLine: Line.optional(),
+    side: Side.optional(),
+    alsoAt: z.array(Location).max(10),
+    title: Text,
+    body: Text,
+    suggestion: z.string().optional(),
+    source: DataKey.optional(),
+    evidence: Evidence.optional(),
+    commit: Sha,
+  })
+  .refine(validFindingLocation, 'a finding needs a complete location, or evidence without location-only fields');
 
 export const ResolveTarget = z.strictObject({
   id: Id,
@@ -169,21 +174,25 @@ export const ReviewBlockRead = z.looseObject({
   findings: z.array(z.string()),
 });
 
-export const FindingBlockRead = z.looseObject({
-  ...readBase,
-  t: z.literal('finding'),
-  review: z.string(),
-  severity: SeverityRead,
-  path: RepoPath,
-  line: Line,
-  endLine: Line.optional(),
-  side: Side.or(z.string()).optional(),
-  alsoAt: z.array(LocationRead).optional(),
-  title: z.string(),
-  body: z.string(),
-  suggestion: z.string().optional(),
-  commit: Sha,
-});
+export const FindingBlockRead = z
+  .looseObject({
+    ...readBase,
+    t: z.literal('finding'),
+    review: z.string(),
+    severity: SeverityRead,
+    path: RepoPath.optional(),
+    line: Line.optional(),
+    endLine: Line.optional(),
+    side: Side.or(z.string()).optional(),
+    alsoAt: z.array(LocationRead).optional(),
+    title: z.string(),
+    body: z.string(),
+    suggestion: z.string().optional(),
+    source: z.string().optional(),
+    evidence: EvidenceRead.optional(),
+    commit: Sha,
+  })
+  .refine(validFindingLocation, 'a finding needs a complete location, or evidence without location-only fields');
 
 export const ResolveTargetRead = z.looseObject({
   id: z.string().min(1),

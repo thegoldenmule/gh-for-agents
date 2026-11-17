@@ -102,6 +102,33 @@ test('strict schemas reject unknown keys, unknown enum values and bad ids', () =
   assert.ok(!CommentBlock.safeParse({ ...resolve, targets: [{ id: 'f_h4x8pz', status: 'addressed', x: 1 }] }).success);
 });
 
+test('finding source/evidence round-trip; unlocated blocks require evidence and complete location invariants', () => {
+  const { path: _path, line: _line, side: _side, ...base } = finding;
+  const external = {
+    ...base,
+    alsoAt: [],
+    source: 'acceptanceCheck',
+    evidence: { source: 'ENG-123', quote: 'Retry three times.', url: 'https://tracker.example/ENG-123' },
+  };
+  const strict = FindingBlock.parse(external);
+  const read = readBlocks(encodeBlock(strict))[0];
+  assert.equal(read?.status, 'ok');
+  if (read?.status !== 'ok' || read.block.t !== 'finding') assert.fail('finding did not round-trip');
+  assert.equal(read.block.path, undefined);
+  assert.equal(read.block.source, 'acceptanceCheck');
+  assert.deepEqual(read.block.evidence, external.evidence);
+  for (const invalid of [
+    { ...base, alsoAt: [] },
+    { ...external, path: 'src/a.ts' },
+    { ...external, line: 1 },
+    { ...external, side: 'RIGHT' },
+    { ...external, endLine: 2 },
+    { ...external, source: 'not a token' },
+  ])
+    assert.equal(FindingBlock.safeParse(invalid).success, false);
+  assert.equal(FindingBlock.safeParse({ ...finding, source: 'check_1', evidence: external.evidence }).success, true);
+});
+
 test('encodeBlock validates strictly; an invalid block is INTERNAL', () => {
   assert.equal(encodeBlock(finding), encode(finding));
   assert.throws(

@@ -200,10 +200,13 @@ test('review-body-3-findings: body-only finding blocks follow the review block, 
       '2. **[low]** `packages/shared/document-model/crypto.ts:179` Rejection error does not name the documentId\n' +
       '3. **[medium]** `packages/shared/document-model/crypto.ts:40-44` Range finding',
   );
-  const blocks = (parts[3] ?? '').split('\n');
+  assert.ok(body.includes(LOW.body), 'body-only findings include their full text');
+  assert.ok(body.includes(MED.id), 'body-only findings expose the id used by resolve');
+  const blockSection = parts.at(-1) ?? '';
+  const blocks = blockSection.split('\n');
   assert.equal(blocks.length, 3);
   assert.deepEqual(
-    readBlocks(parts[3] ?? '').map((b) => (b.status === 'ok' ? `${b.block.t}:${b.block.id}` : b.status)),
+    readBlocks(blockSection).map((b) => (b.status === 'ok' ? `${b.block.t}:${b.block.id}` : b.status)),
     ['review:r_7tq2wd', 'finding:f_n2c6rv', 'finding:f_q7w3xa'],
   );
   assert.equal(findingCount([]), '0 findings');

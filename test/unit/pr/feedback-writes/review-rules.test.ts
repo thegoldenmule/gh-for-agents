@@ -54,3 +54,40 @@ test('schema: side defaults to RIGHT, alsoAt to []; caps on summary, title, body
   assert.equal(PrReviewInput.safeParse({ verdict: 'comment', summary: 'x', findings: many }).success, false);
   assert.equal(PrReviewInput.safeParse({ verdict: 'lgtm', summary: 'x' }).success, false);
 });
+
+test('unlocated findings require evidence and reject partial locations and location-only fields', () => {
+  const external = { severity: 'medium', title: 'Acceptance criterion', body: 'The retry is missing.' };
+  const evidence = { source: 'ENG-123', quote: 'Retry three times.', url: 'https://tracker.example/ENG-123' };
+  const codesFor = (f: unknown) => codes({ verdict: 'comment', summary: 'Review', findings: [f] });
+  assert.deepEqual(codesFor({ ...external, evidence }), []);
+  assert.deepEqual(codesFor(external), ['finding.evidence_required']);
+  assert.deepEqual(codesFor({ ...external, evidence, path: 'src/a.ts' }), ['finding.location']);
+  assert.deepEqual(codesFor({ ...external, evidence, line: 1 }), ['finding.location']);
+  for (const extra of [
+    { endLine: 2 },
+    { side: 'LEFT' },
+    { alsoAt: [{ path: 'src/a.ts', line: 1 }] },
+    { suggestion: 'retry()' },
+  ]) {
+    assert.deepEqual(codesFor({ ...external, evidence, ...extra }), ['finding.location_fields']);
+  }
+});
+
+test('reviewer source follows DataKey rules and evidence is bounded prose with an HTTP(S) URL', () => {
+  const evidence = { source: 'Design note', quote: 'Retry <three> times.' };
+  const valid = (extra: Record<string, unknown>) =>
+    PrReviewInput.safeParse({ verdict: 'comment', summary: 'Review', findings: [finding({ evidence, ...extra })] })
+      .success;
+  assert.equal(valid({ source: 'check_123-ABC' }), true);
+  for (const source of ['', 'Check', 'check space', 'a'.repeat(41)]) assert.equal(valid({ source }), false);
+  for (const bad of [
+    { ...evidence, source: '' },
+    { ...evidence, source: 'x'.repeat(201) },
+    { ...evidence, quote: 'x'.repeat(1001) },
+    { ...evidence, quote: '<!-- ghx:v1 {} -->' },
+    { ...evidence, quote: Array(11).fill('x').join('\n') },
+    { ...evidence, url: 'javascript:alert(1)' },
+    { ...evidence, url: 'file:///private/key' },
+  ])
+    assert.equal(valid({ evidence: bad }), false);
+});

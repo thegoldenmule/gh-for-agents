@@ -9,6 +9,7 @@ import { test } from 'node:test';
 import resolveSpec from '../../src/commands/pr/resolve.ts';
 import { foldFeedback } from '../../src/feedback/fold.ts';
 import { buildGraphqlArgs } from '../../src/gh/graphql.ts';
+import { encode } from '../../src/meta/codec.ts';
 import { Q1_QUERY } from '../../src/pr/snapshot/query.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
@@ -155,6 +156,46 @@ test('a manual precondition is set met with one issue comment, led by its id', a
     /^`c_a1b2c3` Met: Ops confirmed the window\.\n\n<!-- ghx:v1 /,
   );
   assert.equal(r.json.events[0].from, 'unknown');
+  assert.equal(r.json.events[0].threadResolved, null);
+});
+
+test('an evidence-backed unlocated finding resolves through one issue comment without a thread mutation', async () => {
+  const review = {
+    t: 'review',
+    gen: 'ghx/0.2.0',
+    id: 'r_aaaaaa',
+    verdict: 'comment',
+    summary: 'Acceptance review',
+    commit: HEAD,
+    findings: ['f_aaaaaa'],
+  };
+  const finding = {
+    t: 'finding',
+    gen: 'ghx/0.2.0',
+    id: 'f_aaaaaa',
+    review: 'r_aaaaaa',
+    severity: 'medium',
+    title: 'Missing retry',
+    body: 'Retries are required.',
+    commit: HEAD,
+    alsoAt: [],
+    source: 'acceptanceCheck',
+    evidence: { source: 'ENG-123', quote: 'Retry three times.' },
+  };
+  const s = writeScene({
+    pr: {
+      reviews: conn([{ ...WORKED.reviews[0], body: `${encode(review)}\n${encode(finding)}` }]),
+      reviewThreads: conn([]),
+      comments: conn([]),
+    },
+  });
+  const r = await run(s, ['f_aaaaaa', '--status', 'wontfix', '--note', 'Accepted by the ticket owner.']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(sequence(s.gh), ['config', 'q1', 'post-comment']);
+  assert.match(
+    String(s.sent['post-comment']?.[0]?.body),
+    /"id":"f_aaaaaa","note":"Accepted by the ticket owner\.","status":"wontfix"/,
+  );
   assert.equal(r.json.events[0].threadResolved, null);
 });
 

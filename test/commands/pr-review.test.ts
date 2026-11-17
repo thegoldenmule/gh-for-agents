@@ -245,7 +245,21 @@ test('round trip: the posted review and its inline comments fold into a structur
   const s = writeScene({ viewer: 'thegoldenmule' });
   const r = await run(s.gh, {
     ...REVIEW,
-    findings: [...REVIEW.findings, { ...REVIEW.findings[1], line: 400, title: 'Body-only' }],
+    findings: [
+      {
+        ...REVIEW.findings[0],
+        source: 'signatureCheck',
+        evidence: { source: 'Signing design', quote: 'Always bind documentId.' },
+      },
+      REVIEW.findings[1],
+      {
+        severity: 'medium',
+        source: 'acceptanceCheck',
+        title: 'Body-only',
+        body: 'The required retry is missing.',
+        evidence: { source: 'ENG-123', quote: 'Retry <three> times.', url: 'https://tracker.example/ENG-123' },
+      },
+    ],
   });
   assert.equal(r.exitCode, EXIT.OK, r.stdout);
   const posted = s.sent['post-review']?.[0] as Posted;
@@ -305,6 +319,44 @@ test('round trip: the posted review and its inline comments fold into a structur
     r.json.findings.map((f: { id: string }) => f.id),
   );
   assert.equal(fold.feedback.counts.findingsTotal, 3);
+  const inline = fold.feedback.findings.find((f) => f.source === 'signatureCheck');
+  assert.equal(inline?.inline, true);
+  assert.equal(inline?.evidence?.source, 'Signing design');
+  const external = fold.feedback.findings.find((f) => f.source === 'acceptanceCheck');
+  assert.deepEqual([external?.path, external?.line, external?.inline], [null, null, false]);
+  assert.equal(external?.evidence?.quote, 'Retry <three> times.');
+  assert.equal(external?.evidence?.url, 'https://tracker.example/ENG-123');
+  assert.match(posted.body, /The required retry is missing\./);
+  assert.match(posted.body, /> Retry &lt;three&gt; times\./);
+  assert.ok(posted.body.includes(`\`${external?.id}\``));
+  assert.match(posted.comments[0]?.body ?? '', /Source: `signatureCheck`/);
+  assert.match(posted.comments[0]?.body ?? '', /Always bind documentId\./);
+});
+
+test('an entirely unlocated review skips diff reads, posts body-only ids, and keeps its head pinned', async () => {
+  const s = writeScene({ viewer: 'maria-dev' });
+  const r = await run(s.gh, {
+    verdict: 'comment',
+    summary: 'Acceptance review.',
+    findings: [
+      {
+        severity: 'medium',
+        title: 'Missing retry',
+        body: 'Retries are required.',
+        evidence: { source: 'ENG-123', quote: 'Retry three times.' },
+      },
+    ],
+  });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(sequence(s.gh), ['q1', 'pull', 'post-review']);
+  assert.equal(r.json.warnings, undefined);
+  const posted = s.sent['post-review']?.[0] as Posted;
+  assert.equal(posted.commit_id, HEAD);
+  assert.deepEqual(posted.comments, []);
+  assert.equal(r.json.findings[0].inline, false);
+  assert.equal(r.json.findings[0].commentId, null);
+  assert.match(posted.body, /Retries are required\./);
+  assert.ok(!posted.body.includes('undefined:undefined'));
 });
 
 test('smoke/pr-review: the example halts in dry-run, and the fixture query matches the builder', async () => {

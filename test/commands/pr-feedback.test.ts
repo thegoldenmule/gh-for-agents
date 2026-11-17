@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import type { Feedback } from '../../src/feedback/schemas.ts';
+import { encode } from '../../src/meta/codec.ts';
 import { filterFeedback } from '../../src/pr/status/feedback.ts';
 import { PrFeedbackOutput } from '../../src/pr/status/schema.ts';
 import { EXIT } from '../contract/exit-table.ts';
@@ -34,6 +35,73 @@ test('everything from all three sources, as folded; the full document is at arti
   assert.deepEqual(artifact.feedback, r.json.feedback);
   fake.expectNoMutations();
   assert.ok(!fake.calls.some((c) => c.argv.some((a) => a.includes('/actions/'))), 'no CI reads');
+});
+
+test('feedback/status return evidence and reviewer provenance for unlocated findings without bypassing trust', async () => {
+  const evidence = { source: 'ENG-123', quote: 'q'.repeat(1000), url: 'https://tracker.example/ENG-123' };
+  const finding = {
+    t: 'finding',
+    gen: 'ghx/0.2.0',
+    id: 'f_aaaaaa',
+    review: 'r_aaaaaa',
+    commit: HEAD,
+    severity: 'high',
+    title: 'Missing retry',
+    body: 'The acceptance criterion requires retries.',
+    alsoAt: [],
+    source: 'acceptanceCheck',
+    evidence,
+  };
+  const review = {
+    t: 'review',
+    gen: 'ghx/0.2.0',
+    id: 'r_aaaaaa',
+    commit: HEAD,
+    verdict: 'request-changes',
+    summary: 'Acceptance review',
+    findings: ['f_aaaaaa'],
+  };
+  const rawReview = {
+    databaseId: 98765,
+    author: { __typename: 'User', login: 'reviewer' },
+    authorAssociation: 'MEMBER',
+    body: `${encode(review)}\n${encode(finding)}`,
+    state: 'COMMENTED',
+    submittedAt: '2026-10-22T08:00:00Z',
+    createdAt: '2026-10-22T08:00:00Z',
+    commit: { oid: HEAD },
+    url: 'https://github.com/powerhouse-inc/powerhouse/pull/3301#pullrequestreview-98765',
+  };
+  for (const command of ['feedback', 'status']) {
+    const fake = install(undefined, {
+      pr: workedPr({ reviews: page([rawReview]), reviewThreads: page([]), comments: page([]) }),
+    });
+    const r = await run(['pr', command, REF, ...(command === 'status' ? ['--no-compare-main'] : [])], fake);
+    assert.equal(r.exitCode, EXIT.OK, r.stdout);
+    const f = r.json.feedback.findings[0];
+    assert.equal(f.source, 'acceptanceCheck');
+    assert.deepEqual([f.path, f.line, f.inline], [null, null, false]);
+    assert.equal(f.evidence.source, evidence.source);
+    assert.equal(f.evidence.url, evidence.url);
+    assert.equal(f.evidence.quote.length, command === 'status' ? 600 : 1000);
+    assert.deepEqual(r.json.openFindings, ['f_aaaaaa']);
+    if (command === 'feedback') {
+      const artifact = JSON.parse(readFileSync(r.json.artifactPath, 'utf8'));
+      assert.deepEqual(artifact.feedback.findings[0].evidence, evidence);
+    }
+    fake.expectNoMutations();
+  }
+  const untrusted = install(undefined, {
+    pr: workedPr({
+      reviews: page([{ ...rawReview, authorAssociation: 'CONTRIBUTOR' }]),
+      reviewThreads: page([]),
+      comments: page([]),
+    }),
+  });
+  const rejected = await run(['pr', 'feedback', REF], untrusted);
+  assert.equal(rejected.exitCode, EXIT.OK, rejected.stdout);
+  assert.deepEqual(rejected.json.feedback.findings, []);
+  assert.deepEqual(rejected.json.openFindings, []);
 });
 
 test('--open: open findings, standing change requests; resolved threads, issue comments and bots go', async () => {

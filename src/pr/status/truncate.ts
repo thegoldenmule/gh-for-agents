@@ -1,6 +1,7 @@
 // pr status's size budget (02 §4.1 Truncation; 03 M6.5; 04 wave 4: the 16 KB bound is hard): per-item caps
 // first, then, while the document is over the budget, resolved-finding bodies and the oldest comment bodies,
-// then whole old or resolved comment entries, bots and settled findings, are dropped and counted in
+// then evidence on open findings and whole old or resolved comment entries, bots and settled findings,
+// are dropped and counted in
 // feedback.counts.omitted, with a FEEDBACK_OMITTED warning pointing to `pr feedback`. The 01 spill stays
 // the safety net only for a document whose non-feedback parts alone are too large. Several PRs (fitStatuses)
 // share one budget: PRs that fit their share keep it all, and the rest split what is left. Under --fields or
@@ -29,7 +30,16 @@ export function capFeedback(f: Feedback, caps: { comment: number; finding: numbe
     }),
     findings: f.findings.map((x) => {
       const c = capText(x.body, caps.finding);
-      return { ...x, body: c.text, truncated: x.truncated || c.cut };
+      const quote = x.evidence && capText(x.evidence.quote, caps.finding);
+      const source = x.evidence && capText(x.evidence.source, 200);
+      return {
+        ...x,
+        body: c.text,
+        ...(x.evidence && quote && source
+          ? { evidence: { ...x.evidence, source: source.text, quote: quote.text } }
+          : {}),
+        truncated: x.truncated || c.cut || quote?.cut === true || source?.cut === true,
+      };
     }),
     comments: f.comments.map((x) => {
       const c = capText(x.body, caps.comment);
@@ -59,7 +69,7 @@ const commentTier = (c: Comment): number => (c.threadResolved === true ? 0 : c.t
 
 /**
  * The 16 KB bound is hard (04 wave 4 review decisions). Per-item caps first; then, while over the budget:
- * settled-finding bodies, the oldest comment bodies, then whole entries (comments, resolved and oldest
+ * settled-finding bodies, the oldest comment bodies, evidence on protected findings, then whole entries (comments, resolved and oldest
  * first; bots, oldest first; settled findings; reviews no finding points to). Each item is counted once in
  * feedback.counts.omitted, with a FEEDBACK_OMITTED hint to `pr feedback`. Open and unverified findings,
  * preconditions, openFindings and merge.* are never dropped; the fold's counts stay the totals.
@@ -85,29 +95,51 @@ export function fitStatus(doc: PrStatusOutput, maxBytes = DEFAULT_MAX_BYTES, pro
   };
   const setHint = () => {
     hint.message =
-      `${fb.counts.omitted} feedback items were cut to fit ${maxBytes} bytes (${cut.size - dropped} bodies emptied, ` +
+      `${fb.counts.omitted} feedback items were cut to fit ${maxBytes} bytes (${cut.size - dropped} items shortened, ` +
       `${dropped} whole entries dropped); read them in full with ghx pr feedback ${out.ref}.`;
   };
 
   // One cut each: the lists it changes (undefined when there is nothing to cut), its count key, and whether
   // it drops the whole entry.
   type Lists = Partial<Pick<Feedback, 'findings' | 'comments' | 'bots' | 'reviews'>>;
-  type Cut = { key: string; whole: boolean; apply: () => Lists | undefined };
+  type Cut = { key: string; whole: boolean; apply: () => Lists | undefined; markTruncated?: string };
   const settled = fb.findings.filter((f) => !keepsFinding(f));
   const cuts: Cut[] = [
     // Bodies.
     ...settled
-      .filter((f) => f.body !== '')
+      .filter((f) => f.body !== '' || f.evidence !== undefined)
       .map((f) => ({
         key: `f:${f.id}`,
         whole: false,
-        apply: () => ({ findings: fb.findings.map((x) => (x.id === f.id ? { ...x, body: '', truncated: true } : x)) }),
+        apply: () => ({
+          findings: fb.findings.map((x) => {
+            if (x.id !== f.id) return x;
+            const { evidence: _evidence, ...rest } = x;
+            return { ...rest, body: '', truncated: true };
+          }),
+        }),
       })),
     ...byAge(fb.comments.filter((c) => c.body !== '')).map((c) => ({
       key: `c:${c.id}`,
       whole: false,
       apply: () => ({ comments: fb.comments.map((x) => (x.id === c.id ? { ...x, body: '', truncated: true } : x)) }),
     })),
+    // Keep every open/unverified finding and its actionable fields. Evidence is supplementary and can
+    // be recovered through pr feedback; remove it whole so a retained URL is always complete.
+    ...fb.findings
+      .filter((f) => keepsFinding(f) && f.evidence !== undefined)
+      .map((f) => ({
+        key: `f:${f.id}`,
+        whole: false,
+        markTruncated: f.id,
+        apply: () => ({
+          findings: fb.findings.map((x) => {
+            if (x.id !== f.id) return x;
+            const { evidence: _evidence, ...rest } = x;
+            return rest;
+          }),
+        }),
+      })),
     // Whole entries.
     ...[0, 1, 2].flatMap((tier) =>
       byAge(fb.comments.filter((c) => commentTier(c) === tier)).map((c) => ({
@@ -148,6 +180,10 @@ export function fitStatus(doc: PrStatusOutput, maxBytes = DEFAULT_MAX_BYTES, pro
     if (project && after === seen) {
       Object.assign(fb, before);
       continue;
+    }
+    // A projected truncated flag must not make an otherwise invisible evidence cut look useful.
+    if (cut.markTruncated !== undefined) {
+      fb.findings = fb.findings.map((f) => (f.id === cut.markTruncated ? { ...f, truncated: true } : f));
     }
     count(cut.key, cut.whole);
     setHint();
