@@ -52,7 +52,9 @@ const logLines = (path: string) =>
         .map((l) => JSON.parse(l))
     : [];
 
-async function waitForCalls(path: string, n: number, timeoutMs = 15_000): Promise<void> {
+// Generous: every gh call spawns a fake-gh process, which takes far longer while the whole suite runs in
+// parallel (15 s logged only 11 of 19 calls there; alone the test takes ~3 s).
+async function waitForCalls(path: string, n: number, timeoutMs = 60_000): Promise<void> {
   const t0 = Date.now();
   while (logLines(path).length < n) {
     if (Date.now() - t0 > timeoutMs) throw new Error(`only ${logLines(path).length}/${n} gh calls logged`);
@@ -62,7 +64,7 @@ async function waitForCalls(path: string, n: number, timeoutMs = 15_000): Promis
 
 // ~3 s: two spawned runs, each replaying its calls through fake-gh processes.
 test('SIGKILL mid-wait, then the identical command resumes with no repeated baseline or diagnosis calls', {
-  timeout: 60_000,
+  timeout: 180_000,
 }, async () => {
   const sim = new GitHubSim(new FakeClock(Date.now()), state());
   const rec: Recorded[] = [];
@@ -81,6 +83,7 @@ test('SIGKILL mid-wait, then the identical command resumes with no repeated base
   const r1 = await spawnGhx(['ci', 'wait', ...ARGV], {
     fakeGh: true,
     env: d.env(scenario),
+    timeoutMs: 75_000,
     onSpawn: (child) => {
       // Killed once its first tick (diagnosis and the state save after it) is done: no signal handler runs.
       void waitForCalls(d.log, run1Calls).then(() => setTimeout(() => child.kill('SIGKILL'), 500));
@@ -95,6 +98,7 @@ test('SIGKILL mid-wait, then the identical command resumes with no repeated base
   const r2 = await spawnGhx(['ci', 'wait', ...ARGV], {
     fakeGh: true,
     env: d.env(scenario),
+    timeoutMs: 75_000,
     onSpawn: (child) => {
       void waitForCalls(d.log, before + rec.length - run1Calls).then(() =>
         setTimeout(() => child.kill('SIGTERM'), 200),
