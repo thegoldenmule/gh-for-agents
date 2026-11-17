@@ -10,6 +10,19 @@ export const MergeChild = z.object({
   base: z.string().describe('The branch it is based on: the merged head branch'),
 });
 
+export const HeadBranch = z.object({
+  state: z
+    .enum(['deleted', 'present', 'unknown'])
+    .describe('The remote head branch after the merge; unknown for a fork head or when its ref could not be read'),
+  deletedBy: z
+    .enum(['ghx', 'github', 'unknown'])
+    .nullable()
+    .describe('Who deleted it: ghx, github (the repo deletes head branches on merge) or unknown; null unless deleted'),
+  autoDelete: z
+    .boolean()
+    .describe("The repo's delete_branch_on_merge setting: when on and state is present, GitHub is about to delete it"),
+});
+
 export const PrMergeOutput = z.object({
   ref: PrRef.describe('owner/repo#N'),
   merged: z.literal(true),
@@ -21,7 +34,10 @@ export const PrMergeOutput = z.object({
   headSha: Sha.describe('The head the merge was pinned to'),
   mergeCommit: Sha,
   mergedAt: Iso,
-  deletedBranch: z.boolean().describe('ghx deleted the remote head branch'),
+  deletedBranch: z
+    .boolean()
+    .describe('ghx itself deleted the remote head branch; headBranch says whether it still exists'),
+  headBranch: HeadBranch,
   children: z.array(MergeChild).describe('Open PRs based on the merged head branch'),
   plan: MergePlan,
   next: z.array(z.string()),
@@ -29,4 +45,5 @@ export const PrMergeOutput = z.object({
 });
 
 export type MergeChild = z.infer<typeof MergeChild>;
+export type HeadBranch = z.infer<typeof HeadBranch>;
 export type PrMergeOutput = z.infer<typeof PrMergeOutput>;

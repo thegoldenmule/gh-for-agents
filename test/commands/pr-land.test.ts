@@ -23,6 +23,7 @@ import {
   q2Reply,
 } from '../unit/pr/snapshot-fixture.ts';
 import { drive, endpoint, forbidden, GitHubSim, type ProcResultLike, type SimJob, sha } from './ci-wait-world.ts';
+import { httpReply } from './ci-why-world.ts';
 import { CONFIG } from './pr-status-world.ts';
 
 const H = sha('a');
@@ -140,6 +141,26 @@ test('green and mergeable: one PUT pinned to the judged head; merged, exit 0', a
 });
 
 const puts = (sim: GitHubSim) => sim.calls.filter((c) => isPut(c.argv)).length;
+
+test('issue #2: in a repo that deletes head branches on merge, merge.headBranch says GitHub deleted it', async () => {
+  const { sim, t } = world({ repo: { deleteBranchOnMerge: true } });
+  sim.override(
+    (argv) => endpoint(argv) === 'repos/o/r/git/ref/heads/feat/x',
+    () => ({
+      status: 404,
+      exitCode: 1,
+      stdout: httpReply('HTTP/2.0 404 Not Found', '{"message":"Not Found"}'),
+      stderr: 'gh: Not Found (HTTP 404)\n',
+    }),
+  );
+  green(sim, t, 4 * MIN);
+  const r = await land(sim, ['o/r#7']);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  const s = LandSummary.parse(r.json);
+  assert.equal(s.outcome, 'merged');
+  assert.equal(s.merge?.deletedBranch, false);
+  assert.deepEqual(s.merge?.headBranch, { state: 'deleted', deletedBy: 'github', autoDelete: true });
+});
 
 test('red CI: not merged, exit 10, the diagnosis, ci why next; no PUT', async () => {
   const { sim, t } = world();

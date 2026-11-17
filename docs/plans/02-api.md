@@ -745,7 +745,7 @@ gh's merge flags are not ghx flags. `USAGE_UNKNOWN_FLAG` names the ghx form in i
    - 405: re-read the PR. `DIRTY` → `MERGE_CONFLICT`; `BLOCKED` → `BLOCKED_BY_PROTECTION`.
    - Transient error (#3214): re-read the PR. If it's merged and its head oid still equals `H`, report success with `recoveredFromTransient:true`; otherwise retry once.
 8. **Verify** by polling `GET pulls/N` until merged (≤10 s).
-9. **Delete the branch** only if `--delete-branch` or `merge.deleteBranch` is set, the branch is same-repo, and no PR uses it as base. ghx deletes the remote ref only, and children retarget **[G-RETARGET]**.
+9. **Delete the branch** only if `--delete-branch` or `merge.deleteBranch` is set, the branch is same-repo, and no PR uses it as base. ghx deletes the remote ref only, and children retarget **[G-RETARGET]**. Whether or not ghx deleted it, `headBranch` reports the branch's state after the merge: a same-repo ref is read once, so a repository that deletes head branches on merge reads as `deleted` by `github` (or `present` with `autoDelete: true` while GitHub's asynchronous delete is pending), never as left behind.
 10. **Output** with `next: ["ghx ci wait branch:<default>@<mergeCommit>"]`.
 
 ### 8.2 Checks
@@ -781,7 +781,9 @@ const MergePlan = z.object({ ref: PrRef, headSha: Sha, method: z.enum(["merge","
   overrides: z.array(z.object({ code: z.string(), reason: z.string() })),
   request: z.object({ method: z.literal("PUT"), path: z.string(), body: z.record(z.unknown()) }) });
 const PrMergeOutput = z.object({ ref: PrRef, merged: z.literal(true), alreadyMerged: z.boolean(), recoveredFromTransient: z.boolean(),
-  method: z.string(), headSha: Sha, mergeCommit: Sha, mergedAt: Iso, deletedBranch: z.boolean(),
+  method: z.string(), headSha: Sha, mergeCommit: Sha, mergedAt: Iso, deletedBranch: z.boolean() /* ghx deleted it */,
+  headBranch: z.object({ state: z.enum(["deleted","present","unknown"]), deletedBy: z.enum(["ghx","github","unknown"]).nullable(),
+    autoDelete: z.boolean() /* the repo's delete_branch_on_merge */ }),
   children: z.array(z.object({ ref: PrRef, base: z.string() })), plan: MergePlan, next: z.array(z.string()), warnings: z.array(Warning) });
 // --dry-run allowed: { dryRun: true, wouldMerge: true, plan } (exit 0)
 ```

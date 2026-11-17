@@ -23,6 +23,8 @@ import {
 
 const warned = (r: { json: any }, code: string) =>
   (r.json.warnings as { code: string; message: string }[]).find((w) => w.code === code);
+const branchWarnings = (r: { json: any }) =>
+  (r.json.warnings as { code: string }[]).filter((w) => w.code.startsWith('BRANCH_')).map((w) => w.code);
 const deletes = (fake: ReturnType<typeof installMerge>) => fake.calls.filter((c) => isRefDelete(c.argv));
 
 test('--delete-branch deletes the remote head ref; next waits for CI on the default branch merge commit', async () => {
@@ -30,6 +32,7 @@ test('--delete-branch deletes the remote head ref; next waits for CI on the defa
   const r = await runMerge(['pr', 'merge', REF, '--delete-branch'], fake);
   assert.equal(r.exitCode, EXIT.OK, r.stdout);
   assert.equal(r.json.deletedBranch, true);
+  assert.deepEqual(r.json.headBranch, { state: 'deleted', deletedBy: 'ghx', autoDelete: false });
   assert.deepEqual(r.json.children, []);
   assert.deepEqual(r.json.next, [`ghx ci wait branch:main@${MERGE_COMMIT}`]);
   const [del] = deletes(fake);
@@ -54,8 +57,9 @@ test('without --delete-branch nothing is deleted, and children are still reporte
   const r = await runMerge(['pr', 'merge', REF], fake);
   assert.equal(r.exitCode, EXIT.OK, r.stdout);
   assert.equal(r.json.deletedBranch, false);
+  assert.deepEqual(r.json.headBranch, { state: 'present', deletedBy: null, autoDelete: false });
   assert.deepEqual(r.json.children, [{ ref: 'powerhouse-inc/powerhouse#3302', base: HEAD_BRANCH }]);
-  fake.expectNoCall(isRefGet);
+  assert.equal(fake.calls.filter((c) => isRefGet(c.argv)).length, 1, 'the ref is read once for headBranch');
   fake.expectNoCall(isRefDelete);
 });
 
@@ -78,6 +82,7 @@ test('a head from a fork gives a warning and no DELETE', async () => {
   assert.equal(r.exitCode, EXIT.OK, r.stdout);
   assert.equal(r.json.deletedBranch, false);
   assert.match(warned(r, 'BRANCH_NOT_DELETED')?.message ?? '', /someone\/powerhouse:.* is in another repository/);
+  assert.deepEqual(r.json.headBranch, { state: 'unknown', deletedBy: null, autoDelete: false });
   fake.expectNoCall(isRefGet);
   fake.expectNoCall(isRefDelete);
 });
@@ -102,8 +107,76 @@ test('a branch GitHub already deleted is BRANCH_ALREADY_DELETED, not an error', 
   const r = await runMerge(['pr', 'merge', REF, '--delete-branch'], fake);
   assert.equal(r.exitCode, EXIT.OK, r.stdout);
   assert.equal(r.json.deletedBranch, false);
+  assert.deepEqual(r.json.headBranch, { state: 'deleted', deletedBy: 'unknown', autoDelete: false });
   assert.ok(warned(r, 'BRANCH_ALREADY_DELETED'));
   fake.expectNoCall(isRefDelete);
+});
+
+// Issue #2: a repo with "Automatically delete head branches" removes the branch itself; the result must say
+// the branch is gone (deletedBy github), not leave a reader thinking it was left behind.
+const AUTO = { repo: { deleteBranchOnMerge: true } };
+const ref404 = () => ({
+  exitCode: 1,
+  stdout: httpReply('HTTP/2.0 404 Not Found', '{"message":"Not Found"}'),
+  stderr: 'gh: Not Found (HTTP 404)\n',
+});
+
+test('auto-delete on, no --delete-branch: a ref GitHub removed is deleted by github, without a warning', async () => {
+  const fake = installMerge(undefined, AUTO);
+  fake.on(isRefGet, ref404());
+  const r = await runMerge(['pr', 'merge', REF], fake);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.deletedBranch, false);
+  assert.deepEqual(r.json.headBranch, { state: 'deleted', deletedBy: 'github', autoDelete: true });
+  assert.deepEqual(branchWarnings(r), []);
+  fake.expectNoCall(isRefDelete);
+});
+
+test('auto-delete on, ref still there right after the merge: present with autoDelete, no wait', async () => {
+  const fake = installMerge(undefined, AUTO);
+  const r = await runMerge(['pr', 'merge', REF], fake);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.deepEqual(r.json.headBranch, { state: 'present', deletedBy: null, autoDelete: true });
+  assert.equal(fake.calls.filter((c) => isRefGet(c.argv)).length, 1);
+});
+
+test('auto-delete on, --delete-branch finds it gone: deleted by github, no BRANCH_ALREADY_DELETED', async () => {
+  const fake = installMerge(undefined, AUTO);
+  fake.on(isRefGet, ref404());
+  const r = await runMerge(['pr', 'merge', REF, '--delete-branch'], fake);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.deletedBranch, false);
+  assert.deepEqual(r.json.headBranch, { state: 'deleted', deletedBy: 'github', autoDelete: true });
+  assert.equal(warned(r, 'BRANCH_ALREADY_DELETED'), undefined);
+  fake.expectNoCall(isRefDelete);
+});
+
+test('auto-delete on, GitHub wins the race with the DELETE (422): deleted by github', async () => {
+  const fake = installMerge(undefined, AUTO);
+  fake.on(isRefDelete, {
+    exitCode: 1,
+    stdout: httpReply('HTTP/2.0 422 Unprocessable Entity', '{"message":"Reference does not exist"}'),
+    stderr: 'gh: Reference does not exist (HTTP 422)\n',
+  });
+  const r = await runMerge(['pr', 'merge', REF, '--delete-branch'], fake);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.deletedBranch, false);
+  assert.deepEqual(r.json.headBranch, { state: 'deleted', deletedBy: 'github', autoDelete: true });
+  assert.deepEqual(branchWarnings(r), []);
+});
+
+test('a ref that cannot be read is headBranch unknown with BRANCH_STATE_UNKNOWN; the merge still succeeds', async () => {
+  const fake = installMerge();
+  fake.on(isRefGet, {
+    exitCode: 1,
+    stdout: httpReply('HTTP/2.0 403 Forbidden', '{"message":"Resource not accessible by integration"}'),
+    stderr: 'gh: Resource not accessible by integration (HTTP 403)\n',
+  });
+  const r = await runMerge(['pr', 'merge', REF], fake);
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.equal(r.json.merged, true);
+  assert.deepEqual(r.json.headBranch, { state: 'unknown', deletedBy: null, autoDelete: false });
+  assert.ok(warned(r, 'BRANCH_STATE_UNKNOWN'));
 });
 
 test('a failed DELETE is a warning; the merge still reports success (exit 0)', async () => {

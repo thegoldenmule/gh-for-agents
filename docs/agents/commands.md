@@ -386,7 +386,7 @@ Flags:
 - `--method <merge|squash|rebase>`: merge (default: merge.method); squash or rebase only when config allows
 - `--override <string>` (repeatable): Overridable blocker codes the user accepted (CODE or CODE,CODE); needs --reason
 - `--reason <string>`: Why the override is allowed (who asked); one line, ≤200 chars
-- `--delete-branch`: Delete the same-repo head branch after merging (default: merge.deleteBranch); remote ref only
+- `--delete-branch`: Delete the same-repo head branch after merging (default: merge.deleteBranch); remote ref only. Not needed when the repo deletes head branches on merge: headBranch reports the state either way
 - `--foreground` (default `false`): Return pending (exit 15) after 9 min, under the Bash tool cap (a subagent); re-run the identical command
 
 Input: Flags and positionals only; --input file.json is also accepted.
@@ -415,7 +415,7 @@ Flags:
 - `--method <merge|squash|rebase>`: merge (default: merge.method); squash or rebase only when config allows
 - `--override <string>` (repeatable): Overridable blocker codes the user accepted (CODE or CODE,CODE); needs --reason
 - `--reason <string>`: Why the override is allowed (who asked); one line, ≤200 chars
-- `--delete-branch`: Delete the same-repo head branch after merging (default: merge.deleteBranch); remote ref only
+- `--delete-branch`: Delete the same-repo head branch after merging (default: merge.deleteBranch); remote ref only. Not needed when the repo deletes head branches on merge: headBranch reports the state either way
 
 Input: Flags and positionals only; --input file.json is also accepted.
 

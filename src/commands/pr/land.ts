@@ -35,7 +35,10 @@ const Input = z.strictObject({
   deleteBranch: z
     .boolean()
     .optional()
-    .describe('Delete the same-repo head branch after merging (default: merge.deleteBranch); remote ref only'),
+    .describe(
+      'Delete the same-repo head branch after merging (default: merge.deleteBranch); remote ref only. ' +
+        'Not needed when the repo deletes head branches on merge: headBranch reports the state either way',
+    ),
   foreground: z
     .boolean()
     .default(false)
@@ -162,6 +165,7 @@ export default defineStreamCommand({
     'wait.diagnosis.jobs.firstError',
     'wait.merge.blockers',
     'merge.mergeCommit',
+    'merge.headBranch.state',
     'error.code',
     'error.message',
     'next',

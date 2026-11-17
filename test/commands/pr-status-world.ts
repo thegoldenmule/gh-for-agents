@@ -126,13 +126,15 @@ const mainJob: WJob = { ...prJob, id: MAIN_JOB, runId: MAIN_RUN, headSha: MAIN_S
 export interface InstallOptions {
   config?: unknown | null;
   pr?: unknown;
+  /** Q1 repository fields over the fixture's (e.g. deleteBranchOnMerge). */
+  repo?: Record<string, unknown>;
 }
 
 /** Install the worked example; `config: null` answers the config read with 404. */
 export function install(fake: FakeGh = new FakeGh(), o: InstallOptions = {}): FakeGh {
   const config = o.config === undefined ? CONFIG : o.config;
   fake.on(at('/contents/.github/ghx.json'), config === null ? notFoundJson() : contents(config));
-  fake.on(isQ1, q1Reply(o.pr ?? workedPr()));
+  fake.on(isQ1, q1Reply(o.pr ?? workedPr(), o.repo));
   fake.on(isMergeable, mergeableReply('MERGEABLE', { mergeState: 'UNSTABLE' }));
   fake.on(isQ2, q2Reply({ children: { nodes: [] } }));
   fake.on(isPrCommits, prCommitsReply([OLD_HEAD, HEAD]));

@@ -23,7 +23,10 @@ const Input = z.strictObject({
   deleteBranch: z
     .boolean()
     .optional()
-    .describe('Delete the same-repo head branch after merging (default: merge.deleteBranch); remote ref only'),
+    .describe(
+      'Delete the same-repo head branch after merging (default: merge.deleteBranch); remote ref only. ' +
+        'Not needed when the repo deletes head branches on merge: headBranch reports the state either way',
+    ),
 });
 
 export default defineCommand({
@@ -48,6 +51,7 @@ export default defineCommand({
     'headSha',
     'mergeCommit',
     'mergedAt',
+    'headBranch.state',
     'plan.blockers.code',
     'next',
   ],
@@ -83,7 +87,7 @@ export async function mergePr(
       await after();
       throw new DryRunHalt([], undefined);
     }
-    const { deletedBranch, children } = await after();
+    const { deletedBranch, headBranch, children } = await after();
     return {
       ref: snapshot.ref,
       merged: true as const,
@@ -94,6 +98,7 @@ export async function mergePr(
       mergeCommit: d.mergeCommit,
       mergedAt: d.mergedAt,
       deletedBranch,
+      headBranch,
       children,
       plan,
       next: [`ghx ci wait branch:${snapshot.defaultBranch}@${d.mergeCommit}`],
@@ -110,7 +115,7 @@ export async function mergePr(
     plan,
   });
   const { mergeCommit } = outcome;
-  const { deletedBranch, children } = await after();
+  const { deletedBranch, headBranch, children } = await after();
   return {
     ref: snapshot.ref,
     merged: true as const,
@@ -121,6 +126,7 @@ export async function mergePr(
     mergeCommit,
     mergedAt: outcome.mergedAt,
     deletedBranch,
+    headBranch,
     children,
     plan,
     next: [`ghx ci wait branch:${snapshot.defaultBranch}@${mergeCommit}`],
