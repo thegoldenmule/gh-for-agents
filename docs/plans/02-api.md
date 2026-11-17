@@ -371,7 +371,8 @@ One object that answers: what is this PR, can it land, and what's left (§8a, §
 ```ts
 const PrMeta = z.object({ id: z.string(), rev: z.number(), gen: z.string(), risk: Risk.or(z.string()), riskNote: z.string().nullable(),
   components: z.array(z.string()), alsoTouched: z.array(z.string()) /* 06 */, revertPolicy: RevertPolicy.or(z.string()), revertNote: z.string().nullable(), revertWith: z.array(PrRef),
-  testing: z.array(TestingItem.passthrough()), refs: Refs.passthrough() });
+  testing: z.array(TestingItem.passthrough()), refs: Refs.passthrough(),
+  data: z.record(z.unknown()) /* 08: {} when absent, not an object (DATA_INVALID) or the PR author is untrusted (UNTRUSTED_DATA) */ });
 const Violation = z.object({ code: z.string(), message: z.string(), overridable: z.boolean(), details: z.record(z.unknown()).optional() });
 const StatusEvent = z.object({ id: z.string(), by: z.string(), at: Iso, commit: Sha.nullable(), note: z.string().nullable(), verified: z.boolean().nullable(), url: z.string() });
 const Finding = z.object({ id: z.string(), reviewId: z.string(), severity: Severity.or(z.string()), path: z.string().nullable(),
@@ -403,7 +404,7 @@ const PrStatusOutput = z.object({ ref: PrRef, url: z.string(), number: z.number(
   state: z.enum(["OPEN","CLOSED","MERGED"]), draft: z.boolean(), createdAt: Iso, updatedAt: Iso,
   base: z.object({ ref: z.string(), isDefault: z.boolean() }), head: z.object({ ref: z.string(), sha: Sha }),
   changes: z.object({ files: z.number(), additions: z.number(), deletions: z.number(), commits: z.number() }),
-  description: z.object({ text: z.string(), structured: z.boolean(), drift: z.array(z.enum(["title","description","trailer"])) }),
+  description: z.object({ text: z.string(), structured: z.boolean(), drift: z.array(z.enum(["title","description","trailer","layout" /* 08 */])) }),
   meta: PrMeta.nullable(), metaError: z.object({ code: z.string(), message: z.string() }).nullable(),
   merge: MergeState, ci: CiSummary,
   feedback: z.object({ reviews: z.array(Review), findings: z.array(Finding), comments: z.array(Comment), bots: z.array(BotItem),
@@ -833,7 +834,7 @@ The code is `MERGE_BLOCKED`. The exit code is **6** if any blocker is policy-cla
 
 ```ts
 const PrBlock = z.object({ t: z.literal("pr"), id, gen, rev: z.number().int().min(1), title, description, testing, risk, riskNote?,
-  components, alsoTouched? /* 06 */, revertPolicy, revertNote?, revertWith?, refs? }).strict();   // PR body; one (extra ⇒ first valid + DUPLICATE_BLOCK)
+  components, alsoTouched? /* 06 */, revertPolicy, revertNote?, revertWith?, refs?, data? /* 08 */, layout? /* 08 */ }).strict();   // PR body; one (extra ⇒ first valid + DUPLICATE_BLOCK)
 const ReviewBlock = z.object({ t: z.literal("review"), id, gen, verdict: Verdict, summary, scope?, commit: Sha, findings: z.array(z.string()) }).strict();
 const FindingBlock = z.object({ t: z.literal("finding"), id, gen, review: z.string(), severity: Severity, path: RepoPath, line, endLine?,
   side, alsoAt, title, body, suggestion?, commit: Sha }).strict();         // no status field: initially open
@@ -1501,7 +1502,8 @@ How to read this stream:
 **Config keys** (`.github/ghx.json`):
 - `components[{name, paths?, minRisk?, aliases?}]`: `aliases` are other names for a component (an old name, a commit-log scope). A title scope or `components` entry that uses one maps to the component with a `COMPONENT_ALIAS` warning, in `pr create` and `pr edit` (including a block written under the old name). Aliases are scope tokens, unique across components and never a component name. `ghx init` writes them from the scopes the git log uses
 - `title.types`, `title.scopeRequired`
-- `render.mode`, `render.footer`, `render.descriptionMaxChars`
+- `render.mode`, `render.prBody` (08), `render.footer`, `render.descriptionMaxChars`
+- `data.fields` (08): declared agent data fields `{type, required?, requiredFromRisk?, pattern?, values?, …}`; any other key is still allowed
 - `create.requirePassingTest`
 - `merge.method`, `merge.allowedMethods`, `merge.sharedRed`, `merge.blockOnSeverity`, `merge.requireOwnPr`, `merge.deleteBranch`
 - `ci.none`, `ci.ignore`, `ci.expected`, `ci.keySteps`, `ci.logPatterns`, `ci.infraPatterns`, `ci.knownFlaky`, `ci.maxRerunAttempts`

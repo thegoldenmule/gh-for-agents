@@ -52,6 +52,9 @@ export default defineCommand({
     'ghx pr create --example prints a valid input for this repo; write it to pr.json, edit it, and pass --input pr.json. ' +
     'Required: title, description, testing, risk, revertPolicy. base and head default to the default and current branch; ' +
     'components the diff touches are added (past 5, ghx records the rest as alsoTouched); draft and stackedOn follow the base. ' +
+    'data takes extra facts {key: value} (≤20 keys, ≤2 KB): shown under Data in the body and returned by pr status as meta.data; ' +
+    'fields .github/ghx.json declares in data.fields must be present (data.required), and any other key is allowed. ' +
+    'The body follows the repo template (render.prBody or the built-in one); preview it with --dry-run. ' +
     'Validation runs before any write and reports every issue at once (VALIDATION); DUPLICATE_PR when the head already has an open PR.',
   kind: 'write',
   input: Input,
