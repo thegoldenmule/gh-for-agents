@@ -2,6 +2,7 @@
 // helper is one small REST read; selection and math stay in expected.ts, eta.ts and stall.ts.
 import { z } from 'zod';
 import { rethrowControlFlow } from '../../core/control-flow.ts';
+import { GhxError } from '../../core/errors.ts';
 import type { ApiRequest } from '../../gh/api.ts';
 import { type Gh, GhFailure } from '../../gh/index.ts';
 import type { RepoRef } from '../../gh/types.ts';
@@ -25,16 +26,31 @@ export const branchPath = (b: string): string => b.split('/').map(encodeURICompo
 
 const isNotFound = (e: unknown): boolean => e instanceof GhFailure && e.failure.code === 'GH_NOT_FOUND';
 
-async function get<S extends z.ZodType>(gh: Gh, req: ApiRequest, schema: S): Promise<z.output<S>> {
+async function get<S extends z.ZodType>(
+  gh: Gh,
+  req: ApiRequest,
+  schema: S,
+  requireComplete = false,
+): Promise<z.output<S>> {
   const r = await gh.api(req, schema);
   if (r.notModified) throw new Error('unreachable: unconditional request returned 304');
+  if (requireComplete && r.truncated) {
+    throw new GhxError('GH_OUTPUT_UNEXPECTED', `Required policy facts were truncated at ${req.path}.`, {
+      details: { path: req.path, pages: r.pages },
+    });
+  }
   return r.data;
 }
 
 /** A GET whose 404 is data (`null`). Control flow and every other failure propagate. */
-async function getOrNull<S extends z.ZodType>(gh: Gh, req: ApiRequest, schema: S): Promise<z.output<S> | null> {
+async function getOrNull<S extends z.ZodType>(
+  gh: Gh,
+  req: ApiRequest,
+  schema: S,
+  requireComplete = false,
+): Promise<z.output<S> | null> {
   try {
-    return await get(gh, req, schema);
+    return await get(gh, req, schema, requireComplete);
   } catch (e) {
     rethrowControlFlow(e);
     if (isNotFound(e)) return null;
@@ -82,12 +98,15 @@ export async function fetchRequiredSources(o: {
   repo: RepoRef;
   base: string;
   warn?: Warn;
+  /** Repository CI gates must not accept truncated required-check sources. */
+  requireComplete?: boolean;
 }): Promise<RequiredFetch> {
   const b = branchPath(o.base);
   const rules = await getOrNull(
     o.gh,
     { path: `repos/{owner}/{repo}/rules/branches/${b}`, repo: o.repo, paginate: { maxPages: 3 } },
     z.array(Rule),
+    o.requireComplete,
   );
   if (rules === null) {
     o.warn?.({
@@ -95,7 +114,12 @@ export async function fetchRequiredSources(o: {
       message: `The rules for ${o.base} could not be read (404); required checks come from branch protection and isRequired only.`,
     });
   }
-  const branch = await getOrNull(o.gh, { path: `repos/{owner}/{repo}/branches/${b}`, repo: o.repo }, Branch);
+  const branch = await getOrNull(
+    o.gh,
+    { path: `repos/{owner}/{repo}/branches/${b}`, repo: o.repo },
+    Branch,
+    o.requireComplete,
+  );
   const rsc = branch?.protection?.required_status_checks;
   return {
     sources: {

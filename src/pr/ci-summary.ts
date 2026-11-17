@@ -98,6 +98,8 @@ export interface CiSummaryOptions {
    * from this process's config, so the merge gate judges the set the wait settled on (04, one check set).
    */
   expectedDefs?: readonly ExpectedDef[];
+  /** A CI policy gate cannot reuse a prior invocation’s required-check observation. */
+  freshRequired?: boolean;
   warn: (w: Warning) => void;
 }
 
@@ -133,12 +135,24 @@ async function requiredSources(
   cache: JsonCache,
 ): Promise<{ sources: RequiredSources; baseHeadSha?: string | null }> {
   const key = requiredCacheKey(o.base);
-  const hit = cache.get(key, CachedRequired);
+  const hit = o.freshRequired ? undefined : cache.get(key, CachedRequired);
   if (hit) return { sources: hit };
   const fetched = await optional(o, `The required checks for ${o.base}`, null, () =>
-    fetchRequiredSources({ gh: o.gh, repo: o.repo, base: o.base, warn: o.warn }),
+    fetchRequiredSources({
+      gh: o.gh,
+      repo: o.repo,
+      base: o.base,
+      warn: o.warn,
+      requireComplete: o.freshRequired === true,
+    }),
   );
   if (!fetched) return { sources: { rules: null, branch: null } };
+  if (o.freshRequired && (fetched.sources.rules === null || fetched.sources.branch === null)) {
+    o.warn({
+      code: 'REQUIRED_CHECKS_UNKNOWN',
+      message: `The complete required-check sources for ${o.base} could not be established.`,
+    });
+  }
   const { rules, branch } = fetched.sources;
   const sources = { rules: rules ? [...rules] : null, branch: branch ? [...branch] : null };
   cache.set(key, sources, REQUIRED_TTL_MS);

@@ -160,6 +160,32 @@ async function readRemote(gh: Gh, repo: RepoRef): Promise<{ text: string; ref: s
   }
 }
 
+/** CI must validate against the pinned target revision, never a PR-controlled working copy. */
+export async function loadConfigAtRef(gh: Gh, repo: RepoRef, ref: string): Promise<LoadedConfig> {
+  const source: ConfigSource = { kind: 'remote', repo, ref, path: CONFIG_PATH };
+  try {
+    const response = await gh.api(
+      { path: `repos/{owner}/{repo}/contents/${CONFIG_PATH}`, repo, fields: { ref } },
+      ContentsResponse,
+      { notFound: 'REF_NOT_FOUND' },
+    );
+    if (response.notModified) throw new GhxError('GH_OUTPUT_UNEXPECTED', 'Pinned config read returned 304.');
+    const text =
+      response.data.encoding === 'base64'
+        ? Buffer.from(response.data.content, 'base64').toString('utf8')
+        : response.data.content;
+    return { config: parseConfigText(text, source), source, warnings: [] };
+  } catch (e) {
+    if (e instanceof GhFailure && e.failure.code === 'GH_NOT_FOUND') {
+      throw new GhxError('CONFIG_MISSING', `No ${CONFIG_PATH} at target revision ${ref}.`, {
+        hint: 'Merge the repository config before making this check required.',
+        details: { source: describeSource(source) },
+      });
+    }
+    throw e;
+  }
+}
+
 /** One line naming the source: `the working tree at fb84c4e (dirty)`, `o/r@main`, `the defaults`. */
 export function sourceLabel(s: ConfigSource): string {
   if (s.kind === 'remote') return `${repoSlug(s.repo)}@${s.ref}`;

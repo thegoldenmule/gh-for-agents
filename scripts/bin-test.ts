@@ -100,6 +100,21 @@ step('ghx --version', () => {
   return `${v.version} on bun ${v.runtime.version} (${v.platform})`;
 });
 
+step('PR impact and CI check are bundled without Node', () => {
+  for (const command of ['impact', 'check']) {
+    const h = json(ok(run(BIN, ['pr', command, '--help'], { env: env(home) }), `pr ${command} help`), 'help');
+    assert.equal(h.name, `pr ${command}`);
+    assert.equal(h.kind, 'read');
+    const schema = json(
+      ok(run(BIN, ['pr', command, '--schema'], { env: env(home) }), `pr ${command} schema`),
+      'schema',
+    );
+    assert.ok(schema.input, `pr ${command} has no input schema`);
+    assert.ok(schema.output, `pr ${command} has no output schema`);
+  }
+  return undefined;
+});
+
 step('ghx doctor (no install yet)', () => {
   const r = run(BIN, ['doctor'], { env: env(home), cwd: work });
   const d = json(r, 'ghx doctor');

@@ -87,7 +87,9 @@ export interface MergePolicyInput {
   /** Epoch ms, for the 24 h base-change warning. */
   now: number;
   /** `ci-gate` keeps only 02 §8.2 rows 6–12 (ci wait --until mergeable). */
-  scope?: 'full' | 'ci-gate';
+  scope?: 'full' | 'ci-gate' | 'repository-gate';
+  /** Only set after an exact running Actions check has been verified and excluded. */
+  selfCheckExcluded?: boolean;
   /** Where ci.expected was read (config/load.ts sourceLabel and describeSource), for CI_PENDING. */
   configOrigin?: ConfigOrigin;
 }
@@ -506,6 +508,18 @@ export function evaluateMerge(i: MergePolicyInput): MergeEvaluation {
     (code) => inScope(code) && stillFails(code),
   );
   results.set('BLOCKED_BY_PROTECTION', open ? blockedByProtection(s, explained) : notOpen);
+  if (i.scope === 'repository-gate') {
+    results.set('AUTHOR_NOT_VIEWER', skip('CI checks repository policy rather than the merging user’s identity.'));
+    results.set('NO_MERGE_PERMISSION', skip('A read-only CI token does not perform the merge.'));
+    if (i.selfCheckExcluded && s.merge.mergeStateStatus === 'BLOCKED') {
+      results.set(
+        'BLOCKED_BY_PROTECTION',
+        skip(
+          'An exact running self-check was excluded. GitHub enforces aggregate protection readiness, which can include this gate.',
+        ),
+      );
+    }
+  }
 
   const checks: PlanCheck[] = [];
   const blockers: Violation[] = [];
@@ -536,6 +550,20 @@ export function evaluateMerge(i: MergePolicyInput): MergeEvaluation {
     checks.push({ code: spec.code, status: r.status, message: r.message });
     if (r.status === 'fail') blockers.push(violation(spec.code, r, spec.overridable));
     if (r.status === 'waived') waivers.push(violation(spec.code, r, spec.overridable));
+  }
+  if (i.scope === 'repository-gate' && s.merge.reviewDecision === 'REVIEW_REQUIRED') {
+    const message = 'GitHub still requires an approving review.';
+    checks.push({ code: 'REVIEW_REQUIRED', status: 'fail', message });
+    blockers.push({ code: 'REVIEW_REQUIRED', message, overridable: false });
+  }
+  if (
+    i.scope === 'repository-gate' &&
+    s.merge.reviewDecision === 'CHANGES_REQUESTED' &&
+    !blockers.some((b) => b.code === 'CHANGES_REQUESTED')
+  ) {
+    const message = 'GitHub reports outstanding change requests.';
+    checks.push({ code: 'CHANGES_REQUESTED', status: 'fail', message });
+    blockers.push({ code: 'CHANGES_REQUESTED', message, overridable: false });
   }
 
   const notices: Warning[] = [...overrides]

@@ -43,6 +43,10 @@ test('<cmd> --schema and ghx schema make no gh calls (the fake gh log stays empt
     ['schema'],
     ['schema', 'config'],
     ['doctor', '--help'],
+    ['pr', 'impact', '--help'],
+    ['pr', 'impact', '--schema'],
+    ['pr', 'check', '--help'],
+    ['pr', 'check', '--schema'],
   ]) {
     const r = await spawnGhx(argv, { fakeGh: true, env });
     assert.equal(r.exitCode, 0, `${argv.join(' ')}: ${r.stdout}`);

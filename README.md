@@ -81,6 +81,8 @@ These are the v1 commands, specified in [02-api](docs/plans/02-api.md).
 | `pr edit` | Patches a PR's structured fields and re-renders the body, with the same validation. |
 | `pr ready` | Marks any PR ready for review, or back to draft with `--undo`. |
 | `pr status` | Returns one object: description, metadata, merge state, CI for the head SHA, feedback and blockers. Several PRs (`pr status 12 13 14`) return `{results: […]}`. |
+| `pr impact` | Derives components, overflow and the risk floor from changed paths for open or historical PRs, including PRs without a ghx block. Takes several PRs in one call. |
+| `pr check` | Validates stored PR metadata and visible text against config at the target SHA. `--merge-policy` also evaluates repository merge gates for CI. |
 | `pr feedback` | Merges feedback from all three GitHub sources into one list, with bots kept separate. |
 | `pr comment`, `pr review` | Post structured comments and reviews. |
 | `pr resolve` | Records a status on feedback items, such as addressed or wontfix. |
@@ -178,6 +180,93 @@ foreground with `--foreground`, which returns within 9 minutes (exit 15 if CI
 hasn't settled; it re-runs the identical command, which resumes). A second wait
 on the same PR follows the first instead of polling again. `ghx pr land <pr>`
 waits until the PR is mergeable and then merges it.
+
+### Ticket titles and defect references
+
+Repositories using tracker keys can select ticket titles in `.github/ghx.json`:
+
+```json
+{"title":{"format":"ticket","ticket":{"pattern":"^ENG-\\d+$","example":"ENG-123"}}}
+```
+
+This requires titles such as `ENG-123: retry the request`; the default remains
+`type(scope): summary`. The example must match the complete key pattern and is
+used by `pr create --example`. Ticket keys do not automatically fill `data`, and
+`ghx init` does not infer ticket patterns.
+
+To record which earlier PR introduced a defect, use
+`"refs":{"fixes":["#123","other/repo#456"]}`. Targets must be PRs. The trailer
+says `Repairs defects from #123`, which does not trigger GitHub issue closing.
+Use `refs.closes` for issues that should close on merge.
+
+### Review sources and external evidence
+
+A finding can identify its reviewer or check with `source`, using the same token
+rules as a data key. It can also quote evidence from a ticket or decision record:
+
+```json
+{
+  "verdict": "request-changes",
+  "summary": "The retry behavior misses an acceptance criterion.",
+  "findings": [{
+    "severity": "medium",
+    "source": "ticketAcceptance",
+    "title": "Retry stops too early",
+    "body": "The implementation stops after the first transient failure.",
+    "evidence": {
+      "source": "ENG-123 acceptance criteria",
+      "quote": "Retry a transient failure three times.",
+      "url": "https://tracker.example/ENG-123"
+    }
+  }]
+}
+```
+
+Pass this to `ghx pr review <pr> --input review.json`. Without `path` and `line`,
+the finding appears in the review body with its own ID and can be resolved with
+`pr resolve`. Located findings may also carry evidence. `source` and `evidence`
+come back through `pr feedback` and `pr status`; ghx records evidence without
+fetching or verifying it. Evidence quotes are limited to 1,000 characters and
+10 lines; status may shorten them while the full feedback artifact retains them.
+
+Upgrade participating readers before posting unlocated findings: older versions
+show their IDs as open findings with unknown severity instead of reading their
+text. Optional provenance on existing located findings remains compatible.
+
+### PR impact and CI validation
+
+```sh
+ghx pr impact 12 13 -R owner/repo
+ghx pr check 12 -R owner/repo
+```
+
+`pr impact` derives `components`, `alsoTouched` and nullable `riskFloor` from
+complete changed paths and current config, and reports config provenance. It
+works for merged PRs and deleted head branches. Incomplete file lists fail;
+stored PR metadata is not changed.
+
+`pr check` validates the block, required data, components, risk and visible-body
+drift against config fetched at the PR's pinned target SHA. It ignores local
+config edits, reports all validation issues, and never repairs the PR. A policy
+change in a PR takes effect after merge. Merge the initial config before making
+this command a required check.
+
+In Actions, pass the PR number and base repository explicitly and set
+`GITHUB_TOKEN` to `${{ github.token }}`. The standalone binary requires `gh` on
+PATH, with no Node runtime or interactive login. Start with `contents: read`
+and `pull-requests: read`; `--merge-policy` also needs the Actions/check reads
+and access to required-check facts. Unavailable policy facts fail the gate.
+
+`--merge-policy` checks repository gates while excluding CI-user ownership and
+merge-write permissions. For a required gate running inside Actions, pass
+`--self-check <check-run-id>` with `GITHUB_RUN_ID` set to avoid waiting for that
+check itself. Supply your gate's check-run ID, rather than a workflow-run or
+Actions-job ID. The command verifies a running check on this PR head in the
+current run; the workflow must select its own gate, since ghx cannot infer the
+invoking job. Exclusions are returned explicitly. GitHub remains responsible for
+aggregate branch-protection readiness; approvals, conflicts, other CI, findings
+and preconditions are checked independently. A fork workflow must receive a
+token able to read the base repository's PR and policy facts.
 
 ## Status
 

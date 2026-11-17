@@ -73,10 +73,12 @@ Spawning a subagent for PR work? Paste the [coordinator PR template](https://git
 - `ghx hook claude-pretooluse` (read): Claude Code PreToolUse hook: background ghx ci wait, steer raw gh to ghx (stdin protocol)
 - `ghx init` (write): Write a starter .github/ghx.json (components inferred from the workspace).
 - `ghx install` (write): Install the Claude Code hook and CLAUDE.md block, plus deny rules at project scope (try --dry-run).
+- `ghx pr check` (read): Validate a PR’s stored block and optional repository merge gates in CI
 - `ghx pr comment` (write): Post a typed coordination comment: note, merge precondition, status or supersede
 - `ghx pr create` (write): Open a PR from validated JSON: compact body, hidden ghx block, exact read-back
 - `ghx pr edit` (write): Patch a ghx PR: re-validated, block rev+1, retarget or draft toggle, exact read-back
 - `ghx pr feedback` (read): All PR feedback (reviews, findings, comments, bots), filterable; full bodies in a file
+- `ghx pr impact` (read): Read components and the risk floor from any PR’s changed paths
 - `ghx pr land` (write): Wait until mergeable, then merge pinned to that head (run like ci wait)
 - `ghx pr merge` (write): Merge when policy allows, pinned to the evaluated head; every blocker reported together
 - `ghx pr ready` (write): Mark a PR ready for review, or back to draft with --undo; any PR, no ghx block needed

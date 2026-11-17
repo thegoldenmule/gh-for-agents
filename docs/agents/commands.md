@@ -12,10 +12,12 @@ Every command prints one JSON document (or a spill result). Errors are `{"error"
 - [`ghx hook claude-pretooluse`](#ghx-hook-claude-pretooluse) (read): Claude Code PreToolUse hook: background ghx ci wait, steer raw gh to ghx (stdin protocol)
 - [`ghx init`](#ghx-init) (write): Write a starter .github/ghx.json (components inferred from the workspace).
 - [`ghx install`](#ghx-install) (write): Install the Claude Code hook and CLAUDE.md block, plus deny rules at project scope (try --dry-run).
+- [`ghx pr check`](#ghx-pr-check) (read): Validate a PR’s stored block and optional repository merge gates in CI
 - [`ghx pr comment`](#ghx-pr-comment) (write): Post a typed coordination comment: note, merge precondition, status or supersede
 - [`ghx pr create`](#ghx-pr-create) (write): Open a PR from validated JSON: compact body, hidden ghx block, exact read-back
 - [`ghx pr edit`](#ghx-pr-edit) (write): Patch a ghx PR: re-validated, block rev+1, retarget or draft toggle, exact read-back
 - [`ghx pr feedback`](#ghx-pr-feedback) (read): All PR feedback (reviews, findings, comments, bots), filterable; full bodies in a file
+- [`ghx pr impact`](#ghx-pr-impact) (read): Read components and the risk floor from any PR’s changed paths
 - [`ghx pr land`](#ghx-pr-land) (write): Wait until mergeable, then merge pinned to that head (run like ci wait)
 - [`ghx pr merge`](#ghx-pr-merge) (write): Merge when policy allows, pinned to the evaluated head; every blocker reported together
 - [`ghx pr ready`](#ghx-pr-ready) (write): Mark a PR ready for review, or back to draft with --undo; any PR, no ghx block needed
@@ -251,6 +253,30 @@ Examples:
 
 Schema: `ghx install --schema`.
 
+## ghx pr check
+
+Validate a PR’s stored block and optional repository merge gates in CI
+
+`ghx pr check <pr> [flags]`
+
+read, single document, timeout 2m (max 5m).
+
+Read-only validation against config at the pinned target-branch SHA. No working-tree policy is trusted and no metadata is repaired. The standalone binary needs gh and GITHUB_TOKEN, without an interactive login. --merge-policy excludes CI-user ownership/write permissions. --self-check excludes the supplied running Actions check on this PR head in GITHUB_RUN_ID. The caller must identify its own gate; same-run siblings cannot be distinguished. GitHub still enforces aggregate branch protection.
+
+Flags:
+
+- `--merge-policy` (default `false`):
+- `--self-check <integer>`: Supplied running Actions check-run id on this PR head; caller must identify its own gate. Requires --merge-policy and GITHUB_RUN_ID
+
+Input: Flags and positionals only; --input file.json is also accepted.
+
+Examples:
+
+- `ghx pr check owner/repo#12`: Validate metadata against the pinned base policy
+- `ghx pr check 12 --merge-policy --self-check 123456 -R owner/repo`: Evaluate repository gates from Actions with this job excluded
+
+Schema: `ghx pr check --schema`.
+
 ## ghx pr comment
 
 Post a typed coordination comment: note, merge precondition, status or supersede
@@ -369,6 +395,24 @@ Examples:
 - `ghx pr feedback 12 --since 9f2c4e1`: Only feedback newer than that commit
 
 Schema: `ghx pr feedback --schema`.
+
+## ghx pr impact
+
+Read components and the risk floor from any PR’s changed paths
+
+`ghx pr impact <pr…>`
+
+read, single document, timeout 2m (max 5m).
+
+Derives current-config component matches independently of a ghx block. Merged PRs and deleted head branches work. Incomplete file lists fail closed. Several PRs return ordered results.
+
+Input: Flags and positionals only; --input file.json is also accepted.
+
+Examples:
+
+- `ghx pr impact 12 13 -R owner/repo`: Classify current and historical PRs
+
+Schema: `ghx pr impact --schema`.
 
 ## ghx pr land
 
@@ -491,7 +535,7 @@ Post a review: verdict, inline findings in the diff, hidden blocks, pinned to th
 
 write, single document, timeout 1m (max 5m).
 
-Write {verdict, summary, scope?, findings[]} with your file tool and pass --input review.json. A finding goes inline only inside a diff hunk (else in the body, FINDING_NOT_INLINE). On your own PR the verdict posts as COMMENT (VERDICT_DOWNGRADED). --expect-head pins the head (HEAD_MOVED).
+Write {verdict, summary, scope?, findings[]} with your file tool and pass --input review.json. A finding goes inline only inside a diff hunk (else in the body, FINDING_NOT_INLINE). On your own PR the verdict posts as COMMENT (VERDICT_DOWNGRADED). source optionally identifies the reviewer/check. A finding without path and line requires evidence {source, quote, url?} and goes in the review body with its own id. --expect-head pins the head (HEAD_MOVED).
 
 Flags:
 

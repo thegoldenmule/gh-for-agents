@@ -17,6 +17,15 @@ function flagLine(g: (typeof GLOBAL_FLAGS)[number]): string {
   return `${g.flag}${alias}${value}: ${g.description}`;
 }
 
+/** Keep the global command index compact; command/group help retain the full summary. */
+function indexSummary(summary: string): string {
+  const chars = [...summary];
+  if (chars.length <= 72) return summary;
+  const prefix = chars.slice(0, 71).join('');
+  const boundary = prefix.lastIndexOf(' ');
+  return `${boundary > 40 ? prefix.slice(0, boundary) : prefix}…`;
+}
+
 export function globalHelp(specs: readonly AnyCommandSpec[], version: string): Record<string, unknown> {
   // A `timeout: null` command has no deadline and rejects --timeout; say so where the flag is listed.
   const noDeadline = specs.filter((s) => s.timeout === null).map(commandName);
@@ -42,7 +51,7 @@ export function globalHelp(specs: readonly AnyCommandSpec[], version: string): R
     commands: Object.fromEntries(
       [...specs.map((s) => ({ name: commandName(s), kind: s.kind, summary: s.summary })), ...BUILTINS].map((c) => [
         c.name,
-        `${c.kind}: ${c.summary}`,
+        `${c.kind}: ${indexSummary(c.summary)}`,
       ]),
     ),
     next: 'ghx <command> --help | --schema; ghx doctor checks setup',

@@ -19,6 +19,7 @@ import {
 } from '../../policy/merge.ts';
 import type { CiSummary } from '../../schemas/ci.ts';
 import type { Warning } from '../../schemas/common.ts';
+import { type CheckExclusion, excludeSelfCheck } from '../check/self.ts';
 import { buildCiSummary, type CiSummaryConfig, COMPARE_BUDGET_MS } from '../ci-summary.ts';
 import { fetchPrSnapshot, MERGEABLE_BUDGET_MS, type PrSnapshot, type PrSnapshotConfig } from '../snapshot/index.ts';
 import { backoffDelays } from '../snapshot/mergeable.ts';
@@ -53,7 +54,9 @@ export interface LoadPrStatusOptions {
    */
   deadline?: number | undefined;
   request?: MergeRequest;
-  scope?: 'full' | 'ci-gate';
+  scope?: 'full' | 'ci-gate' | 'repository-gate';
+  /** CI’s exact Actions job id and run id, never a check-name glob. */
+  selfCheck?: { checkId: number; runId: number };
   /** Baseline names ci wait has aged out itself (buildCiSummary's agedOut); default: the grace rule. */
   agedOut?: readonly string[];
   /** Where `config` was read, named by the CI_PENDING blocker. */
@@ -69,6 +72,7 @@ export interface PrStatusState {
   evaluation: MergeEvaluation;
   /** Snapshot, block, fold, CI and policy warnings, in that order. */
   warnings: Warning[];
+  excludedChecks: CheckExclusion[];
 }
 
 /** Kept back from `deadline` for what follows the comparison (key steps, the policy) and the output. */
@@ -90,7 +94,7 @@ function mergeableBudget(o: LoadPrStatusOptions): number | undefined {
 
 export async function loadPrStatus(o: LoadPrStatusOptions): Promise<PrStatusState> {
   const mergeableBudgetMs = mergeableBudget(o);
-  const snapshot = await fetchPrSnapshot({
+  let snapshot = await fetchPrSnapshot({
     gh: o.gh,
     clock: o.clock,
     ...(o.signal ? { signal: o.signal } : {}),
@@ -101,6 +105,25 @@ export async function loadPrStatus(o: LoadPrStatusOptions): Promise<PrStatusStat
     ...(mergeableBudgetMs !== undefined ? { mergeableBudgetMs } : {}),
     blockOnSeverity: o.config.merge.blockOnSeverity,
   });
+  const excludedChecks: CheckExclusion[] = [];
+  if (o.scope === 'repository-gate') {
+    excludedChecks.push(
+      { code: 'AUTHOR_NOT_VIEWER', reason: 'CI evaluates repository gates, not the merging user’s identity.' },
+      { code: 'NO_MERGE_PERMISSION', reason: 'The read-only CI token does not perform a merge.' },
+    );
+    if (o.selfCheck) {
+      const excluded = excludeSelfCheck(snapshot, o.selfCheck.checkId, o.selfCheck.runId);
+      snapshot = excluded.snapshot;
+      excludedChecks.push(excluded.exclusion);
+      if (snapshot.merge.mergeStateStatus === 'BLOCKED') {
+        excludedChecks.push({
+          code: 'BLOCKED_BY_PROTECTION',
+          reason:
+            'GitHub enforces aggregate protection readiness; its BLOCKED state may include this exact running gate. Approvals, conflicts, other CI and ghx policy are evaluated independently.',
+        });
+      }
+    }
+  }
   const ciWarnings: Warning[] = [];
   const compareBudgetMs =
     o.deadline === undefined
@@ -121,6 +144,7 @@ export async function loadPrStatus(o: LoadPrStatusOptions): Promise<PrStatusStat
     ...(o.agedOut ? { agedOut: o.agedOut } : {}),
     ...(o.expectedDefs ? { expectedDefs: o.expectedDefs } : {}),
     warn: (w) => ciWarnings.push(w),
+    ...(o.scope === 'repository-gate' ? { freshRequired: true } : {}),
   });
   const evaluation = evaluateMerge({
     snapshot,
@@ -132,6 +156,7 @@ export async function loadPrStatus(o: LoadPrStatusOptions): Promise<PrStatusStat
     ...(o.request ? { request: o.request } : {}),
     now: o.clock.now(),
     ...(o.scope ? { scope: o.scope } : {}),
+    ...(excludedChecks.some((e) => e.code === 'CI_SELF_CHECK') ? { selfCheckExcluded: true } : {}),
     ...(o.configSource
       ? { configOrigin: { label: sourceLabel(o.configSource), details: describeSource(o.configSource) } }
       : {}),
@@ -141,6 +166,7 @@ export async function loadPrStatus(o: LoadPrStatusOptions): Promise<PrStatusStat
     ci: summary,
     ciFacts: facts,
     evaluation,
+    excludedChecks,
     warnings: [
       ...snapshot.warnings,
       ...snapshot.meta.warnings,
