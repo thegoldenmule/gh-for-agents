@@ -6,6 +6,14 @@ import type { Warning } from '../../schemas/common.ts';
 import type { PrStatusState } from './compose.ts';
 import type { PrMeta, PrStatusOutput } from './schema.ts';
 
+/** The block's data as an object, or null when it is present but not one. */
+function dataOf(b: PrBlockRead): Record<string, unknown> | null {
+  if (b.data === undefined) return {};
+  return b.data !== null && typeof b.data === 'object' && !Array.isArray(b.data)
+    ? { ...(b.data as Record<string, unknown>) }
+    : null;
+}
+
 export function prMetaOf(b: PrBlockRead): PrMeta {
   return {
     id: b.id,
@@ -20,7 +28,28 @@ export function prMetaOf(b: PrBlockRead): PrMeta {
     revertWith: [...(b.revertWith ?? [])],
     testing: b.testing,
     refs: b.refs ?? {},
+    data: dataOf(b) ?? {},
   };
+}
+
+/**
+ * meta with the trust gate on data (08 §1): the PR body block is not trust-gated like comments, and a fork
+ * author could otherwise hand instructions to a coordinating agent through it.
+ */
+export function gatedMeta(b: PrBlockRead, author: { login: string; association: string }, trusted: boolean) {
+  const meta = prMetaOf(b);
+  const warnings: Warning[] = [];
+  const data = dataOf(b);
+  if (data === null) {
+    warnings.push({ code: 'DATA_INVALID', message: "The block's data is not an object; meta.data reads as {}." });
+  } else if (!trusted && Object.keys(data).length > 0) {
+    meta.data = {};
+    warnings.push({
+      code: 'UNTRUSTED_DATA',
+      message: `meta.data omitted: the PR author ${author.login} (${author.association}) is not trusted (trust.associations).`,
+    });
+  }
+  return { meta, warnings };
 }
 
 export function metaErrorOf(m: PrBlockResult): PrStatusOutput['metaError'] {
@@ -38,6 +67,7 @@ export function statusOutput(s: PrStatusState, o: StatusOutputOptions): PrStatus
   const snap = s.snapshot;
   const meta = snap.meta;
   const f = snap.feedback;
+  const gated = meta.status === 'ok' ? gatedMeta(meta.block, snap.author, snap.authorTrusted === true) : null;
   return {
     ref: snap.ref,
     url: snap.url,
@@ -56,7 +86,7 @@ export function statusOutput(s: PrStatusState, o: StatusOutputOptions): PrStatus
       structured: meta.status === 'ok',
       drift: meta.status === 'ok' ? prBodyDrift(snap.body, meta.block, { footer: o.footer }, snap.title) : [],
     },
-    meta: meta.status === 'ok' ? prMetaOf(meta.block) : null,
+    meta: gated?.meta ?? null,
     metaError: metaErrorOf(meta),
     merge: mergeStateOf(snap, s.evaluation),
     ci: s.ci,
@@ -64,7 +94,7 @@ export function statusOutput(s: PrStatusState, o: StatusOutputOptions): PrStatus
     openFindings: f.openFindings,
     preconditions: f.preconditions,
     stack: snap.stack,
-    warnings: [...(o.warnings ?? []), ...s.warnings],
+    warnings: [...(o.warnings ?? []), ...s.warnings, ...(gated?.warnings ?? [])],
     fetchedAt: snap.fetchedAt,
   };
 }

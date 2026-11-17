@@ -1,6 +1,7 @@
 // `ghx pr create --example` / `ghx pr edit --example`: a minimal input that validates in THIS repo (its real
 // component names), the rules the validator enforces in one screen, and what to run next.
 import { z } from 'zod';
+import { dataRulesSummary, requiredExample } from './data.ts';
 import type { CreateRulesConfig } from './rules.ts';
 import { DESCRIPTION_MAX_LINES, TITLE_MAX_CODE_POINTS } from './rules.ts';
 import { MAX_COMPONENTS, MAX_TESTING_ITEMS } from './schema.ts';
@@ -34,6 +35,7 @@ export function createRulesSummary(config: CreateRulesConfig): string[] {
     'revertPolicy: revert-safe|revert-with-followup|forward-fix-only (need revertNote)|coordinated (needs revertWith)',
     `components: up to ${MAX_COMPONENTS} names from .github/ghx.json; ghx adds the ones the diff touches${floors.length > 0 ? `; risk floors: ${floors.join(', ')}` : ''}${aliases.length > 0 ? `; aliases: ${aliases.join(', ')}` : ''}`,
     "optional: base (default branch), head (current branch), draft, refs {closes, related, stackedOn, …} ('#N' or 'owner/repo#N')",
+    dataRulesSummary(config),
   ];
 }
 
@@ -41,6 +43,7 @@ export function createRulesSummary(config: CreateRulesConfig): string[] {
 export function createExample(config: CreateRulesConfig): Record<string, unknown> {
   const component = exampleComponent(config);
   const type = config.title.types.includes('feat') ? 'feat' : (config.title.types[0] ?? 'feat');
+  const data = requiredExample(config, 'low');
   return {
     title: `${type}${component !== undefined ? `(${component})` : ''}: show a banner when a request is retried`,
     description: 'Requests retried after a transient failure now show a dismissable banner.',
@@ -48,6 +51,7 @@ export function createExample(config: CreateRulesConfig): Record<string, unknown
     risk: 'low',
     revertPolicy: 'revert-safe',
     ...(component !== undefined ? { components: [component] } : {}),
+    ...(Object.keys(data).length > 0 ? { data } : {}),
   };
 }
 
@@ -78,6 +82,7 @@ export function editExampleOutput(config: CreateRulesConfig): {
       'A patch: only the fields to change, as in pr create (not head); arrays replace',
       '{"draft": false} or {"base": "main"} alone works on any PR, including ones ghx did not open; ghx pr ready <pr> toggles draft',
       'Other fields on a PR without a ghx block need "adopt": true and every pr create field (ghx pr create --example)',
+      'data merges by key: {"data": {"k": "v"}} sets k, {"data": {"k": null}} deletes it, {"data": null} deletes every key',
       ...createRulesSummary(config),
     ],
     next: ['Write example to patch.json with your file tool, edit it, then run: ghx pr edit <pr> --input patch.json'],

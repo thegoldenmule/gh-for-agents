@@ -28,6 +28,7 @@ test('prefault populates every section from the minimal config (zod 4 .prefault,
       descriptionMaxChars: 500,
     },
     create: { requirePassingTest: true },
+    data: { fields: {} },
     merge: {
       method: 'merge',
       allowedMethods: ['merge'],

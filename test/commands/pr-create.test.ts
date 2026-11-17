@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { buildGraphqlArgs } from '../../src/gh/graphql.ts';
+import { readPrBlock } from '../../src/meta/schemas.ts';
 import { buildPreflightQuery, preflightVars } from '../../src/pr/create/preflight.ts';
 import { EXIT } from '../contract/exit-table.ts';
 import { FakeClock } from '../helpers/fake-clock.ts';
@@ -13,7 +14,7 @@ import { FakeGh } from '../helpers/fake-gh.ts';
 import { gitCheckout } from '../helpers/fake-git.ts';
 import { argvKey, GH_FIXTURE_ROOT } from '../helpers/fixture-match.ts';
 import { runInProcess } from '../helpers/harness.ts';
-import { fail, HEAD_OID, INPUT, localCheckout, PARENT_OID, scene, sequence } from './pr-create-scene.ts';
+import { CONFIG, fail, HEAD_OID, INPUT, localCheckout, PARENT_OID, scene, sequence } from './pr-create-scene.ts';
 
 const ARGV = ['pr', 'create', '-R', 'octo/demo', '--input', '-'];
 const run = (gh: FakeGh, input: unknown = INPUT, extra: string[] = [], o: Parameters<typeof runInProcess>[1] = {}) =>
@@ -416,4 +417,22 @@ test('smoke/pr-create: the example reaches the halt, and the fixture query match
   const repo = { host: 'github.com', owner: 'octo', name: 'demo' };
   const built = buildGraphqlArgs(buildPreflightQuery([]), preflightVars(repo, 'main', 'feat/retry-banner'), { repo });
   assert.equal(argvKey(fixture.argv), argvKey(built.args), 'regenerate the pr-create fixtures: the query changed');
+});
+
+test('08: data goes into the pr block; a declared required field is checked with the rest', async () => {
+  const s = scene();
+  const r = await run(s.gh, { ...INPUT, data: { ticket: 'ENG-12', flags: ['a', 'b'] } });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  const block = readPrBlock(String((s.posted[0] as Record<string, unknown>).body));
+  assert.equal(block.status, 'ok');
+  if (block.status === 'ok') assert.deepEqual(block.block.data, { ticket: 'ENG-12', flags: ['a', 'b'] });
+
+  const config = { ...CONFIG, data: { fields: { ticket: { type: 'string', pattern: '^ENG-\\d+$', required: true } } } };
+  const bad = scene({ config });
+  const r2 = await run(bad.gh, { ...INPUT, risk: 'nope', data: { tikcet: 'ENG-12' } });
+  assert.equal(r2.exitCode, EXIT.USAGE, r2.stdout);
+  const issues = (r2.json.error as { details: { issues: { path: string; code: string }[] } }).details.issues;
+  assert.ok(issues.some((i) => i.path === 'risk'));
+  assert.ok(issues.some((i) => i.path === 'data.ticket' && i.code === 'data.required'));
+  bad.gh.expectNoMutations();
 });

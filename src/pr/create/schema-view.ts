@@ -2,12 +2,38 @@
 // validator enforces, and — in a repo with .github/ghx.json — its component names and a valid example.
 // The derived JSON Schema (single and batch shapes, ~12.5k chars) stays in `ghx schema --all`.
 import { defaultConfig, type GhxConfig } from '../../config/schema.ts';
+import { MAX_DATA_ITEMS, MAX_DATA_KEYS, MAX_DATA_STRING } from '../../schemas/data.ts';
 import { RevertPolicy, Risk, TestingKind, TestingResult } from '../../schemas/pr.ts';
+import { fieldShape } from './data.ts';
 import { createExample, createRulesSummary } from './example.ts';
 import { TITLE_MAX_CODE_POINTS } from './rules.ts';
 import { MAX_COMPONENTS, MAX_TESTING_ITEMS } from './schema.ts';
 
 const REF = { type: 'string' };
+
+const SCALAR = { type: ['string', 'number', 'boolean'], maxLength: MAX_DATA_STRING };
+
+/** `data`: the declared fields (08 §1), and any other key with a generic value. */
+function dataView(config: GhxConfig): Record<string, unknown> {
+  const declared = Object.entries(config.data.fields);
+  const required = declared.filter(([, f]) => f.required === true).map(([n]) => n);
+  return {
+    type: 'object',
+    maxProperties: MAX_DATA_KEYS,
+    propertyNames: { pattern: '^[a-z][a-zA-Z0-9_-]{0,39}$' },
+    ...(declared.length > 0
+      ? { properties: Object.fromEntries(declared.map(([n, f]) => [n, { description: fieldShape(f) }])) }
+      : {}),
+    ...(required.length > 0 ? { required } : {}),
+    additionalProperties: {
+      anyOf: [
+        SCALAR,
+        { type: 'array', items: SCALAR, maxItems: MAX_DATA_ITEMS },
+        { type: 'object', additionalProperties: SCALAR },
+      ],
+    },
+  };
+}
 
 /** Types and limits only; `rules` says what each field must hold. */
 function inputView(config: GhxConfig): Record<string, unknown> {
@@ -50,6 +76,7 @@ function inputView(config: GhxConfig): Record<string, unknown> {
         type: 'object',
         properties: { closes: refs, related: refs, stackedOn: REF, splitFrom: REF, supersedes: refs, reverts: REF },
       },
+      data: dataView(config),
     },
   };
 }

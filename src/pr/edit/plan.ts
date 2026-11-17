@@ -41,6 +41,7 @@ const CONTENT_KEYS = [
   'revertNote',
   'revertWith',
   'refs',
+  'data',
 ] as const;
 
 /** The content fields of a (lenient) block, without unknown extras. */
@@ -56,15 +57,38 @@ export function blockContent(block: PrBlockRead): Record<string, unknown> {
  */
 export type DriftField = 'title' | 'description' | 'appended';
 
-/** `{...block, ...patch}` with base and head from the PR (02 §3); arrays and refs replace whole. */
+/**
+ * `{...block, ...patch}` with base and head from the PR (02 §3); arrays and refs replace whole. `data`
+ * merges by key (08 §1): a key set to null is deleted, and `data: null` deletes every key.
+ */
 export function mergeEdit(
   block: Record<string, unknown>,
   pr: Pick<PrSnapshot, 'baseRefName' | 'headRefName'>,
   patch: Omit<PrEditInput, 'adopt' | 'draft'>,
 ): Record<string, unknown> {
   const merged: Record<string, unknown> = { ...block, base: pr.baseRefName, head: pr.headRefName };
-  for (const [k, v] of Object.entries(patch)) if (v !== undefined) merged[k] = v;
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) continue;
+    if (k === 'data') {
+      const data = mergeData(merged.data, v as PrEditInput['data']);
+      if (data === undefined) delete merged.data;
+      else merged.data = data;
+    } else merged[k] = v;
+  }
   return merged;
+}
+
+/** The block's data with a patch merged in (RFC 7396, one level); undefined when no key is left. */
+export function mergeData(have: unknown, patch: PrEditInput['data']): Record<string, unknown> | undefined {
+  if (patch === null || patch === undefined) return undefined;
+  // A stored value that is not an object is replaced whole; structureIssues reports it if the patch keeps nothing.
+  const out: Record<string, unknown> =
+    have !== null && typeof have === 'object' && !Array.isArray(have) ? { ...(have as Record<string, unknown>) } : {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) delete out[k];
+    else out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 export interface EditEnv {

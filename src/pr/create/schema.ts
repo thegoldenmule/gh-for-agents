@@ -5,6 +5,7 @@
 // JSON Schema without a config (test/registry.test.ts). No transforms, for the same reason.
 import { z } from 'zod';
 import { OneLine, PrRef } from '../../schemas/common.ts';
+import { Data, DataPatch } from '../../schemas/data.ts';
 import { ComponentName, Refs, RevertPolicy, Risk, TestingItem } from '../../schemas/pr.ts';
 
 export const MAX_TESTING_ITEMS = 10;
@@ -32,19 +33,29 @@ export const PrCreateInput = z
     head: z.string().min(1).max(255),
     draft: z.boolean().optional(),
     refs: Refs.optional(),
+    data: Data.optional(),
   })
   .describe('A structured PR (02 §2.1)');
 
 export type PrCreateInput = z.infer<typeof PrCreateInput>;
 
 /**
- * A `pr edit` patch (02 §3): any create field except `head`, plus `adopt`. Arrays replace on merge. The
- * merged object is validated with the full createRules (and the network rules), so this schema is
- * structure only, like PrCreateInput.
+ * The fields of a `pr edit` patch (02 §3): any create field except `head`, plus `adopt`. Arrays replace on
+ * merge; `data` merges by key (08 §1). The merged object is validated with the full createRules (and the
+ * network rules), so this schema is structure only, like PrCreateInput.
  */
-export const PrEditInput = PrCreateInput.omit({ head: true })
+export const PrEditFields = PrCreateInput.omit({ head: true })
   .partial()
-  .extend({ adopt: z.boolean().optional().describe('Adopt a PR that has no ghx block (needs every field)') })
-  .refine((p) => Object.keys(p).length > 0, 'empty patch: give at least one field');
+  .extend({
+    data: DataPatch.nullable()
+      .optional()
+      .describe("Merged into the PR's data by key: a key set to null is deleted; null deletes every key"),
+    adopt: z.boolean().optional().describe('Adopt a PR that has no ghx block (needs every field)'),
+  });
+
+export const PrEditInput = PrEditFields.refine(
+  (p) => Object.keys(p).length > 0,
+  'empty patch: give at least one field',
+);
 
 export type PrEditInput = z.infer<typeof PrEditInput>;

@@ -53,6 +53,7 @@ test('a green PR costs 2 GraphQL calls (Q1 + Q2) and maps every field', async ()
   assert.equal(env.fake.calls.length, 2);
   assert.equal(s.ref, 'powerhouse-inc/powerhouse#3301');
   assert.deepEqual(s.author, { login: 'thegoldenmule', isViewer: true, isBot: false, association: 'MEMBER' });
+  assert.equal(s.authorTrusted, true, 'a MEMBER passes the default trust gate (08: meta.data)');
   assert.deepEqual(s.base, { ref: 'main', sha: s.base.sha, isDefault: true });
   assert.equal(s.head.sha, HEAD);
   assert.deepEqual(s.merge, {

@@ -52,6 +52,7 @@ export function toPrBlock(input: BlockFields, meta: PrBlockMeta): PrBlockData {
   // An empty list means "none" (a `pr edit` patch clears it with []); the strict block needs ≥1 or absent.
   if (input.revertWith !== undefined && input.revertWith.length > 0) block.revertWith = input.revertWith;
   if (input.refs !== undefined) block.refs = input.refs;
+  if (input.data !== undefined && Object.keys(input.data).length > 0) block.data = input.data;
   return block;
 }
 

@@ -11,16 +11,14 @@ import { repoSlug, sameRepo } from '../../gh/types.ts';
 import { lenientFields, normalizeInput, structureIssues } from '../../pr/create/check.ts';
 import { EDIT_EXAMPLE_HINT, ExampleFields, editExampleOutput } from '../../pr/create/example.ts';
 import { validationError } from '../../pr/create/rules.ts';
-import { PrCreateInput, type PrEditInput } from '../../pr/create/schema.ts';
+import { PrEditFields, type PrEditInput } from '../../pr/create/schema.ts';
 import { planEdit } from '../../pr/edit/plan.ts';
 import { applyEdit } from '../../pr/edit/submit.ts';
 import { PrRef } from '../../schemas/common.ts';
 
 // Every patch field arrives through --input only (02 §0: prose is JSON, never flags). The runner accepts
 // any value and any extra key; the handler checks them (with the merged object's rules) in one pass.
-const PatchSchema = PrCreateInput.omit({ head: true })
-  .partial()
-  .extend({ adopt: z.boolean().optional().describe('Adopt a PR that has no ghx block (needs every field)') });
+const PatchSchema = PrEditFields;
 const PATCH_FIELDS = Object.keys(PatchSchema.shape);
 
 const Input = z

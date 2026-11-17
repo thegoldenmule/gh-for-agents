@@ -8,6 +8,7 @@ import { BotsSection } from './sections/bots.ts';
 import { CiSection } from './sections/ci.ts';
 import { ComponentsRecord, ComponentsSection } from './sections/components.ts';
 import { CreateSection } from './sections/create.ts';
+import { DataSection } from './sections/data.ts';
 import { MergeSection } from './sections/merge.ts';
 import { RenderSection } from './sections/render.ts';
 import { TitleSection } from './sections/title.ts';
@@ -23,6 +24,7 @@ export const ConfigSchema = z.strictObject({
   title: TitleSection,
   render: RenderSection,
   create: CreateSection,
+  data: DataSection,
   merge: MergeSection,
   ci: CiSection,
   trust: TrustSection,

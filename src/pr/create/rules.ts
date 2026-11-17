@@ -10,13 +10,14 @@ import { GhxError, type IssueDetail } from '../../core/errors.ts';
 import { RISK_ORDER, riskRank } from '../../schemas/pr.ts';
 import { matchesGlob } from '../../util/glob.ts';
 import { componentList, suggestComponent } from './components.ts';
+import { dataRules } from './data.ts';
 import { MAX_COMPONENTS, type PrCreateInput } from './schema.ts';
 
 export const TITLE_MAX_CODE_POINTS = 72;
 export const DESCRIPTION_MAX_LINES = 3;
 
 /** The config sections the rules read. A full GhxConfig satisfies it. */
-export type CreateRulesConfig = Pick<GhxConfig, 'components' | 'title' | 'render' | 'create'>;
+export type CreateRulesConfig = Pick<GhxConfig, 'components' | 'title' | 'render' | 'create' | 'data'>;
 
 export interface CreateRuleContext {
   config: CreateRulesConfig;
@@ -562,6 +563,7 @@ export function partialRules(
     ...revertRules(input),
     ...componentRules(input, ctx),
     ...branchRules(input, ctx),
+    ...dataRules(input, ctx.config),
   ];
 }
 

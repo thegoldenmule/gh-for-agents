@@ -451,3 +451,32 @@ test('the smoke/pr-edit scenario replays the example to the PATCH halt under --d
   assert.equal(r.json.preview.rev, 2);
   gh.expectNoMutations();
 });
+
+test('08: data merges by key; a key set to null is deleted; the block and body carry the result', async () => {
+  const s = editScene({ pr: { body: bodyOf({ ...CONTENT, data: { ticket: 'ENG-1', stale: true } }) } });
+  const r = await run(s.gh, { data: { stale: null, rollout: 'canary' } });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  const block = blockOf(String(s.patched[0]?.body));
+  assert.deepEqual(block.data, { ticket: 'ENG-1', rollout: 'canary' });
+  assert.equal(r.json.rev, 2);
+});
+
+test('08: data: null deletes every key; the block omits data', async () => {
+  const s = editScene({ pr: { body: bodyOf({ ...CONTENT, data: { ticket: 'ENG-1' } }) } });
+  const r = await run(s.gh, { data: null });
+  assert.equal(r.exitCode, EXIT.OK, r.stdout);
+  assert.ok(!('data' in blockOf(String(s.patched[0]?.body))));
+});
+
+test('08: an edit cannot drop a field .github/ghx.json requires', async () => {
+  const config = { ...CONFIG, data: { fields: { ticket: { type: 'string', required: true } } } };
+  const s = editScene({ config, pr: { body: bodyOf({ ...CONTENT, data: { ticket: 'ENG-1' } }) } });
+  const r = await run(s.gh, { data: { ticket: null } });
+  assert.equal(r.exitCode, EXIT.USAGE, r.stdout);
+  const issues = (r.json.error as { details: { issues: { path: string; code: string }[] } }).details.issues;
+  assert.deepEqual(
+    issues.map((i) => [i.path, i.code]),
+    [['data.ticket', 'data.required']],
+  );
+  s.gh.expectNoMutations();
+});

@@ -13,7 +13,7 @@ import { MAX_COMMIT_CHECKS, resolveFacts } from '../../feedback/facts.ts';
 import { type FeedbackInput, type FoldResult, foldFeedback } from '../../feedback/fold.ts';
 import type { RawFeedback } from '../../feedback/raw.ts';
 import type { TrustConfig } from '../../feedback/trust.ts';
-import { normalizeAssociation } from '../../feedback/trust.ts';
+import { normalizeAssociation, trustOf } from '../../feedback/trust.ts';
 import type { Gh } from '../../gh/index.ts';
 import { formatPrRef } from '../../gh/refs.ts';
 import type { RepoRef } from '../../gh/types.ts';
@@ -48,6 +48,11 @@ export interface PrSnapshot {
   title: string;
   body: string;
   author: Author;
+  /**
+   * Whether the PR author passes the trust gate (02 §9.4), so `pr status` reports the body block's agent
+   * data (08 §1). Optional so hand-built snapshots stay valid; absent counts as untrusted.
+   */
+  authorTrusted?: boolean;
   state: 'OPEN' | 'CLOSED' | 'MERGED';
   draft: boolean;
   createdAt: string;
@@ -284,6 +289,7 @@ export async function fetchPrSnapshot(o: FetchPrSnapshotOptions): Promise<PrSnap
     title: pr.title,
     body: pr.body,
     author: authorOf(q1, o.config.bots),
+    authorTrusted: trustOf(pr.author?.login ?? '', pr.authorAssociation, o.config.trust, pr.author).trusted,
     state: closedMidRetry ?? pr.state,
     draft: pr.isDraft,
     createdAt: pr.createdAt,

@@ -18,6 +18,7 @@ import {
   Sha,
   type Warning,
 } from '../schemas/common.ts';
+import { Data } from '../schemas/data.ts';
 import {
   CONDITION_TYPES,
   CommentKind,
@@ -71,6 +72,8 @@ export const PrBlock = z.strictObject({
   revertNote: Text.optional(),
   revertWith: z.array(PrRef).min(1).max(10).optional(),
   refs: Refs.optional(),
+  /** Agent data (08 §1); absent when empty. */
+  data: Data.refine((d) => Object.keys(d).length > 0, 'empty data is omitted').optional(),
 });
 
 export const ReviewBlock = z.strictObject({
@@ -145,6 +148,8 @@ export const PrBlockRead = z.looseObject({
   revertNote: z.string().optional(),
   revertWith: z.array(PrRef).optional(),
   refs: RefsRead.optional(),
+  /** Agent data (08 §1). Any value: a malformed one never invalidates the block (pr status: DATA_INVALID). */
+  data: z.unknown().optional(),
 });
 
 export const ReviewBlockRead = z.looseObject({

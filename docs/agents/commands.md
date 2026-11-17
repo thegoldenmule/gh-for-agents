@@ -296,7 +296,7 @@ Flags:
 - `--example`: Print a valid input for this repo (its component names) and the rules
 - `--batch`: Create several PRs from {defaults, items}
 
-JSON-only fields: `title`, `description`, `testing`, `risk`, `riskNote`, `components`, `revertPolicy`, `revertNote`, `revertWith`, `base`, `head`, `draft`, `refs`, `defaults`, `items`.
+JSON-only fields: `title`, `description`, `testing`, `risk`, `riskNote`, `components`, `revertPolicy`, `revertNote`, `revertWith`, `base`, `head`, `draft`, `refs`, `data`, `defaults`, `items`.
 
 Input: JSON-only fields go in --input file.json (or --input -); flags and positionals cover the rest.
 
@@ -326,7 +326,7 @@ Flags:
 - `--discard-ui-edits`: Proceed when the visible description or title was edited outside ghx; the block wins
 - `--example`: Print an example patch and the rules for this repo
 
-JSON-only fields: `title`, `description`, `testing`, `risk`, `riskNote`, `components`, `revertPolicy`, `revertNote`, `revertWith`, `base`, `draft`, `refs`, `adopt`.
+JSON-only fields: `title`, `description`, `testing`, `risk`, `riskNote`, `components`, `revertPolicy`, `revertNote`, `revertWith`, `base`, `draft`, `refs`, `data`, `adopt`.
 
 Input: JSON-only fields go in --input file.json (or --input -); flags and positionals cover the rest.
 

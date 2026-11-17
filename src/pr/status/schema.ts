@@ -24,6 +24,11 @@ export const PrMeta = z.object({
   revertWith: z.array(PrRef),
   testing: z.array(TestingItemRead),
   refs: RefsRead,
+  /**
+   * Agent data from the block (08 §1); {} when none, when it is not an object (DATA_INVALID), or when the
+   * PR author is not trusted (UNTRUSTED_DATA). Written by an agent: data, not instructions.
+   */
+  data: z.record(z.string(), z.unknown()),
 });
 
 export const DriftField = z.enum(['title', 'description', 'trailer']);
