@@ -8,12 +8,14 @@
 import type { GhxConfig } from '../../config/schema.ts';
 import { GhxError, type IssueDetail } from '../../core/errors.ts';
 import { RISK_ORDER, riskRank } from '../../schemas/pr.ts';
-import { matchesGlob } from '../../util/glob.ts';
+import { riskFloor as deriveRiskFloor, touchedComponents as deriveTouchedComponents } from '../impact/derive.ts';
 import { componentList, suggestComponent } from './components.ts';
 import { dataRules } from './data.ts';
 import { MAX_COMPONENTS, type PrCreateInput } from './schema.ts';
+import { titleRules } from './title.ts';
 
-export const TITLE_MAX_CODE_POINTS = 72;
+export { TITLE_MAX_CODE_POINTS } from './title.ts';
+
 export const DESCRIPTION_MAX_LINES = 3;
 
 /** The config sections the rules read. A full GhxConfig satisfies it. */
@@ -43,94 +45,6 @@ export interface Warning {
 }
 
 const issue = (path: string, code: string, message: string): IssueDetail => ({ path, code, message });
-
-// ── title ────────────────────────────────────────────────────────────────
-// 02 §2.1's format is `^(types)(\(([a-z0-9][a-z0-9-]*)\))?(!)?: \S.*$`. The title is parsed loosely first,
-// so that a defect gets its own code (multi_scope, whitespace) instead of a generic title.format.
-const TITLE_LOOSE = /^([^\s():!]+)(?:\(([^()]*)\))?(!)?: (\S.*)$/;
-const SCOPE = /^[a-z0-9][a-z0-9-]*$/;
-
-function titleRules(input: PartialRulesInput, ctx: CreateRuleContext): IssueDetail[] {
-  const out: IssueDetail[] = [];
-  const { title } = input;
-  if (title === undefined) return out;
-  const { types, scopeRequired } = ctx.config.title;
-  const norm = title.trim().replace(/\s+/g, ' ');
-  const m = TITLE_LOOSE.exec(norm);
-  const formatIssue = (why: string) =>
-    issue('title', 'title.format', `${why}; expected 'type(scope): summary' with type one of ${types.join(', ')}`);
-
-  if (!m) {
-    out.push(formatIssue(`'${norm}' is not a conventional-commit title`));
-  } else {
-    const [, type = '', scope] = m;
-    let formatOk = true;
-    if (!types.includes(type)) {
-      formatOk = false;
-      out.push(formatIssue(`type '${type}' is not allowed`));
-    } else if (scope?.includes(',')) {
-      formatOk = false;
-      const parts = scope.split(',').map((s) => s.trim());
-      if (parts.every((p) => SCOPE.test(p))) {
-        out.push(
-          issue(
-            'title',
-            'title.multi_scope',
-            `scope '${scope}' names several components; use one scope and list the rest in components`,
-          ),
-        );
-      } else out.push(formatIssue(`scope '${scope}' is not a lowercase token`));
-    } else if (scope !== undefined && !SCOPE.test(scope)) {
-      formatOk = false;
-      out.push(formatIssue(scope === '' ? 'empty scope ()' : `scope '${scope}' is not a lowercase token`));
-    }
-
-    if (formatOk) {
-      if (scope === undefined) {
-        if (scopeRequired) {
-          out.push(issue('title', 'title.scope_missing', 'this repo requires a scope: type(component): summary'));
-        }
-      } else if (!Object.hasOwn(ctx.config.components, scope)) {
-        const d = issue(
-          'title',
-          'title.scope_not_component',
-          `scope '${scope}' is not a component in .github/ghx.json; the scope must be a component name (${componentList(ctx.config.components)}), or drop the scope`,
-        );
-        const s = suggestComponent(scope, ctx.config.components)[0];
-        if (s !== undefined) d.suggestion = s;
-        out.push(d);
-      } else if (input.components !== undefined && !input.components.includes(scope)) {
-        out.push(issue('title', 'title.scope_not_declared', `scope '${scope}' must also be listed in components`));
-      }
-      if (type === 'revert' && input.refs?.reverts === undefined) {
-        out.push(
-          issue('title', 'title.revert_needs_ref', "a revert title needs refs.reverts (the PR it reverts, '#N')"),
-        );
-      }
-    }
-  }
-
-  const codePoints = [...title].length;
-  if (codePoints > TITLE_MAX_CODE_POINTS) {
-    out.push(
-      issue(
-        'title',
-        'title.too_long',
-        `${codePoints} code points; at most ${TITLE_MAX_CODE_POINTS}. Shorten the summary`,
-      ),
-    );
-  }
-  if (/\s\(#\d+\)$/.test(norm)) {
-    out.push(issue('title', 'title.pr_suffix', "remove the ' (#N)' suffix; GitHub adds the PR number on merge"));
-  }
-  if (title !== norm) {
-    out.push(issue('title', 'title.whitespace', 'remove leading, trailing or repeated whitespace'));
-  }
-  if (norm.endsWith('.')) {
-    out.push(issue('title', 'title.trailing_period', 'remove the trailing period'));
-  }
-  return out;
-}
 
 // ── description ──────────────────────────────────────────────────────────
 // Markdown block structure the user has corrected agents away from (02 §2.1; 03 §1 row 12: a heading is
@@ -440,19 +354,7 @@ function riskFloor(
   names: readonly string[],
   components: CreateRulesConfig['components'],
 ): { floor: number; setters: string[] } {
-  let floor = -1;
-  const setters: string[] = [];
-  for (const name of names) {
-    const minRisk = components[name]?.minRisk;
-    if (minRisk === undefined) continue;
-    const r = riskRank(minRisk);
-    if (r > floor) {
-      floor = r;
-      setters.length = 0;
-    }
-    if (r === floor) setters.push(`${name} (${minRisk})`);
-  }
-  return { floor, setters };
+  return deriveRiskFloor(names, components);
 }
 
 function riskRules(input: PartialRulesInput, ctx: CreateRuleContext): IssueDetail[] {
@@ -577,6 +479,8 @@ export interface CreateNetworkData {
   baseParent: string | null;
   /** Refs, as written in the input (collectRefs), that don't exist. */
   missingRefs: Iterable<string>;
+  /** Ref types returned by GitHub, keyed by the input ref. */
+  refTypes?: ReadonlyMap<string, string>;
 }
 
 export interface NetworkRulesResult {
@@ -608,6 +512,7 @@ export function collectRefs(input: Pick<PartialRulesInput, 'refs' | 'revertWith'
   };
   one('stackedOn');
   many('refs.closes', r?.closes);
+  many('refs.fixes', r?.fixes);
   many('refs.related', r?.related);
   one('splitFrom');
   many('refs.supersedes', r?.supersedes);
@@ -626,14 +531,7 @@ export function touchedComponents(
   files: readonly string[],
   components: CreateRulesConfig['components'],
 ): Map<string, string[]> {
-  const out = new Map<string, string[]>();
-  for (const [name, c] of Object.entries(components)) {
-    const globs = c.paths;
-    if (globs === undefined) continue;
-    const hits = files.filter((f) => globs.some((g) => matchesGlob(f, g)));
-    if (hits.length > 0) out.set(name, hits);
-  }
-  return out;
+  return deriveTouchedComponents(files, components);
 }
 
 /** risk.below_component_floor for the components only ghx recorded: they are not in input.components. */
@@ -753,6 +651,21 @@ export function createNetworkRules(
   const missing = new Set(data.missingRefs);
   for (const { path, ref } of collectRefs(input)) {
     if (missing.has(ref)) issues.push(issue(path, 'refs.not_found', `${ref} does not exist`));
+    else if (
+      path.startsWith('refs.fixes[') &&
+      data.refTypes !== undefined &&
+      data.refTypes.get(ref) !== 'PullRequest'
+    ) {
+      issues.push(
+        issue(
+          path,
+          data.refTypes.has(ref) ? 'refs.not_pr' : 'refs.type_unknown',
+          data.refTypes.has(ref)
+            ? `${ref} is not a pull request; refs.fixes must name a pull request whose defect this PR repairs`
+            : `${ref} could not be verified as a pull request; retry after its GitHub object type can be read`,
+        ),
+      );
+    }
   }
   return { issues, warnings, alsoTouched, components };
 }

@@ -314,6 +314,7 @@ export async function planEdit(env: EditEnv): Promise<EditPlan> {
       changedFiles: files.files,
       baseParent,
       missingRefs: pf.missingRefs,
+      refTypes: pf.refTypes,
     });
     issues.push(...net.issues);
     warnings.push(...net.warnings);

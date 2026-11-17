@@ -74,7 +74,15 @@ function inputView(config: GhxConfig): Record<string, unknown> {
       draft: { type: 'boolean' },
       refs: {
         type: 'object',
-        properties: { closes: refs, related: refs, stackedOn: REF, splitFrom: REF, supersedes: refs, reverts: REF },
+        properties: {
+          closes: refs,
+          fixes: refs,
+          related: refs,
+          stackedOn: REF,
+          splitFrom: REF,
+          supersedes: refs,
+          reverts: REF,
+        },
       },
       data: dataView(config),
     },

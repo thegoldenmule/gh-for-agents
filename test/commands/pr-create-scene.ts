@@ -74,6 +74,8 @@ export interface SceneOptions {
   branches?: Record<string, BranchSpec>;
   /** Refs (as aliased in the query, e.g. 'r0', 'x1') that do not exist. */
   missingAliases?: string[];
+  /** GitHub object types by preflight alias; defaults to Issue locally and PullRequest remotely. */
+  refTypes?: Record<string, 'Issue' | 'PullRequest'>;
   files?: string[];
   aheadBy?: number;
   /** Replies to POST /pulls, in order (the last repeats). Default: a 201 echoing the request. */
@@ -161,8 +163,8 @@ export function scene(o: SceneOptions = {}): Scene {
       const value = gone
         ? null
         : alias.startsWith('r')
-          ? { __typename: 'Issue' }
-          : { issueOrPullRequest: { __typename: 'PullRequest' } };
+          ? { __typename: o.refTypes?.[alias] ?? 'Issue' }
+          : { issueOrPullRequest: { __typename: o.refTypes?.[alias] ?? 'PullRequest' } };
       if (alias.startsWith('r')) repository[alias] = value;
       else data[alias] = value;
       if (gone) {

@@ -14,7 +14,9 @@ export const MAX_COMPONENTS = 5;
 /** The fields of a PR create input, without the config-dependent rules. */
 export const PrCreateInput = z
   .strictObject({
-    title: z.string().describe('Conventional-commit title, ≤72 code points: type(scope): summary'),
+    title: z
+      .string()
+      .describe('Title matching the repo convention, ≤72 code points: type(scope): summary or KEY: summary'),
     description: z.string().describe('1–3 plain lines, ≤500 chars; no headings, lists, quotes, tables or fences'),
     testing: z.array(TestingItem).min(1).max(MAX_TESTING_ITEMS),
     risk: Risk,

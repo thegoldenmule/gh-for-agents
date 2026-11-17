@@ -19,6 +19,7 @@ test('prefault populates every section from the minimal config (zod 4 .prefault,
     version: 1,
     components: { x: {} },
     title: {
+      format: 'conventional',
       types: ['feat', 'fix', 'docs', 'refactor', 'perf', 'test', 'build', 'ci', 'chore', 'revert', 'style'],
       scopeRequired: false,
     },

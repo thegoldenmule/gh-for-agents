@@ -28,13 +28,15 @@ export function createRulesSummary(config: CreateRulesConfig): string[] {
     .map(([n, c]) => `${n} ≥ ${c.minRisk}`);
   const aliases = Object.entries(config.components).flatMap(([n, c]) => (c.aliases ?? []).map((a) => `${a} → ${n}`));
   return [
-    `title: 'type(scope): summary', ≤${TITLE_MAX_CODE_POINTS} chars, no trailing period; type one of ${config.title.types.join(', ')}; the scope is ${config.title.scopeRequired ? 'required and' : 'optional, and when given'} must be a component name`,
+    config.title.format === 'ticket'
+      ? `title: 'KEY: summary', key matching ${config.title.ticket?.pattern}; ≤${TITLE_MAX_CODE_POINTS} chars, no trailing period`
+      : `title: 'type(scope): summary', ≤${TITLE_MAX_CODE_POINTS} chars, no trailing period; type one of ${config.title.types.join(', ')}; the scope is ${config.title.scopeRequired ? 'required and' : 'optional, and when given'} must be a component name`,
     `description: 1–${DESCRIPTION_MAX_LINES} plain sentences, ≤${config.render.descriptionMaxChars} chars; no headings, lists, tables or footer (ghx renders the footer)`,
     `testing: 1–${MAX_TESTING_ITEMS} items {kind, command, result}; command is one plain command (no &&, |, ;, redirects), its directory goes in cwd; kind manual takes steps instead of a command; a result other than pass needs notes${config.create.requirePassingTest ? '; at least one must pass' : ''}`,
     'risk: trivial|low|medium|high; medium and high need riskNote',
     'revertPolicy: revert-safe|revert-with-followup|forward-fix-only (need revertNote)|coordinated (needs revertWith)',
     `components: up to ${MAX_COMPONENTS} names from .github/ghx.json; ghx adds the ones the diff touches${floors.length > 0 ? `; risk floors: ${floors.join(', ')}` : ''}${aliases.length > 0 ? `; aliases: ${aliases.join(', ')}` : ''}`,
-    "optional: base (default branch), head (current branch), draft, refs {closes, related, stackedOn, …} ('#N' or 'owner/repo#N')",
+    "optional: base (default branch), head (current branch), draft, refs {closes, fixes, related, stackedOn, …} ('#N' or 'owner/repo#N'); fixes names PRs whose defects this PR repairs",
     dataRulesSummary(config),
     `body: ghx renders it from ${config.render.prBody !== undefined ? "this repo's template (render.prBody)" : `the built-in '${config.render.mode}' template`}, with your description, the trailer and data; preview it with --dry-run`,
   ];
@@ -46,7 +48,10 @@ export function createExample(config: CreateRulesConfig): Record<string, unknown
   const type = config.title.types.includes('feat') ? 'feat' : (config.title.types[0] ?? 'feat');
   const data = requiredExample(config, 'low');
   return {
-    title: `${type}${component !== undefined ? `(${component})` : ''}: show a banner when a request is retried`,
+    title:
+      config.title.format === 'ticket'
+        ? `${config.title.ticket?.example}: update`
+        : `${type}${component !== undefined ? `(${component})` : ''}: show a banner when a request is retried`,
     description: 'Requests retried after a transient failure now show a dismissable banner.',
     testing: [{ kind: 'unit', command: 'pnpm test', result: 'pass' }],
     risk: 'low',

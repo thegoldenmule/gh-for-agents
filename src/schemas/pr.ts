@@ -85,6 +85,7 @@ export const TestingItemRead = TestingItem.extend({
 export const Refs = z.strictObject({
   stackedOn: PrRef.optional(),
   closes: z.array(IssueRef).max(10).optional(),
+  fixes: z.array(PrRef).max(10).optional().describe('PRs whose defects this PR repairs; does not close issues'),
   related: z.array(PrRef).max(10).optional(),
   splitFrom: PrRef.optional(),
   supersedes: z.array(PrRef).max(10).optional(),

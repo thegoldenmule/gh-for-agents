@@ -271,6 +271,7 @@ export async function planCreate<T extends PlanInput>(input: T, env: PlanEnv): P
     changedFiles: files.files,
     baseParent,
     missingRefs: pf.missingRefs,
+    refTypes: pf.refTypes,
   });
   issues.push(...net.issues);
   warnings.push(...net.warnings);

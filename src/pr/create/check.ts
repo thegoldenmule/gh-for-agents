@@ -34,7 +34,7 @@ export function lenientFields<S extends Record<string, z.ZodType>>(
 
 /** An example value per field, for "required; e.g." messages and the --example input. */
 export const FIELD_EXAMPLES: Readonly<Record<string, unknown>> = {
-  title: 'feat(<component>): show a banner when a request is retried',
+  title: '<repo title prefix>: show a banner when a request is retried',
   description: 'Requests retried after a transient failure now show a dismissable banner.',
   testing: [{ kind: 'unit', command: 'pnpm test', result: 'pass' }],
   risk: 'low',
@@ -54,7 +54,7 @@ const TESTING_ITEM_EXAMPLE = { kind: 'unit', command: 'pnpm test', result: 'pass
 
 /** What a required field holds, for the message. */
 const FIELD_SHAPES: Readonly<Record<string, string>> = {
-  title: "a conventional-commit title 'type(scope): summary', ≤72 chars",
+  title: "a title matching the repo convention, ≤72 chars (see 'ghx pr create --example')",
   description: '1–3 plain sentences (no headings, lists or footer)',
   testing: '1–10 items {kind, command, result} (manual: {kind, steps, result})',
   risk: 'one of trivial, low, medium, high',
@@ -76,7 +76,7 @@ const GH_KEYS: Readonly<Record<string, { rename?: string; message: string }>> = 
   body_file: { message: "ghx has no body file; put 1–3 plain sentences in 'description'" },
   summary: { message: "ghx's field for the PR text is 'description' (1–3 plain sentences)" },
   closes: { message: 'closing issues go in refs.closes: {"refs": {"closes": ["#12"]}}' },
-  fixes: { message: 'closing issues go in refs.closes: {"refs": {"closes": ["#12"]}}' },
+  fixes: { message: 'closing issues go in refs.closes; PRs whose defects this PR repairs go in refs.fixes' },
   resolves: { message: 'closing issues go in refs.closes: {"refs": {"closes": ["#12"]}}' },
   related: { message: 'related PRs go in refs.related: {"refs": {"related": ["#12"]}}' },
   stackedOn: { message: 'the parent PR goes in refs.stackedOn (ghx fills it from the base when omitted)' },
@@ -224,13 +224,13 @@ function splitTesting(items: readonly unknown[]): { items: unknown[]; warnings: 
  */
 export function normalizeComponents(
   value: Record<string, unknown>,
-  config: Pick<CreateRulesConfig, 'components'>,
+  config: Pick<CreateRulesConfig, 'components' | 'title'>,
   o: { addScope: boolean },
 ): Warning[] {
   const warnings: Warning[] = [];
   const aliased: string[] = [];
   let scope: string | null = null;
-  if (typeof value.title === 'string') {
+  if (config.title.format !== 'ticket' && typeof value.title === 'string') {
     const m = TITLE_SCOPE.exec(value.title);
     if (m?.[2] !== undefined) {
       const canonical = resolveComponent(m[2], config.components);

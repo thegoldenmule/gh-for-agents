@@ -85,7 +85,12 @@ export interface TrailerSource {
   revertPolicy: string;
   testing: readonly { kind: string; result: string }[];
   refs?:
-    | { stackedOn?: string | undefined; splitFrom?: string | undefined; closes?: readonly string[] | undefined }
+    | {
+        stackedOn?: string | undefined;
+        splitFrom?: string | undefined;
+        closes?: readonly string[] | undefined;
+        fixes?: readonly string[] | undefined;
+      }
     | undefined;
 }
 
@@ -112,6 +117,7 @@ export function renderTrailer(block: TrailerSource): string {
     `Tests: ${testSummary(block.testing)}`,
     refs?.stackedOn && `Stacked on ${refs.stackedOn}`,
     refs?.splitFrom && `Split from ${refs.splitFrom}`,
+    refs?.fixes?.length ? `Repairs defects from ${refs.fixes.join(', ')}` : null,
     closes.length > 0 ? closes.map((c, i) => `${i === 0 ? 'Closes' : 'closes'} ${c}`).join(', ') : null,
   ]);
 }

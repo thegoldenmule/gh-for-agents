@@ -128,6 +128,8 @@ export interface Preflight {
   baseParent: PrSummary | null;
   /** Refs (as written) that do not exist. */
   missingRefs: string[];
+  /** GitHub object types for references that exist, keyed by the input ref. */
+  refTypes: Map<string, string>;
 }
 
 function sameRepoPrs(nodes: readonly (PrNode | null)[], repo: RepoRef): PrNode[] {
@@ -190,6 +192,16 @@ export async function runPreflight(
       return x == null || x.issueOrPullRequest == null;
     })
     .map((l) => l.ref);
+  const refTypes = new Map<string, string>();
+  lookups.forEach((l, i) => {
+    const node =
+      l.owner === null
+        ? (r as Record<string, unknown>)[`r${i}`]
+        : ((data as Record<string, unknown>)[`x${i}`] as { issueOrPullRequest?: unknown } | null)?.issueOrPullRequest;
+    if (node !== null && typeof node === 'object' && '__typename' in node && typeof node.__typename === 'string') {
+      refTypes.set(l.ref, node.__typename);
+    }
+  });
   const head = sameRepoPrs(r.headPrs.nodes, repo);
   const parent = sameRepoPrs(r.parentPrs.nodes, repo)[0];
   const open = head.find((n) => n.state === 'OPEN');
@@ -203,6 +215,7 @@ export async function runPreflight(
     closedOnHead: head.filter((n) => n.state !== 'OPEN').map(summary),
     baseParent: parent ? summary(parent) : null,
     missingRefs,
+    refTypes,
   };
 }
 
