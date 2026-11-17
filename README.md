@@ -141,13 +141,19 @@ slips are fixed with a warning instead of a rejection: a `body` field becomes
 (`TITLE_PERIOD_REMOVED`), an old component name maps through the config's
 `aliases` (`COMPONENT_ALIAS`), and a Claude Code footer appended to
 `description` is stripped (`FOOTER_STRIPPED`), since `ghx` renders its own. It
-then renders a short body:
+then renders a short body with brief sections:
 
 ```markdown
+## Summary
+
 The primary write path signed actions without binding documentId.
 signAction now always binds it, and verify rejects unbound candidates.
 
 Risk: medium · Components: reactor, shared · Revert: revert-safe · Tests: 2/2 pass (unit, typecheck) · Closes #2894
+
+## Data
+
+- ticket: `ENG-2894`
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
@@ -155,6 +161,14 @@ Risk: medium · Components: reactor, shared · Revert: revert-safe · Tests: 2/2
 ```
 
 GitHub doesn't show the hidden block, but `pr status` reads it back.
+
+An agent can attach its own facts in `data` (`{"ticket": "ENG-2894"}`): they are
+listed under Data and come back from `pr status` as `meta.data`. A project can
+require fields in `.github/ghx.json` (`data.fields`, typed, required always or
+from a risk up); an agent can always add more keys than the project requires,
+never fewer. A project can also replace the layout with its own template,
+`render.prBody`, using placeholders such as `{{description}}`, `{{trailer}}`,
+`{{data}}` and `{{data.ticket}}` ([plan 08](docs/plans/08-templates-and-data.md)).
 
 Waiting for CI works the same way every time. The agent runs `ghx ci wait <pr>`
 in the background and moves on. It is woken once, when CI finishes or stalls.

@@ -42,7 +42,10 @@ writes, and answers each common question in one plain invocation on reads.
    - The rendered body is the description, plus one compact trailer line
      (risk, components, revert policy, test summary), plus the attribution
      footer. The user has corrected agents twice toward "2–3 sentences, no
-     sections, no test logs", so a sectioned body is out.
+     sections, no test logs", so a sectioned body is out. *Amended by 08
+     (2026-11-17): bodies have brief sections (Summary, How to test, Data),
+     built in or from a project template; the description stays 2–3 plain
+     sentences.*
    - The full structured object is embedded in a hidden block:
      `<!-- ghx:v1 {json} -->`. GitHub doesn't render HTML comments.
 6. **Per-repo config.** A file at the repo root, `.ghx.json` (exact name is

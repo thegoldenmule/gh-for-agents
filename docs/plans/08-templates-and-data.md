@@ -146,6 +146,8 @@ The template language is built in, small and logic-free, about 100 lines in `src
 | `render.prBody.trailer_like` | a literal line matches the trailer pattern |
 | `render.prBody.unterminated` | `{{` without `}}` |
 | `render.prBody.conflicts_mode` | both `mode` and `prBody` set |
+| `render.prBody.in_heading` | a placeholder inside a heading (headings are literal) |
+| `render.prBody.too_long` | over 4,000 chars |
 
 A bad template fails every write before any network call, and `ghx doctor` reports it with no extra code. The template adds no input fields, so `--schema` stays stable. `--example` gains one rules line: `body: rendered by this repo's template; preview with --dry-run`.
 
